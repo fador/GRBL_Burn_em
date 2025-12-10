@@ -3,6 +3,7 @@ using laser_gui_test.Data;
 using laser_gui_test.Tools;
 using System.ComponentModel;
 using laser_gui_test.Data.Commands;
+using System.Linq;
 
 namespace laser_gui_test;
 
@@ -104,7 +105,7 @@ public partial class MainForm : Form
             DataSource = ProjectState.Instance.Objects,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             RowHeadersVisible = false,
-            MultiSelect = false
+            MultiSelect = true
         };
         _objectList.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = "IsEnabled", HeaderText = "On", Width = 30 });
         _objectList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Name", HeaderText = "Name", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
@@ -116,17 +117,36 @@ public partial class MainForm : Form
         {
             if (_objectList.SelectedRows.Count > 0)
             {
-                var obj = _objectList.SelectedRows[0].DataBoundItem as LaserObject;
-                if (ProjectState.Instance.SelectedObject != obj)
+                var list = new List<LaserObject>();
+                foreach (DataGridViewRow row in _objectList.SelectedRows)
                 {
-                     ProjectState.Instance.SelectedObject = obj;
+                    if (row.DataBoundItem is LaserObject obj)
+                    {
+                        list.Add(obj);
+                    }
+                }
+                
+                // Avoid infinite loop if ProjectState triggers this
+                // We need equality check? Or just set it.
+                // Setting SelectedObjects triggers PropertyChanged, which we listen to below.
+                // We must ensure we don't re-select in list if list initiated it.
+                // But typically it's fine if we handle re-entrancy or if checks pass.
+                
+                // Simple check: identify if list matches state
+                var current = ProjectState.Instance.SelectedObjects;
+                if (!new HashSet<LaserObject>(current).SetEquals(list))
+                {
+                     ProjectState.Instance.SelectedObjects = list;
                      _workbench.Invalidate();
                 }
             }
             else
             {
-                ProjectState.Instance.SelectedObject = null;
-                _workbench.Invalidate();
+                if (ProjectState.Instance.SelectedObjects.Count > 0)
+                {
+                    ProjectState.Instance.SelectedObjects = new List<LaserObject>();
+                    _workbench.Invalidate();
+                }
             }
         };
 
@@ -337,8 +357,30 @@ public partial class MainForm : Form
         flow.Controls.Add(btnConnect);
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); // Spacer
         flow.Controls.Add(btnStart);
+
         flow.Controls.Add(btnPause);
         flow.Controls.Add(btnStop);
+        
+        flow.Controls.Add(new Label { Text = "--------", AutoSize = true });
+        
+        var flowGroup = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+        var btnGroup = new Button { Text = "Group", Width = 95 };
+        var btnUngroup = new Button { Text = "Ungroup", Width = 95 };
+        
+        btnGroup.Click += (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
+        };
+        btnUngroup.Click += (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
+        };
+        
+        flowGroup.Controls.Add(btnGroup);
+        flowGroup.Controls.Add(btnUngroup);
+        flow.Controls.Add(flowGroup);
         
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); 
         flow.Controls.Add(new Label { Text = "History:", AutoSize = true });
@@ -437,6 +479,27 @@ public partial class MainForm : Form
         if (keyData == (Keys.Control | Keys.Y))
         {
             CommandManager.Instance.Redo();
+            return true;
+        }
+        if (keyData == (Keys.Control | Keys.G))
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count > 1)
+            {
+                var cmd = new GroupCommand(sel);
+                CommandManager.Instance.Execute(cmd);
+            }
+            return true;
+        }
+        if (keyData == (Keys.Control | Keys.U))
+        {
+            // Ungroup ALL selected groups
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Any(o => o is LaserGroup))
+            {
+                var cmd = new UngroupCommand(sel);
+                CommandManager.Instance.Execute(cmd);
+            }
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);

@@ -42,19 +42,31 @@ public class MoveCommand : ICommand
     {
         foreach (var obj in _objects)
         {
-            if (obj is LaserPath path)
+            MoveObject(obj, x, y);
+        }
+    }
+    
+    private void MoveObject(LaserObject obj, float x, float y)
+    {
+        if (obj is LaserPath path)
+        {
+            // Move points
+            for(int i=0; i<path.Points.Count; i++)
             {
-                // Move points
-                for(int i=0; i<path.Points.Count; i++)
-                {
-                    path.Points[i] = new PointF(path.Points[i].X + x, path.Points[i].Y + y);
-                }
-                path.Position = new PointF(path.Position.X + x, path.Position.Y + y);
+                path.Points[i] = new PointF(path.Points[i].X + x, path.Points[i].Y + y);
             }
-            else
+            path.Position = new PointF(path.Position.X + x, path.Position.Y + y);
+        }
+        else if (obj is LaserGroup group)
+        {
+            foreach(var child in group.Children)
             {
-                obj.Position = new PointF(obj.Position.X + x, obj.Position.Y + y);
+                MoveObject(child, x, y);
             }
+        }
+        else
+        {
+             obj.Position = new PointF(obj.Position.X + x, obj.Position.Y + y);
         }
     }
 }

@@ -185,27 +185,52 @@ public class WorkbenchControl : Control
                         {
                             hit = true;
                             
-                            // Interaction Fix:
-                            // If obj is ALREADY selected, we might mean to move it.
-                            // If obj is NOT selected, we select it (and clear others if no modifier, but we assume simple logic for now).
+                            // Interaction Fixes:
+                            // 1. Check for Ctrl key
                             
-                            if (ProjectState.Instance.SelectedObjects.Contains(obj))
+                            if (Control.ModifierKeys == Keys.Control)
                             {
-                                // Allows moving
-                                _interactionObject = obj;
-                                _isMoving = true;
-                                _dragStartPos = worldPos;
-                                _moveStartPos = worldPos; // Capture start for Undo
-
-                                // Capture initial state for Undo could go here if we tracked per-object start pos
-                                // But simpler is to capture relative move at the end.
+                                // Toggle Selection
+                                var currentSel = ProjectState.Instance.SelectedObjects;
+                                if (currentSel.Contains(obj))
+                                {
+                                    currentSel.Remove(obj);
+                                    ProjectState.Instance.SelectedObjects = new List<LaserObject>(currentSel);
+                                }
+                                else
+                                {
+                                    currentSel.Add(obj);
+                                    ProjectState.Instance.SelectedObjects = new List<LaserObject>(currentSel);
+                                    
+                                    // Make this the interaction object for potential drag
+                                    _interactionObject = obj;
+                                    _isMoving = true;
+                                    _dragStartPos = worldPos;
+                                    _moveStartPos = worldPos;
+                                }
                             }
                             else
                             {
-                                // Just select it. Do NOT start move.
-                                ProjectState.Instance.SelectedObject = obj; 
+                                // Normal Click
+                                if (ProjectState.Instance.SelectedObjects.Contains(obj))
+                                {
+                                    // Allows moving existing selection
+                                    _interactionObject = obj;
+                                    _isMoving = true;
+                                    _dragStartPos = worldPos;
+                                    _moveStartPos = worldPos; 
+                                }
+                                else
+                                {
+                                    // Select ONLY this (Clear others)
+                                    ProjectState.Instance.SelectedObject = obj;
+                                    // And allow moving immediately (standard behavior is Click-Drag selects and moves)
+                                    _interactionObject = obj;
+                                    _isMoving = true;
+                                    _dragStartPos = worldPos;
+                                    _moveStartPos = worldPos;
+                                }
                             }
-                            
                             break;
                         }
                     }
@@ -296,24 +321,14 @@ public class WorkbenchControl : Control
              // Move all Selected Objects
              foreach(var obj in ProjectState.Instance.SelectedObjects)
              {
-                 if (obj is LaserPath path)
-                 {
-                     for(int i=0; i<path.Points.Count; i++)
-                     {
-                         path.Points[i] = new PointF(path.Points[i].X + dx, path.Points[i].Y + dy);
-                     }
-                     path.Position = new PointF(path.Position.X + dx, path.Position.Y + dy);
-                 }
-                 else
-                 {
-                     obj.Position = new PointF(obj.Position.X + dx, obj.Position.Y + dy);
-                 }
+                 MoveObject(obj, dx, dy);
              }
              
              _dragStartPos = worldPos; // Update for next delta
              Invalidate();
              return;
         }
+
 
         if (_isDragging && _interactionObject != null)
         {
@@ -361,9 +376,9 @@ public class WorkbenchControl : Control
             var list = new List<LaserObject>();
             foreach(var obj in ProjectState.Instance.Objects)
             {
-                // Simple bounding box intersection
-                var objRect = new RectangleF(obj.Position, obj.Size);
-                if (rect.IntersectsWith(objRect))
+                // Robust bounds intersection
+                var objRect = obj.GetBounds();
+                if (!objRect.IsEmpty && rect.IntersectsWith(objRect))
                 {
                     list.Add(obj);
                 }
@@ -466,33 +481,21 @@ public class WorkbenchControl : Control
         
         float minX = float.MaxValue, minY = float.MaxValue;
         float maxX = float.MinValue, maxY = float.MinValue;
+        bool hasBounds = false;
         
         foreach (var obj in ProjectState.Instance.SelectedObjects)
         {
-            // Simple robust bounds
-            float l = obj.Position.X;
-            float t = obj.Position.Y;
-            float r = l + obj.Size.Width;
-            float b = t + obj.Size.Height;
+            var b = obj.GetBounds();
+            if (b.IsEmpty) continue;
             
-            if (l < minX) minX = l;
-            if (t < minY) minY = t;
-            if (r > maxX) maxX = r;
-            if (b > maxY) maxY = b;
-            
-            if (obj is LaserPath p)
-            {
-                 // Path points might be outside Position/Size box if not maintained well
-                 foreach(var pt in p.Points)
-                 {
-                     if(pt.X < minX) minX = pt.X;
-                     if(pt.Y < minY) minY = pt.Y;
-                     if(pt.X > maxX) maxX = pt.X;
-                     if(pt.Y > maxY) maxY = pt.Y;
-                 }
-            }
+            if (b.Left < minX) minX = b.Left;
+            if (b.Top < minY) minY = b.Top;
+            if (b.Right > maxX) maxX = b.Right;
+            if (b.Bottom > maxY) maxY = b.Bottom;
+            hasBounds = true;
         }
         
+        if (!hasBounds) return null;
         return new RectangleF(minX, minY, maxX - minX, maxY - minY);
     }
     
@@ -593,6 +596,29 @@ public class WorkbenchControl : Control
         Invalidate();
     }
     
+    private void MoveObject(LaserObject obj, float dx, float dy)
+    {
+         if (obj is LaserPath path)
+         {
+             for(int i=0; i<path.Points.Count; i++)
+             {
+                 path.Points[i] = new PointF(path.Points[i].X + dx, path.Points[i].Y + dy);
+             }
+             path.Position = new PointF(path.Position.X + dx, path.Position.Y + dy);
+         }
+         else if (obj is LaserGroup group)
+         {
+             foreach(var child in group.Children)
+             {
+                 MoveObject(child, dx, dy);
+             }
+         }
+         else
+         {
+             obj.Position = new PointF(obj.Position.X + dx, obj.Position.Y + dy);
+         }
+    }
+
     private int HitTestHandles(PointF pos)
     {
          var bounds = GetSelectionBounds();
