@@ -27,11 +27,13 @@ public partial class MainForm : Form
         // 1. Menu Strip
         var menuStrip = new MenuStrip();
         var fileMenu = new ToolStripMenuItem("File");
+        
         fileMenu.DropDownItems.Add("New", null, (s, e) => 
         {
             ProjectState.Instance.Objects.Clear();
             _workbench.Invalidate();
         });
+
         fileMenu.DropDownItems.Add("Open", null, (s, e) => 
         {
             using var ofd = new OpenFileDialog { Filter = "Laser Project|*.json" };
@@ -41,6 +43,7 @@ public partial class MainForm : Form
                  _workbench.Invalidate();
             }
         });
+
         fileMenu.DropDownItems.Add("Save", null, (s, e) => 
         {
             using var sfd = new SaveFileDialog { Filter = "Laser Project|*.json" };
@@ -49,8 +52,9 @@ public partial class MainForm : Form
                 ProjectSerializer.Save(sfd.FileName);
             }
         });
-        // Import Image
-        fileMenu.DropDownItems.Add("Import Image", null, ImportImage_Click);
+
+        fileMenu.DropDownItems.Add(new ToolStripSeparator());
+        fileMenu.DropDownItems.Add("Import File", null, (s, e) => ImportFile());
         menuStrip.Items.Add(fileMenu);
         this.MainMenuStrip = menuStrip;
         this.Controls.Add(menuStrip);
@@ -338,27 +342,65 @@ public partial class MainForm : Form
         _controlPanel.Controls.Add(flow);
     }
 
-    private void ImportImage_Click(object? sender, EventArgs e)
+    private void ImportFile()
     {
-        using var ofd = new OpenFileDialog { Filter = "Images|*.jpg;*.png;*.bmp" };
+        using var ofd = new OpenFileDialog();
+        ofd.Filter = "Supported Files|*.bmp;*.jpg;*.jpeg;*.png;*.svg|Images|*.bmp;*.jpg;*.jpeg;*.png|Scalable Vector Graphics|*.svg|All Files|*.*";
         if (ofd.ShowDialog() == DialogResult.OK)
         {
-            try 
+            string ext = Path.GetExtension(ofd.FileName).ToLower();
+            
+            if (ext == ".svg")
             {
-                var img = new Bitmap(ofd.FileName); // Load bitmap
-                var lObj = new LaserImage // Use LaserImage
-                { 
-                    Name = Path.GetFileName(ofd.FileName),
-                    Position = new PointF(0, 0),
-                    Size = new SizeF(img.Width / 10f, img.Height / 10f), // Scale down
-                    Image = img,
-                    ImagePath = ofd.FileName
-                };
-                ProjectState.Instance.AddObject(lObj);
+                try 
+                {
+                    var objects = SvgImporter.Import(ofd.FileName);
+                    foreach(var obj in objects)
+                    {
+                        // Assign active layer
+                        if (ProjectState.Instance.ActiveLayer != null)
+                        {
+                            obj.LayerId = ProjectState.Instance.ActiveLayer.Id;
+                        }
+                        ProjectState.Instance.AddObject(obj);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to import SVG: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
-            catch (Exception ex)
+            else
             {
-                MessageBox.Show("Error loading image: " + ex.Message);
+                // Assume Image
+                try
+                {
+                    // Load into LaserImage
+                    var lImg = new LaserImage();
+                    lImg.Name = Path.GetFileNameWithoutExtension(ofd.FileName);
+                    lImg.ImagePath = ofd.FileName;
+                    
+                    // Helper to load image properly (ProjectSerializer has logic, maybe reuse or plain Load)
+                    // For now plain load
+                    using var stream = new FileStream(ofd.FileName, FileMode.Open, FileAccess.Read);
+                    lImg.Image = new Bitmap(stream);
+                    
+                    lImg.Position = new PointF(0, 0);
+                    // Default scale: 1 pixel = 0.1 mm ? Or 1 pixel = 1 pixel (0.26mm)?
+                    // Laser cutters often map 1px = X mm.
+                    // Let's keep 1px = 1 unit (approx 0.26mm at 96dpi) if using 96dpi grid.
+                    // Actually let's just use pixel dimensions.
+                    lImg.Size = new SizeF(lImg.Image.Width, lImg.Image.Height);
+
+                    if (ProjectState.Instance.ActiveLayer != null)
+                        lImg.LayerId = ProjectState.Instance.ActiveLayer.Id;
+
+                    ProjectState.Instance.AddObject(lImg);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to load image: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
     }
