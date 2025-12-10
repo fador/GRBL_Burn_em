@@ -147,6 +147,12 @@ public class WorkbenchControl : Control
     {
         base.OnMouseDown(e);
         
+        // Safety reset to ensure no lingering state from previous interactions
+        if (e.Button == MouseButtons.Left && !_isPanning)
+        {
+             ResetInteractionState();
+        }
+
         // Transform mouse coordinates to world coordinates
         PointF worldPos = ScreenToWorld(e.Location);
         _currentMouseWorld = worldPos;
@@ -357,6 +363,9 @@ public class WorkbenchControl : Control
     {
         base.OnMouseUp(e);
         
+        // Ensure coordinate is identical to where the mouse actually released
+        _currentMouseWorld = ScreenToWorld(e.Location);
+        
         if (e.Button == MouseButtons.Right)
         {
             _isPanning = false;
@@ -433,19 +442,15 @@ public class WorkbenchControl : Control
             float dy = _currentMouseWorld.Y - _moveStartPos.Y;
             if (Math.Abs(dx) > 0.001 || Math.Abs(dy) > 0.001)
             {
-                // We moved selected objects (or just the interaction object?)
-                // Current logic moves "Selection" via interaction object in a loop, wait.
-                // In OnMouseMove, we updated Position of objects.
-                // We should assume ALL selected objects moved if we support multi-move (which we don't fully yet in Move logic, see OnMouseMove).
-                
-                // Oops, the MouseMove logic for _interactionObject was:
-                // if (_interactionObject is LaserPath) ... else ...
-                // It only moved _interactionObject.
-                // BUT if we selected multiple, we expect them all to move?
-                // The current implementation of OnMouseMove only moves _interactionObject.
-                // We should fix that too to move ALL SelectedObjects if we are moving one of them.
-                
-                // Assuming we fix OnMouseMove to move all selected:
+                // Revert the interactive move to prevent double application by MoveCommand.Execute()
+                // The interactive move modified the object state directly. 
+                // MoveCommand.Execute() will apply the delta again.
+                // So we revert back to _moveStartPos first.
+                foreach(var obj in ProjectState.Instance.SelectedObjects)
+                {
+                     MoveObject(obj, -dx, -dy);
+                }
+
                 var cmd = new MoveCommand(ProjectState.Instance.SelectedObjects, dx, dy);
                 CommandManager.Instance.Execute(cmd);
             }
@@ -472,6 +477,27 @@ public class WorkbenchControl : Control
             
             _initialStates.Clear();
         }
+
+        
+        // Final safety reset
+        ResetInteractionState();
+    }
+
+    private void ResetInteractionState()
+    {
+        _isSelecting = false;
+        _isDragging = false;
+        _isMoving = false;
+        _isResizing = false;
+        _interactionObject = null;
+        _dragHandleIndex = -1;
+        _initialGroupBounds = null;
+        _initialStates.Clear();
+        // Note: _isPanning is handled separately via Right Mouse Button usually, 
+        // but if we want to be strict:
+        // _isPanning = false; 
+        // Display cursor reset might be needed if we force reset panning.
+        // For now, let's keep Panning separate as it's Right Click.
     }
     
     // Resize Handles
