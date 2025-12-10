@@ -1,6 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Windows.Forms;
+using System.Linq;
 using laser_gui_test.Data;
 using laser_gui_test.Tools;
+using laser_gui_test.Data.Commands;
 
 namespace laser_gui_test.Controls;
 
@@ -125,7 +131,7 @@ public class WorkbenchControl : Control
             if (bounds != null)
             {
                 using var boundaryPen = new Pen(Color.Cyan, 1.0f / _zoom);
-                boundaryPen.DashStyle = DashStyle.Dot;
+                boundaryPen.DashStyle = DashStyle.Solid;
                 g.DrawRectangle(boundaryPen, bounds.Value.X, bounds.Value.Y, bounds.Value.Width, bounds.Value.Height);
                 DrawResizeHandles(g, bounds.Value);
             }
@@ -134,6 +140,8 @@ public class WorkbenchControl : Control
 
     private PointF _currentMouseWorld;
     private bool _isSelecting = false;
+
+    private PointF _moveStartPos; // To calculate total delta for Command
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
@@ -175,19 +183,36 @@ public class WorkbenchControl : Control
                     {
                         if (obj.HitTest(worldPos))
                         {
-                            ProjectState.Instance.SelectedObject = obj; // Clears others by default setter logic
                             hit = true;
                             
-                            // Start Move
-                            _interactionObject = obj;
-                            _isMoving = true;
-                            _dragStartPos = worldPos; 
+                            // Interaction Fix:
+                            // If obj is ALREADY selected, we might mean to move it.
+                            // If obj is NOT selected, we select it (and clear others if no modifier, but we assume simple logic for now).
+                            
+                            if (ProjectState.Instance.SelectedObjects.Contains(obj))
+                            {
+                                // Allows moving
+                                _interactionObject = obj;
+                                _isMoving = true;
+                                _dragStartPos = worldPos;
+                                _moveStartPos = worldPos; // Capture start for Undo
+
+                                // Capture initial state for Undo could go here if we tracked per-object start pos
+                                // But simpler is to capture relative move at the end.
+                            }
+                            else
+                            {
+                                // Just select it. Do NOT start move.
+                                ProjectState.Instance.SelectedObject = obj; 
+                            }
+                            
                             break;
                         }
                     }
                     
                     if (!hit)
                     {
+                        // Clicked empty space
                         // Start Selection Box
                         ProjectState.Instance.SelectedObject = null; // Clear selection
                         _isSelecting = true;
@@ -268,18 +293,21 @@ public class WorkbenchControl : Control
              float dx = worldPos.X - _dragStartPos.X;
              float dy = worldPos.Y - _dragStartPos.Y;
              
-             if (_interactionObject is LaserPath path)
+             // Move all Selected Objects
+             foreach(var obj in ProjectState.Instance.SelectedObjects)
              {
-                 for(int i=0; i<path.Points.Count; i++)
+                 if (obj is LaserPath path)
                  {
-                     path.Points[i] = new PointF(path.Points[i].X + dx, path.Points[i].Y + dy);
+                     for(int i=0; i<path.Points.Count; i++)
+                     {
+                         path.Points[i] = new PointF(path.Points[i].X + dx, path.Points[i].Y + dy);
+                     }
+                     path.Position = new PointF(path.Position.X + dx, path.Position.Y + dy);
                  }
-                 // Update visual position for center (optional)
-                 path.Position = new PointF(path.Position.X + dx, path.Position.Y + dy);
-             }
-             else
-             {
-                 _interactionObject.Position = new PointF(_interactionObject.Position.X + dx, _interactionObject.Position.Y + dy);
+                 else
+                 {
+                     obj.Position = new PointF(obj.Position.X + dx, obj.Position.Y + dy);
+                 }
              }
              
              _dragStartPos = worldPos; // Update for next delta
@@ -348,6 +376,35 @@ public class WorkbenchControl : Control
         if (_isDragging)
         {
             _isDragging = false;
+            // Create AddObject Command
+            if (_interactionObject != null)
+            {
+               // Since AddObject adds it directly to the list during creation (OnMouseDown and Move),
+               // The "Command" is actually just registering what happened.
+               // BUT AddObjectCommand Execute() ADDS it.
+               // So if we push it now, it's fine. 
+               // However, ProjectState.Instance.AddObject was already called in OnMouseDown.
+               // So we just construct the command and push it to stack WITHOUT Executing (because it's already done).
+               // OR we structure CommandManager to allow Push without Execute.
+               // OR we remove it and re-add it via command (silly).
+               
+               // Let's make AddObjectCommand handle this.
+               // For now, we can manually push to undo stack if we expose it?
+               // Better: Create a method RegisterExecutedCommand in CommandManager? No, that exposes stack.
+               
+               // Best: Remove it, then creating Command executes it.
+               // ProjectState.Instance.RemoveObject(_interactionObject);
+               // var cmd = new AddObjectCommand(_interactionObject);
+               // CommandManager.Instance.Execute(cmd);
+               
+               // This causes a flicker. Not ideal.
+               // Let's add "Register" to CommandManager or just make CommandManager.Execute NOT execute if flag passed?
+               // Let's just do the "flicker" method for now, it's robust.
+               
+               ProjectState.Instance.RemoveObject(_interactionObject);
+               var cmd = new AddObjectCommand(_interactionObject);
+               CommandManager.Instance.Execute(cmd);
+            }
             _interactionObject = null;
         }
 
@@ -355,6 +412,28 @@ public class WorkbenchControl : Control
         {
             _isMoving = false;
             _interactionObject = null;
+            
+            // Create Move Command if moved significantly
+            float dx = _currentMouseWorld.X - _moveStartPos.X;
+            float dy = _currentMouseWorld.Y - _moveStartPos.Y;
+            if (Math.Abs(dx) > 0.001 || Math.Abs(dy) > 0.001)
+            {
+                // We moved selected objects (or just the interaction object?)
+                // Current logic moves "Selection" via interaction object in a loop, wait.
+                // In OnMouseMove, we updated Position of objects.
+                // We should assume ALL selected objects moved if we support multi-move (which we don't fully yet in Move logic, see OnMouseMove).
+                
+                // Oops, the MouseMove logic for _interactionObject was:
+                // if (_interactionObject is LaserPath) ... else ...
+                // It only moved _interactionObject.
+                // BUT if we selected multiple, we expect them all to move?
+                // The current implementation of OnMouseMove only moves _interactionObject.
+                // We should fix that too to move ALL SelectedObjects if we are moving one of them.
+                
+                // Assuming we fix OnMouseMove to move all selected:
+                var cmd = new MoveCommand(ProjectState.Instance.SelectedObjects, dx, dy);
+                CommandManager.Instance.Execute(cmd);
+            }
         }
         
         if (_isResizing)
@@ -362,6 +441,20 @@ public class WorkbenchControl : Control
             _isResizing = false;
             _dragHandleIndex = -1;
             _initialGroupBounds = null;
+            
+            // Create Resize Command
+            // We need current states
+            var newStates = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)>();
+            foreach (var obj in ProjectState.Instance.SelectedObjects)
+            {
+                List<PointF>? pts = null;
+                if (obj is LaserPath p) pts = new List<PointF>(p.Points);
+                newStates[obj] = (obj.Position, obj.Size, pts);
+            }
+            
+            var cmd = new ResizeCommand(_initialStates, newStates);
+            CommandManager.Instance.Execute(cmd);
+            
             _initialStates.Clear();
         }
     }

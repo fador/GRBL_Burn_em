@@ -65,6 +65,11 @@ public class ProjectState : INotifyPropertyChanged
         return obj.Id;
     }
 
+    public void RemoveObject(LaserObject obj)
+    {
+        Objects.Remove(obj);
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

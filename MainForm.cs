@@ -2,6 +2,7 @@ using laser_gui_test.Controls;
 using laser_gui_test.Data;
 using laser_gui_test.Tools;
 using System.ComponentModel;
+using laser_gui_test.Data.Commands;
 
 namespace laser_gui_test;
 
@@ -338,6 +339,22 @@ public partial class MainForm : Form
         flow.Controls.Add(btnStart);
         flow.Controls.Add(btnPause);
         flow.Controls.Add(btnStop);
+        
+        flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); 
+        flow.Controls.Add(new Label { Text = "History:", AutoSize = true });
+        
+        var lbHistory = new ListBox { Width = 200, Height = 200 };
+        flow.Controls.Add(lbHistory);
+        
+        CommandManager.Instance.StateChanged += (s, e) => 
+        {
+             lbHistory.Items.Clear();
+             foreach(var desc in CommandManager.Instance.GetHistory())
+             {
+                 lbHistory.Items.Add(desc);
+             }
+             // Add current stack indicator logic if needed, but simple list for now
+        };
 
         _controlPanel.Controls.Add(flow);
     }
@@ -355,15 +372,15 @@ public partial class MainForm : Form
                 try 
                 {
                     var objects = SvgImporter.Import(ofd.FileName);
+                    var cmd = new AddObjectCommand(objects);
+                    
                     foreach(var obj in objects)
                     {
-                        // Assign active layer
                         if (ProjectState.Instance.ActiveLayer != null)
-                        {
-                            obj.LayerId = ProjectState.Instance.ActiveLayer.Id;
-                        }
-                        ProjectState.Instance.AddObject(obj);
+                             obj.LayerId = ProjectState.Instance.ActiveLayer.Id;
+                        // Don't add directly, let Execute do it
                     }
+                    CommandManager.Instance.Execute(cmd);
                 }
                 catch (Exception ex)
                 {
@@ -380,22 +397,28 @@ public partial class MainForm : Form
                     lImg.Name = Path.GetFileNameWithoutExtension(ofd.FileName);
                     lImg.ImagePath = ofd.FileName;
                     
-                    // Helper to load image properly (ProjectSerializer has logic, maybe reuse or plain Load)
-                    // For now plain load
                     using var stream = new FileStream(ofd.FileName, FileMode.Open, FileAccess.Read);
-                    lImg.Image = new Bitmap(stream);
+                    var lbmp = new Bitmap(stream);
+                    lImg.Image = new Bitmap(lbmp); 
                     
                     lImg.Position = new PointF(0, 0);
-                    // Default scale: 1 pixel = 0.1 mm ? Or 1 pixel = 1 pixel (0.26mm)?
-                    // Laser cutters often map 1px = X mm.
-                    // Let's keep 1px = 1 unit (approx 0.26mm at 96dpi) if using 96dpi grid.
-                    // Actually let's just use pixel dimensions.
-                    lImg.Size = new SizeF(lImg.Image.Width, lImg.Image.Height);
+                    
+                    float dpiX = lImg.Image.HorizontalResolution;
+                    float dpiY = lImg.Image.VerticalResolution;
+                    if (dpiX <= 0) dpiX = 96;
+                    if (dpiY <= 0) dpiY = 96;
+                    
+                    float width = lImg.Image.Width * (96.0f / dpiX);
+                    float height = lImg.Image.Height * (96.0f / dpiY);
+                    
+                    lImg.Size = new SizeF(width, height);
 
                     if (ProjectState.Instance.ActiveLayer != null)
                         lImg.LayerId = ProjectState.Instance.ActiveLayer.Id;
 
-                    ProjectState.Instance.AddObject(lImg);
+                    // Command
+                    var cmd = new AddObjectCommand(lImg);
+                    CommandManager.Instance.Execute(cmd);
                 }
                 catch (Exception ex)
                 {
