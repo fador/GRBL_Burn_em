@@ -427,4 +427,18 @@ public partial class MainForm : Form
             }
         }
     }
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.Z))
+        {
+            CommandManager.Instance.Undo();
+            return true;
+        }
+        if (keyData == (Keys.Control | Keys.Y))
+        {
+            CommandManager.Instance.Redo();
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
 }
