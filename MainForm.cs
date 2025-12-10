@@ -5,7 +5,7 @@ using System.ComponentModel;
 
 namespace laser_gui_test;
 
-public partial class Form1 : Form
+public partial class MainForm : Form
 {
     private WorkbenchControl _workbench;
     private DataGridView _objectList;
@@ -13,7 +13,7 @@ public partial class Form1 : Form
     private FlowLayoutPanel _toolsPanel;
     private GroupBox _controlPanel;
 
-    public Form1()
+    public MainForm()
     {
         InitializeComponent();
         SetupCustomLayout();
@@ -295,8 +295,7 @@ public partial class Form1 : Form
         {
             { "Select", ToolType.Select },
             { "Line", ToolType.DrawLine },
-            { "Box", ToolType.DrawBox },
-            { "Pan", ToolType.Pan }
+            { "Box", ToolType.DrawBox }
         };
 
         foreach (var kvp in toolMap)

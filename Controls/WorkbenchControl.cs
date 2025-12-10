@@ -86,7 +86,7 @@ public class WorkbenchControl : Control
             obj.Draw(g, _zoom);
             
             // Draw selection highlight
-            if (obj == ProjectState.Instance.SelectedObject)
+            if (ProjectState.Instance.SelectedObjects.Contains(obj))
             {
                 using var selPen = new Pen(Color.Cyan, 2.0f / _zoom);
                 selPen.DashStyle = DashStyle.Dash;
@@ -102,7 +102,38 @@ public class WorkbenchControl : Control
             
             g.Restore(state);
         }
+
+        // Draw selection box interaction
+        if (_isSelecting && ToolManager.Instance.CurrentTool == ToolType.Select)
+        {
+            // _dragStartPos is TL, _currentMouse is BR (handled in Draw logic)
+             float x = Math.Min(_dragStartPos.X, _currentMouseWorld.X);
+             float y = Math.Min(_dragStartPos.Y, _currentMouseWorld.Y);
+             float w = Math.Abs(_currentMouseWorld.X - _dragStartPos.X);
+             float h = Math.Abs(_currentMouseWorld.Y - _dragStartPos.Y);
+             
+             using var boxBrush = new SolidBrush(Color.FromArgb(50, Color.Cyan));
+             using var boxPen = new Pen(Color.Cyan, 1.0f / _zoom);
+             g.FillRectangle(boxBrush, x, y, w, h);
+             g.DrawRectangle(boxPen, x, y, w, h);
+        }
+        
+        // Draw Resize Handles
+        if (ToolManager.Instance.CurrentTool == ToolType.Select && ProjectState.Instance.SelectedObjects.Count > 0)
+        {
+            var bounds = GetSelectionBounds();
+            if (bounds != null)
+            {
+                using var boundaryPen = new Pen(Color.Cyan, 1.0f / _zoom);
+                boundaryPen.DashStyle = DashStyle.Dot;
+                g.DrawRectangle(boundaryPen, bounds.Value.X, bounds.Value.Y, bounds.Value.Width, bounds.Value.Height);
+                DrawResizeHandles(g, bounds.Value);
+            }
+        }
     }
+
+    private PointF _currentMouseWorld;
+    private bool _isSelecting = false;
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
@@ -110,8 +141,9 @@ public class WorkbenchControl : Control
         
         // Transform mouse coordinates to world coordinates
         PointF worldPos = ScreenToWorld(e.Location);
+        _currentMouseWorld = worldPos;
 
-        if (e.Button == MouseButtons.Middle || ToolManager.Instance.CurrentTool == ToolType.Pan)
+        if (e.Button == MouseButtons.Right)
         {
             _isPanning = true;
             _lastMousePos = e.Location;
@@ -124,26 +156,44 @@ public class WorkbenchControl : Control
             switch (ToolManager.Instance.CurrentTool)
             {
                 case ToolType.Select:
-                    // Hit test logic
-                    bool found = false;
-                    if (ProjectState.Instance.Objects.Count > 0)
+                    // Check handles first
+                    int handle = HitTestHandles(worldPos);
+                    if (handle != -1)
                     {
-                        foreach (var obj in ProjectState.Instance.Objects.Reverse())
+                        _dragHandleIndex = handle;
+                        _isResizing = true;
+                        _dragStartPos = worldPos;
+                        _initialGroupBounds = GetSelectionBounds();
+                        // Snapshot object states
+                        SnapshotSelection();
+                        return;
+                    }
+                
+                    // Hit test logic
+                    bool hit = false;
+                    foreach (var obj in ProjectState.Instance.Objects.Reverse())
+                    {
+                        if (obj.HitTest(worldPos))
                         {
-                            if (obj.HitTest(worldPos))
-                            {
-                                ProjectState.Instance.SelectedObject = obj;
-                                found = true;
-                                
-                                // Start Move
-                                _interactionObject = obj;
-                                _isMoving = true;
-                                _dragStartPos = worldPos; // Use this as "Last Pos" for delta calc
-                                break;
-                            }
+                            ProjectState.Instance.SelectedObject = obj; // Clears others by default setter logic
+                            hit = true;
+                            
+                            // Start Move
+                            _interactionObject = obj;
+                            _isMoving = true;
+                            _dragStartPos = worldPos; 
+                            break;
                         }
                     }
-                    if (!found) ProjectState.Instance.SelectedObject = null;
+                    
+                    if (!hit)
+                    {
+                        // Start Selection Box
+                        ProjectState.Instance.SelectedObject = null; // Clear selection
+                        _isSelecting = true;
+                        _dragStartPos = worldPos;
+                    }
+                    
                     ProjectState.Instance.Objects.ResetBindings(); 
                     Invalidate(); 
                     break;
@@ -189,6 +239,7 @@ public class WorkbenchControl : Control
     {
         base.OnMouseMove(e);
         PointF worldPos = ScreenToWorld(e.Location);
+        _currentMouseWorld = worldPos;
 
         if (_isPanning)
         {
@@ -198,6 +249,17 @@ public class WorkbenchControl : Control
             _panOffset.Y += dy;
             _lastMousePos = e.Location;
             Invalidate();
+            return;
+        }
+        
+        if (_isSelecting)
+        {
+            Invalidate(); // Draw selection box
+        }
+        
+        if (_isResizing)
+        {
+            UpdateResize(worldPos);
             return;
         }
 
@@ -252,10 +314,35 @@ public class WorkbenchControl : Control
     {
         base.OnMouseUp(e);
         
-        if (_isPanning)
+        if (e.Button == MouseButtons.Right)
         {
             _isPanning = false;
             Cursor = Cursors.Default;
+        }
+
+        if (_isSelecting)
+        {
+            _isSelecting = false;
+            // Find objects in rect
+            float x = Math.Min(_dragStartPos.X, _currentMouseWorld.X);
+            float y = Math.Min(_dragStartPos.Y, _currentMouseWorld.Y);
+            float w = Math.Abs(_currentMouseWorld.X - _dragStartPos.X);
+            float h = Math.Abs(_currentMouseWorld.Y - _dragStartPos.Y);
+            var rect = new RectangleF(x, y, w, h);
+            
+            var list = new List<LaserObject>();
+            foreach(var obj in ProjectState.Instance.Objects)
+            {
+                // Simple bounding box intersection
+                var objRect = new RectangleF(obj.Position, obj.Size);
+                if (rect.IntersectsWith(objRect))
+                {
+                    list.Add(obj);
+                }
+            }
+            ProjectState.Instance.SelectedObjects = list;
+            ProjectState.Instance.Objects.ResetBindings(); 
+            Invalidate();
         }
 
         if (_isDragging)
@@ -269,17 +356,176 @@ public class WorkbenchControl : Control
             _isMoving = false;
             _interactionObject = null;
         }
+        
+        if (_isResizing)
+        {
+            _isResizing = false;
+            _dragHandleIndex = -1;
+            _initialGroupBounds = null;
+            _initialStates.Clear();
+        }
     }
     
-    private PointF ScreenToWorld(Point screenPoint)
+    // Resize Handles
+    private RectangleF? GetSelectionBounds()
     {
-        // Inverse transform
-        // Screen = (World * Scale) + Offset + Center
-        // World = (Screen - Center - Offset) / Scale
+        if (ProjectState.Instance.SelectedObjects.Count == 0) return null;
         
-        float x = (screenPoint.X - Width / 2f - _panOffset.X) / _zoom;
-        float y = (screenPoint.Y - Height / 2f - _panOffset.Y) / _zoom;
-        return new PointF(x, y);
+        float minX = float.MaxValue, minY = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue;
+        
+        foreach (var obj in ProjectState.Instance.SelectedObjects)
+        {
+            // Simple robust bounds
+            float l = obj.Position.X;
+            float t = obj.Position.Y;
+            float r = l + obj.Size.Width;
+            float b = t + obj.Size.Height;
+            
+            if (l < minX) minX = l;
+            if (t < minY) minY = t;
+            if (r > maxX) maxX = r;
+            if (b > maxY) maxY = b;
+            
+            if (obj is LaserPath p)
+            {
+                 // Path points might be outside Position/Size box if not maintained well
+                 foreach(var pt in p.Points)
+                 {
+                     if(pt.X < minX) minX = pt.X;
+                     if(pt.Y < minY) minY = pt.Y;
+                     if(pt.X > maxX) maxX = pt.X;
+                     if(pt.Y > maxY) maxY = pt.Y;
+                 }
+            }
+        }
+        
+        return new RectangleF(minX, minY, maxX - minX, maxY - minY);
+    }
+    
+    private void DrawResizeHandles(Graphics g, RectangleF bounds)
+    {
+        float size = 8.0f / _zoom; // Constant screen size handles
+        using var brush = new SolidBrush(Color.White);
+        using var pen = new Pen(Color.Black, 1.0f / _zoom);
+
+        // 8 handles
+        PointF[] handles = GetHandlePositions(bounds);
+        
+        foreach (var h in handles)
+        {
+            g.FillRectangle(brush, h.X - size/2, h.Y - size/2, size, size);
+            g.DrawRectangle(pen, h.X - size/2, h.Y - size/2, size, size);
+        }
+    }
+    
+    private PointF[] GetHandlePositions(RectangleF b)
+    {
+        return new PointF[] {
+            new(b.Left, b.Top), // TL
+            new(b.Left + b.Width/2, b.Top), // T
+            new(b.Right, b.Top), // TR
+            new(b.Right, b.Top + b.Height/2), // R
+            new(b.Right, b.Bottom), // BR
+            new(b.Left + b.Width/2, b.Bottom), // B
+            new(b.Left, b.Bottom), // BL
+            new(b.Left, b.Top + b.Height/2) // L
+        };
+    }
+    
+    private int _dragHandleIndex = -1; // -1 none, 0-7 handles
+    
+    private bool _isResizing = false;
+    private RectangleF? _initialGroupBounds;
+    private Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)> _initialStates = new();
+
+    private void SnapshotSelection()
+    {
+        _initialStates.Clear();
+        foreach (var obj in ProjectState.Instance.SelectedObjects)
+        {
+            List<PointF>? pts = null;
+            if (obj is LaserPath p) pts = new List<PointF>(p.Points);
+            _initialStates[obj] = (obj.Position, obj.Size, pts);
+        }
+    }
+
+    private void UpdateResize(PointF currentPos)
+    {
+        if (_initialGroupBounds == null) return;
+        var b = _initialGroupBounds.Value;
+        float l = b.Left, t = b.Top, r = b.Right, bm = b.Bottom;
+        
+        // Update bounds based on handle
+        // 0:TL, 1:T, 2:TR, 3:R, 4:BR, 5:B, 6:BL, 7:L
+        
+        float newL = l, newT = t, newR = r, newB = bm;
+        
+        if (_dragHandleIndex == 0 || _dragHandleIndex == 6 || _dragHandleIndex == 7) newL = currentPos.X;
+        if (_dragHandleIndex == 0 || _dragHandleIndex == 1 || _dragHandleIndex == 2) newT = currentPos.Y;
+        if (_dragHandleIndex == 2 || _dragHandleIndex == 3 || _dragHandleIndex == 4) newR = currentPos.X;
+        if (_dragHandleIndex == 4 || _dragHandleIndex == 5 || _dragHandleIndex == 6) newB = currentPos.Y;
+        
+        // Validate inverted bounds (flip if needed, but for now simple clamp or allow flip)
+        float newW = newR - newL;
+        float newH = newB - newT;
+        
+        // Determine Scale Factors
+        float scaleX = (b.Width == 0) ? 1 : newW / b.Width;
+        float scaleY = (b.Height == 0) ? 1 : newH / b.Height;
+        
+        // Apply to objects
+        foreach (var kvp in _initialStates)
+        {
+            var obj = kvp.Key;
+            var init = kvp.Value;
+            
+            // Relative position to group origin (TopLeft of group)
+            float relX = init.Pos.X - b.Left;
+            float relY = init.Pos.Y - b.Top;
+            
+            obj.Position = new PointF(newL + relX * scaleX, newT + relY * scaleY);
+            obj.Size = new SizeF(init.Size.Width * scaleX, init.Size.Height * scaleY);
+            
+            if (obj is LaserPath p && init.Points != null)
+            {
+                for(int i=0; i<p.Points.Count; i++)
+                {
+                    float px = init.Points[i].X - b.Left;
+                    float py = init.Points[i].Y - b.Top;
+                    p.Points[i] = new PointF(newL + px * scaleX, newT + py * scaleY);
+                }
+            }
+        }
+        Invalidate();
+    }
+    
+    private int HitTestHandles(PointF pos)
+    {
+         var bounds = GetSelectionBounds();
+         if (bounds == null) return -1;
+         
+         var handles = GetHandlePositions(bounds.Value);
+         float size = 8.0f / _zoom;
+         
+         for(int i=0; i<handles.Length; i++)
+         {
+             var r = new RectangleF(handles[i].X - size/2, handles[i].Y - size/2, size, size);
+             if (r.Contains(pos)) return i;
+         }
+         return -1;
+    }
+    
+    private void ResizeSelection(int handleIdx, PointF newPos)
+    {
+        // Complex logic:
+        // 1. Calculate new bounds based on handle movement
+        // 2. Calculate Scale X/Y
+        // 3. Apply to all objects
+        // Simplified MVP: Just showing intentions, full robust scaling requires persistence of "Original Bounds" during drag
+        
+        // Let's implement simple scaling for Single Object first or strict bounds scaling?
+        // Proper way: Store initial bounds and initial component states on DragStart.
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
@@ -296,5 +542,15 @@ public class WorkbenchControl : Control
         if (_zoom > 50.0f) _zoom = 50.0f;
 
         Invalidate();
+    }
+    private PointF ScreenToWorld(Point screenPoint)
+    {
+        // Inverse transform
+        // Screen = (World * Scale) + Offset + Center
+        // World = (Screen - Center - Offset) / Scale
+        
+        float x = (screenPoint.X - Width / 2f - _panOffset.X) / _zoom;
+        float y = (screenPoint.Y - Height / 2f - _panOffset.Y) / _zoom;
+        return new PointF(x, y);
     }
 }

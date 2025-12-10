@@ -22,13 +22,27 @@ public class ProjectState : INotifyPropertyChanged
         } 
     }
 
-    private LaserObject? _selectedObject;
-    public LaserObject? SelectedObject
+    private List<LaserObject> _selectedObjects = new();
+    public List<LaserObject> SelectedObjects
     {
-        get => _selectedObject;
+        get => _selectedObjects;
         set
         {
-            _selectedObject = value;
+            _selectedObjects = value;
+            OnPropertyChanged(nameof(SelectedObjects));
+            // Backward compatibility / Primary selection
+             OnPropertyChanged(nameof(SelectedObject));
+        }
+    }
+
+    public LaserObject? SelectedObject
+    {
+        get => _selectedObjects.FirstOrDefault();
+        set
+        {
+            _selectedObjects.Clear();
+            if(value != null) _selectedObjects.Add(value);
+            OnPropertyChanged(nameof(SelectedObjects));
             OnPropertyChanged(nameof(SelectedObject));
         }
     }

@@ -5,7 +5,6 @@ namespace laser_gui_test.Tools;
 public enum ToolType
 {
     Select,
-    Pan,
     DrawLine,
     DrawBox
 }
