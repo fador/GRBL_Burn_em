@@ -4,6 +4,7 @@ using laser_gui_test.Tools;
 using System.ComponentModel;
 using laser_gui_test.Data.Commands;
 using System.Linq;
+using laser_gui_test.Forms;
 
 namespace laser_gui_test;
 
@@ -57,6 +58,12 @@ public partial class MainForm : Form
 
         fileMenu.DropDownItems.Add(new ToolStripSeparator());
         fileMenu.DropDownItems.Add("Import File", null, (s, e) => ImportFile());
+        fileMenu.DropDownItems.Add(new ToolStripSeparator());
+        fileMenu.DropDownItems.Add("Options", null, (s, e) => 
+        {
+            using var dlg = new OptionsForm();
+            dlg.ShowDialog();
+        });
         menuStrip.Items.Add(fileMenu);
         this.MainMenuStrip = menuStrip;
         this.Controls.Add(menuStrip);
@@ -350,6 +357,53 @@ public partial class MainForm : Form
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown };
         
         var btnConnect = new Button { Text = "Connect", Width = 200 };
+        
+        // Connect Logic
+        btnConnect.Click += (s, e) => 
+        {
+             if (SerialInterface.Instance.IsConnected)
+             {
+                 SerialInterface.Instance.Disconnect();
+             }
+             else
+             {
+                 string port = AppConfiguration.Instance.LastPortName;
+                 int baud = AppConfiguration.Instance.BaudRate;
+                 if (string.IsNullOrEmpty(port))
+                 {
+                     MessageBox.Show("Please select a COM port in Options.", "Configuration Missing");
+                     return;
+                 }
+                 try
+                 {
+                     SerialInterface.Instance.Connect(port, baud);
+                 }
+                 catch (Exception ex)
+                 {
+                     MessageBox.Show($"Connection failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                 }
+             }
+        };
+
+        // Status Update
+        SerialInterface.Instance.ConnectionStatusChanged += (connected) => 
+        {
+            if (btnConnect.IsDisposed) return;
+            btnConnect.Invoke(() => 
+            {
+                if (connected)
+                {
+                    btnConnect.Text = "Disconnect";
+                    btnConnect.BackColor = Color.Salmon; 
+                }
+                else
+                {
+                    btnConnect.Text = "Connect";
+                    btnConnect.BackColor = Color.FromName("Control");
+                }
+            });
+        };
+
         var btnStart = new Button { Text = "Start", Width = 200, BackColor = Color.LightGreen };
         var btnStop = new Button { Text = "STOP", Width = 200, BackColor = Color.Red, ForeColor = Color.White };
         var btnPause = new Button { Text = "Pause", Width = 200, BackColor = Color.Yellow };

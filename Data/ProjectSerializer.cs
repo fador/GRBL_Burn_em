@@ -12,6 +12,7 @@ public class ProjectDataDto
 [JsonDerivedType(typeof(LaserPathDto), typeDiscriminator: "Path")]
 [JsonDerivedType(typeof(LaserRectangleDto), typeDiscriminator: "Rectangle")]
 [JsonDerivedType(typeof(LaserImageDto), typeDiscriminator: "Image")]
+[JsonDerivedType(typeof(LaserTextDto), typeDiscriminator: "Text")]
 public abstract class LaserObjectDto
 {
     public Guid Id { get; set; }
@@ -35,6 +36,13 @@ public class LaserRectangleDto : LaserObjectDto { }
 public class LaserImageDto : LaserObjectDto
 {
     public string ImagePath { get; set; }
+}
+
+public class LaserTextDto : LaserObjectDto
+{
+    public string Text { get; set; }
+    public string FontName { get; set; }
+    public float FontSize { get; set; }
 }
 
 public static class ProjectSerializer
@@ -70,6 +78,15 @@ public static class ProjectSerializer
                     Id = i.Id, Name = i.Name, LayerId = i.LayerId, IsEnabled = i.IsEnabled,
                     Power = i.Power, Speed = i.Speed, Position = i.Position, Rotation = i.Rotation, Size = i.Size,
                     ImagePath = i.ImagePath
+                });
+            }
+            else if (obj is LaserText t)
+            {
+                dto.Objects.Add(new LaserTextDto
+                {
+                    Id = t.Id, Name = t.Name, LayerId = t.LayerId, IsEnabled = t.IsEnabled,
+                    Power = t.Power, Speed = t.Speed, Position = t.Position, Rotation = t.Rotation, Size = t.Size,
+                    Text = t.Text, FontName = t.FontName, FontSize = t.FontSize
                 });
             }
         }
@@ -115,6 +132,15 @@ public static class ProjectSerializer
                     try { imgObj.Image = new Bitmap(i.ImagePath); } catch {}
                 }
                 obj = imgObj;
+            }
+            else if (objDto is LaserTextDto t)
+            {
+                obj = new LaserText
+                {
+                    Text = t.Text,
+                    FontName = t.FontName,
+                    FontSize = t.FontSize
+                };
             }
 
             if (obj != null)

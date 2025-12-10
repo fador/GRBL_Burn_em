@@ -44,7 +44,7 @@ public class SvgImporter
                  // Images in Svg are often base64 or linked. Svg library handles this into .Image property.
                  try
                  {
-                     Bitmap bitmap = null;
+                     Bitmap? bitmap = null;
                      if (!string.IsNullOrEmpty(image.Href))
                      {
                          if (image.Href.StartsWith("data:image"))
@@ -198,6 +198,37 @@ public class SvgImporter
                         }
                         path.AddLines(pts);
                     }
+                }
+
+                else if (visual is SvgText svgText)
+                {
+                    // Basic text support
+                    var txt = new LaserText
+                    {
+                        Text = svgText.Text.Trim(),
+                        Name = svgText.ID ?? "Text",
+                        // Map Svg info. 
+                        // SvgText properties: X, Y, FontSize, FontFamily
+                    };
+                    
+                    float x = (svgText.X.Count > 0) ? svgText.X[0].ToDeviceValue(null, UnitRenderingType.Horizontal, svgText) : 0f;
+                    float y = (svgText.Y.Count > 0) ? svgText.Y[0].ToDeviceValue(null, UnitRenderingType.Vertical, svgText) : 0f;
+                    
+                    var pts = new PointF[] { new PointF(x, y) };
+                    currentTransform.TransformPoints(pts);
+                    
+                    txt.Position = pts[0];
+                    
+                    if (svgText.FontSize != SvgUnit.None)
+                        txt.FontSize = svgText.FontSize.ToDeviceValue(null, UnitRenderingType.Other, svgText);
+                        
+                    if(string.IsNullOrEmpty(txt.Text) && svgText.Children.Count > 0)
+                    {
+                        // Handle tspan or nested content simple concatenation
+                        txt.Text = svgText.Content; // Svg library often puts content here
+                    }
+                    
+                    list.Add(txt);
                 }
 
                 if (path != null)

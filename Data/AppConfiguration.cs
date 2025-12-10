@@ -1,0 +1,45 @@
+using System.Text.Json;
+
+namespace laser_gui_test.Data;
+
+public class AppConfiguration
+{
+    private static AppConfiguration? _instance;
+    public static AppConfiguration Instance => _instance ??= Load();
+
+    public string LastPortName { get; set; } = "";
+    public int BaudRate { get; set; } = 115200;
+
+    private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
+
+    public void Save()
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(ConfigPath, json);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to save config: {ex.Message}");
+        }
+    }
+
+    private static AppConfiguration Load()
+    {
+        if (File.Exists(ConfigPath))
+        {
+            try
+            {
+                var json = File.ReadAllText(ConfigPath);
+                var config = JsonSerializer.Deserialize<AppConfiguration>(json);
+                if (config != null) return config;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to load config: {ex.Message}");
+            }
+        }
+        return new AppConfiguration();
+    }
+}

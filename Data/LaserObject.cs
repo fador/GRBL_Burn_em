@@ -8,7 +8,8 @@ public enum LaserObjectType
     Path,
     Image,
     Rectangle,
-    Group
+    Group,
+    Text
 }
 
 public abstract class LaserObject
@@ -174,6 +175,56 @@ public class LaserImage : LaserObject
 
     public override bool HitTest(PointF point)
     {
+        return new RectangleF(Position, Size).Contains(point);
+    }
+}
+
+public class LaserText : LaserObject
+{
+    public string Text { get; set; } = "Text";
+    public string FontName { get; set; } = "Arial";
+    public float FontSize { get; set; } = 20f; // Points
+
+    public LaserText()
+    {
+        Type = LaserObjectType.Text;
+        Name = "Text";
+    }
+
+    public override void Draw(Graphics g, float scale)
+    {
+        var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
+                    ?? ProjectState.Instance.Layers.FirstOrDefault();
+        Color c = layer?.Color ?? Color.Black;
+
+        using var brush = new SolidBrush(c);
+        // Simple scale handling for font: create font of appropriate size? 
+        // Or transform graphics? Graphics is already transformed. 
+        // Font size is in em/points usually. 
+        // If we want WYSIWYG, we need to handle size carefully.
+        // For now, assume FontSize is in world units (mm or whatever).
+        // Standard GDI+ Font size is in Point (1/72 inch). 
+        // 1 pt = 0.3527 mm.
+        // If we want FontSize 10mm ~ 28pt.
+        
+        // Let's assume FontSize is in POINTS for generic text.
+        // But if we resize via 'Size' property we might want to scale it.
+        // For simple MVP usage: DrawString uses Font Size.
+        
+        using var font = new Font(FontName, FontSize);
+        g.DrawString(Text, font, brush, Position);
+        
+        // Update Size to match actual text size for HitTest/Selection
+        // Warning: Measuring in Draw might be expensive or cause side effects? 
+        // Ideally we measure when property changes.
+        // But we need 'g' to measure.
+        var size = g.MeasureString(Text, font);
+        this.Size = size;
+    }
+
+    public override bool HitTest(PointF point)
+    {
+        // Simple bounding box hit test
         return new RectangleF(Position, Size).Contains(point);
     }
 }
