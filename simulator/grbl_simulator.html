@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G-Code Laser Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { 
+            image-rendering: pixelated; 
+            cursor: crosshair;
+        }
+        .g-code-input {
+            font-family: 'Consolas', 'Monaco', monospace;
+            white-space: pre;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-slate-800 text-white p-4 shadow-md shrink-0 flex justify-between items-center">
+        <h1 class="text-xl font-bold flex items-center gap-2">
+            <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Laser G-Code Simulator
+        </h1>
+        <div class="text-sm text-slate-400" id="status-display">Ready</div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="flex flex-1 overflow-hidden">
+        
+        <!-- Sidebar / Editor -->
+        <div class="w-1/3 bg-white border-r border-slate-300 flex flex-col min-w-[300px]">
+            <div class="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                <h2 class="font-semibold text-slate-700">G-Code Input</h2>
+                <div class="flex gap-2">
+                    <button onclick="loadSample()" class="text-xs text-blue-600 hover:text-blue-800 underline">Load Sample</button>
+                    <button onclick="clearInput()" class="text-xs text-red-600 hover:text-red-800 underline">Clear</button>
+                </div>
+            </div>
+            
+            <textarea id="gcode-input" class="flex-1 w-full p-4 resize-none bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs g-code-input text-slate-700" spellcheck="false" placeholder="Paste G-code here..."></textarea>
+            
+            <div class="p-4 border-t border-slate-200 bg-slate-50">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">Max S-Value (Power)</label>
+                        <input type="number" id="max-power" value="1000" class="w-full px-2 py-1 border rounded text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">Stroke Width</label>
+                        <input type="number" id="stroke-width" value="2" step="0.5" class="w-full px-2 py-1 border rounded text-sm">
+                    </div>
+                </div>
+                <button onclick="runSimulation()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded shadow transition">
+                    Simulate
+                </button>
+            </div>
+        </div>
+
+        <!-- Canvas Viewport -->
+        <div class="flex-1 relative bg-slate-200 flex items-center justify-center p-8 overflow-hidden">
+            <div class="relative shadow-2xl bg-white rounded-sm overflow-hidden">
+                <canvas id="sim-canvas" width="800" height="600" class="block bg-white"></canvas>
+                
+                <!-- Overlay Info -->
+                <div class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded pointer-events-none" id="canvas-info">
+                    Scale: 1.0x
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // Configuration
+    const canvas = document.getElementById('sim-canvas');
+    const ctx = canvas.getContext('2d');
+    const inputArea = document.getElementById('gcode-input');
+    const statusDisplay = document.getElementById('status-display');
+    const maxPowerInput = document.getElementById('max-power');
+    const strokeWidthInput = document.getElementById('stroke-width');
+    const canvasInfo = document.getElementById('canvas-info');
+
+    // Default Sample
+    const sampleGCode = `G21
+G90
+M4 S0
+G0 F1000
+G0 X70.482 Y179.814
+G1 X125.698 S0
+G1 X126.121 S85
+G1 X126.262 S105
+G1 X126.825 S170
+G1 X126.966 S194
+G1 X127.952 S259
+G1 X130.910 S0
+G1 X131.896 S262
+G1 X132.037 S193
+G1 X132.600 S174
+G1 X132.741 S108
+G1 X133.164 S85
+G1 X188.380 S0
+G0 X70.482 Y179.675
+G1 X123.867 S0
+G1 X124.149 S89
+G1 X124.290 S110
+G1 X124.571 S174
+G1 X124.712 S194
+G1 X125.135 S255
+G1 X133.727 S0
+G1 X134.150 S255
+G1 X134.291 S193
+G1 X134.572 S174
+G1 X134.713 S108
+G1 X134.995 S85
+G1 X188.380 S0
+G0 X70.482 Y179.537
+G1 X122.599 S0
+G1 X122.740 S89
+G1 X122.881 S109`;
+
+    // State
+    let paths = [];
+    let bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+    // --- Parsing Logic ---
+
+    function parseGCode(code) {
+        const lines = code.split('\n');
+        const segments = [];
+        
+        let state = {
+            x: 0,
+            y: 0,
+            s: 0, // Current power
+            mode: 'G0', // Current motion mode (G0, G1, etc)
+            isRelative: false // G90 (false) vs G91 (true)
+        };
+
+        // Reset bounds
+        bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+        // Helper to update bounds
+        const updateBounds = (x, y) => {
+            if (x < bounds.minX) bounds.minX = x;
+            if (x > bounds.maxX) bounds.maxX = x;
+            if (y < bounds.minY) bounds.minY = y;
+            if (y > bounds.maxY) bounds.maxY = y;
+        };
+
+        // Initial bounds at origin (optional, but good practice if starting from 0,0)
+        updateBounds(0, 0);
+
+        lines.forEach(line => {
+            line = line.trim().toUpperCase();
+            // Remove comments
+            const commentIndex = line.indexOf(';');
+            if (commentIndex !== -1) line = line.substring(0, commentIndex);
+            const parenIndex = line.indexOf('(');
+            if (parenIndex !== -1) line = line.substring(0, parenIndex);
+            
+            if (!line) return;
+
+            const parts = line.split(/\s+/);
+            
+            // Temporary next state
+            let nextX = state.x;
+            let nextY = state.y;
+            let nextS = state.s;
+            let hasMove = false;
+
+            parts.forEach(part => {
+                const letter = part.charAt(0);
+                const value = parseFloat(part.substring(1));
+
+                if (isNaN(value)) return;
+
+                switch (letter) {
+                    case 'G':
+                        if (value === 0) state.mode = 'G0';
+                        if (value === 1) state.mode = 'G1';
+                        if (value === 90) state.isRelative = false;
+                        if (value === 91) state.isRelative = true;
+                        break;
+                    case 'X':
+                        nextX = state.isRelative ? state.x + value : value;
+                        hasMove = true;
+                        break;
+                    case 'Y':
+                        nextY = state.isRelative ? state.y + value : value;
+                        hasMove = true;
+                        break;
+                    case 'S':
+                        nextS = value;
+                        break;
+                }
+            });
+
+            // If we moved, record the segment
+            if (hasMove) {
+                segments.push({
+                    x1: state.x,
+                    y1: state.y,
+                    x2: nextX,
+                    y2: nextY,
+                    power: state.mode === 'G0' ? 0 : nextS, // G0 is always 0 power conceptually for viz
+                    type: state.mode
+                });
+
+                updateBounds(nextX, nextY);
+                
+                // Update state
+                state.x = nextX;
+                state.y = nextY;
+            }
+            
+            // Power updates persist even without moves, but we only draw on moves.
+            // However, if S changes on a G1 line, it applies to that segment.
+            state.s = nextS;
+        });
+
+        return segments;
+    }
+
+    // --- Rendering Logic ---
+
+    function draw() {
+        const width = canvas.width;
+        const height = canvas.height;
+        const maxS = parseFloat(maxPowerInput.value) || 255;
+        const strokeW = parseFloat(strokeWidthInput.value) || 2;
+
+        ctx.clearRect(0, 0, width, height);
+
+        if (paths.length === 0) return;
+
+        // Auto-fit calculation
+        const dataWidth = bounds.maxX - bounds.minX;
+        const dataHeight = bounds.maxY - bounds.minY;
+        
+        // Add 10% padding
+        const padding = Math.min(width, height) * 0.1;
+        
+        // Check if flat line or point to avoid divide by zero
+        if (dataWidth === 0 && dataHeight === 0) return;
+
+        const scaleX = (width - padding * 2) / (dataWidth || 1);
+        const scaleY = (height - padding * 2) / (dataHeight || 1);
+        const scale = Math.min(scaleX, scaleY); // Uniform scale
+
+        // Center the data
+        const offsetX = (width - dataWidth * scale) / 2 - bounds.minX * scale;
+        const offsetY = (height - dataHeight * scale) / 2 - bounds.minY * scale;
+
+        // Draw Coordinate Grid (Optional faint background grid)
+        drawGrid(width, height, 50, '#f0f0f0');
+
+        canvasInfo.innerText = `Scale: ${scale.toFixed(2)}x | Power Max: ${maxS}`;
+
+        // Draw Segments
+        paths.forEach(segment => {
+            const x1 = segment.x1 * scale + offsetX;
+            // Flip Y because Canvas Y is down, G-Code Y is up
+            // We need to mirror around the center of the drawing area or just simple flip
+            // Simple flip: map min Y to bottom, max Y to top
+            // transform: canvasY = height - (worldY * scale + offsetY) ??
+            // Let's stick to standard cartesian flip:
+            
+            const screenY1 = height - (segment.y1 * scale + offsetY);
+            const screenX2 = segment.x2 * scale + offsetX;
+            const screenY2 = height - (segment.y2 * scale + offsetY);
+
+            ctx.beginPath();
+            ctx.moveTo(x1, screenY1);
+            ctx.lineTo(screenX2, screenY2);
+
+            if (segment.type === 'G0') {
+                // Rapid move: Light green, thin, dashed
+                ctx.strokeStyle = 'rgba(100, 200, 100, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+            } else {
+                // G1 Move: Black/Burn color
+                // Calculate opacity based on power
+                const intensity = Math.min(segment.power / maxS, 1);
+                
+                // Laser logic: 0 power = transparent/invisible
+                if (intensity <= 0.01) {
+                    ctx.strokeStyle = 'rgba(0,0,0,0.05)'; // Very faint track for G1 S0
+                } else {
+                    // Simulating burn: darker and more opaque with higher power
+                    // Color: Dark Brown/Black
+                    ctx.strokeStyle = `rgba(40, 20, 10, ${intensity})`; 
+                }
+                
+                ctx.lineWidth = strokeW;
+                ctx.setLineDash([]);
+            }
+            ctx.stroke();
+        });
+    }
+
+    function drawGrid(w, h, step, color) {
+        ctx.beginPath();
+        for (let x = 0; x <= w; x += step) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, h);
+        }
+        for (let y = 0; y <= h; y += step) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(w, y);
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        ctx.stroke();
+    }
+
+    // --- UI Handlers ---
+
+    function runSimulation() {
+        const code = inputArea.value;
+        paths = parseGCode(code);
+        
+        // Auto-detect max power if not set or weird
+        let detectedMaxS = 0;
+        paths.forEach(p => { if(p.power > detectedMaxS) detectedMaxS = p.power; });
+        if (detectedMaxS > parseFloat(maxPowerInput.value)) {
+           // Optional: Auto-update max power input if detected is higher
+           // maxPowerInput.value = detectedMaxS;
+        }
+
+        statusDisplay.innerText = `Rendered ${paths.length} segments. Bounds: [${bounds.minX.toFixed(1)}, ${bounds.minY.toFixed(1)}] to [${bounds.maxX.toFixed(1)}, ${bounds.maxY.toFixed(1)}]`;
+        
+        draw();
+    }
+
+    function loadSample() {
+        inputArea.value = sampleGCode;
+        // Check sample for max power, usually 255 or 1000. Sample has 262, so 1000 is safe.
+        maxPowerInput.value = 1000; 
+        runSimulation();
+    }
+
+    function clearInput() {
+        inputArea.value = '';
+        paths = [];
+        ctx.clearRect(0,0, canvas.width, canvas.height);
+        statusDisplay.innerText = 'Cleared';
+    }
+
+    // Init
+    window.addEventListener('resize', () => {
+        // Optional: Responsive canvas logic could go here
+        runSimulation();
+    });
+    
+    // Load sample on start
+    loadSample();
+
+</script>
+</body>
+</html>
