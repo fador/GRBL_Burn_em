@@ -10,11 +10,16 @@ namespace laser_gui_test;
 
 public partial class MainForm : Form
 {
+    private static MainForm? _instance;
+    public static MainForm Instance => _instance ??= new MainForm();
+
     private WorkbenchControl _workbench = null!;
     private DataGridView _objectList = null!;
     private FlowLayoutPanel _layerPanel = null!;
     private FlowLayoutPanel _toolsPanel = null!;
     private GroupBox _controlPanel = null!;
+
+    private bool _isUpdatingSelection = false;
 
     public MainForm()
     {
@@ -124,6 +129,7 @@ public partial class MainForm : Form
         // Selection Sync
         _objectList.SelectionChanged += (s, e) => 
         {
+            if(_isUpdatingSelection) return;
             if (_objectList.SelectedRows.Count > 0)
             {
                 var list = new List<LaserObject>();
@@ -161,24 +167,9 @@ public partial class MainForm : Form
 
         ProjectState.Instance.PropertyChanged += (s, e) => 
         {
-            if (e.PropertyName == nameof(ProjectState.SelectedObject))
+            if (e.PropertyName == nameof(ProjectState.SelectedObject) || e.PropertyName == nameof(ProjectState.SelectedObjects))
             {
-                var sel = ProjectState.Instance.SelectedObject;
-                if (sel == null)
-                {
-                    _objectList.ClearSelection();
-                }
-                else
-                {
-                    foreach (DataGridViewRow row in _objectList.Rows)
-                    {
-                        if (row.DataBoundItem == sel)
-                        {
-                            row.Selected = true;
-                            break;
-                        }
-                    }
-                }
+                 UpdateSelectedObjects();
             }
         };
 
@@ -560,5 +551,26 @@ public partial class MainForm : Form
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    public bool UpdateSelectedObjects()
+    {
+        _isUpdatingSelection = true;
+        var current = new HashSet<LaserObject>(ProjectState.Instance.SelectedObjects);
+        
+        foreach (DataGridViewRow row in _objectList.Rows)
+        {
+            if (row.DataBoundItem is LaserObject obj)
+            {
+                bool shouldSelect = current.Contains(obj);
+                if (row.Selected != shouldSelect)
+                {
+                    row.Selected = shouldSelect;
+                }
+            }
+        }        
+        _isUpdatingSelection = false;
+
+        return true;
     }
 }
