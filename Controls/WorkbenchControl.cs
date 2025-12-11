@@ -383,17 +383,18 @@ public class WorkbenchControl : Control
             ProjectState.Instance.SelectedObjects = list;
 
             // Popup window listing the selected objects            
-            if(list.Count > 0)
+            if(0 && list.Count > 0)
             {
                 var selectedObjectsForm = new SelectedObjectsForm(list);
                 selectedObjectsForm.ShowDialog();
             }
-            
+
             // Update MainForm
             MainForm.Instance.UpdateSelectedObjects();
             
-            ProjectState.Instance.Objects.ResetBindings(); 
+            //ProjectState.Instance.Objects.ResetBindings(); 
             Invalidate();
+            return;
         }
 
         if (_isDragging)
