@@ -14,7 +14,7 @@ public class AppConfiguration
     public float WorkAreaWidth { get; set; } = 400f;
     public float WorkAreaHeight { get; set; } = 400f;
     public string WorkOrigin { get; set; } = "BottomLeft";
-    public float RasterLineInterval { get; set; } = 0.1f;
+    public float RasterLineInterval { get; set; } = 0.3f;
 
     private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
 

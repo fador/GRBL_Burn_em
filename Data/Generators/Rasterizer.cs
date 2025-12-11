@@ -111,6 +111,7 @@ public static class Rasterizer
             
             float currentX = direction ? startX : startX + width;
             yield return $"G0 X{currentX:F3} Y{currentY:F3}";
+            bool lastG0 = true;
 
             // Now execute segments
             foreach (var segment in rowPixels)
@@ -127,11 +128,26 @@ public static class Rasterizer
                      // G1 S0 is safer to keep 'Laser Mode' behavior consistent (no turn off/on delay?)
                      // Actually G0 is usually non-cutting travel.
                      // In M4 mode, G1 S0 turns laser off but kept in motion.
-                     yield return $"G1 X{nextX:F3} S0";
+                    if(lastG0) {
+                        yield return $"G1 X{nextX:F3} S0";
+                    }
+                    else
+                    {
+                        // GRBL allows XY moves without G0/G1 prefix if mode is already set.
+                        yield return $"X{nextX:F3} S0";
+                    }
+                    lastG0 = false;
                 }
                 else
                 {
-                    yield return $"G1 X{nextX:F3} S{sValue:F0}";
+                    if(lastG0) {
+                        yield return $"G1 X{nextX:F3} S{sValue:F0}";
+                    }
+                    else
+                    {
+                        yield return $"X{nextX:F3} S{sValue:F0}";
+                    }
+                    lastG0 = false;
                 }
                 
                 currentX = nextX;
