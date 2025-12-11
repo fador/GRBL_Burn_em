@@ -135,16 +135,13 @@ public class WorkbenchControl : Control
     {
         base.OnMouseDown(e);
         
-        // Safety reset to ensure no lingering state from previous interactions
-        if (e.Button == MouseButtons.Left && !_isPanning)
-        {
-             ResetInteractionState();
-        }
+        // 1. Reset State
+        if (e.Button == MouseButtons.Left && !_isPanning) ResetInteractionState();
 
-        // Transform mouse coordinates to world coordinates
         PointF worldPos = ScreenToWorld(e.Location);
         _currentMouseWorld = worldPos;
 
+        // 2. Panning (Right Click)
         if (e.Button == MouseButtons.Right)
         {
             _isPanning = true;
@@ -153,131 +150,105 @@ public class WorkbenchControl : Control
             return;
         }
 
-        if (e.Button == MouseButtons.Left)
-        {
-            switch (ToolManager.Instance.CurrentTool)
-            {
-                case ToolType.Select:
-                    // Check handles first
-                    int handle = HitTestHandles(worldPos);
-                    if (handle != -1)
-                    {
-                        _dragHandleIndex = handle;
-                        _isResizing = true;
-                        _dragStartPos = worldPos;
-                        _initialGroupBounds = GetSelectionBounds();
-                        // Snapshot object states
-                        SnapshotSelection();
-                        Invalidate(); // Ensure UI feedback immediately
-                        return;
-                    }
-                
-                    // Hit test logic
-                    bool hit = false;
-                    // Calculate tolerance based on zoom
-                    float hitTolerance = 8.0f / _zoom; 
-                    
-                    foreach (var obj in ProjectState.Instance.Objects.Reverse())
-                    {
-                        if (obj.HitTest(worldPos, hitTolerance))
-                        {
-                            hit = true;
-                            
-                            // Interaction Fixes:
-                            if (Control.ModifierKeys == Keys.Control)
-                            {
-                                // Toggle Selection
-                                var currentSel = new List<LaserObject>(ProjectState.Instance.SelectedObjects);
-                                if (currentSel.Contains(obj))
-                                {
-                                    currentSel.Remove(obj);
-                                    ProjectState.Instance.SelectedObjects = currentSel;
-                                    // Can't move/drag if we just deselected it
-                                }
-                                else
-                                {
-                                    currentSel.Add(obj);
-                                    ProjectState.Instance.SelectedObjects = currentSel;
-                                    
-                                    // Make this the interaction object for potential drag
-                                    _interactionObject = obj;
-                                    _isMoving = true;
-                                    _dragStartPos = worldPos;
-                                    _moveStartPos = worldPos;
-                                }
-                            }
-                            else
-                            {
-                                // Normal Click
-                                if (ProjectState.Instance.SelectedObjects.Contains(obj))
-                                {
-                                    // Allows moving existing selection (group move)
-                                    // NOTE: We do NOT deselect others yet, in case the user wants to drag the group.
-                                    // We handle "Select Only This" in OnMouseUp if no drag occurred.
-                                    _interactionObject = obj;
-                                    _isMoving = true;
-                                    _dragStartPos = worldPos;
-                                    _moveStartPos = worldPos; 
-                                }
-                                else
-                                {
-                                    // Select ONLY this (Clear others)
-                                    ProjectState.Instance.SelectedObjects = new List<LaserObject> { obj };
-                                    
-                                    _interactionObject = obj;
-                                    _isMoving = true;
-                                    _dragStartPos = worldPos;
-                                    _moveStartPos = worldPos;
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    
-                    if (!hit)
-                    {
-                        // Clicked empty space
-                        // Start Selection Box
-                        if (Control.ModifierKeys != Keys.Control)
-                        {
-                            ProjectState.Instance.SelectedObjects = new List<LaserObject>();
-                        }
-                        _isSelecting = true;
-                        _dragStartPos = worldPos;
-                    }
-                    
-                    ProjectState.Instance.Objects.ResetBindings(); 
-                    Invalidate(); 
-                    break;
+        if (e.Button != MouseButtons.Left) return;
 
-                case ToolType.DrawBox:
-                    // Start drawing box
-                    var box = new LaserRectangle
-                    {
-                        Name = "Rectangle",
-                        Position = worldPos,
-                        Size = new SizeF(0, 0)
-                    };
-                    ProjectState.Instance.AddObject(box);
-                    _interactionObject = box;
-                    _isDragging = true;
-                    _dragStartPos = worldPos;
-                    break;
-                
-                case ToolType.DrawLine:
-                    var line = new LaserPath
-                    {
-                        Name = "Line",
-                        Position = worldPos, 
-                    };
-                    line.Points.Add(worldPos);
-                    line.Points.Add(worldPos); 
-                    
-                    ProjectState.Instance.AddObject(line);
-                    _interactionObject = line;
-                    _isDragging = true;
-                    break;
+        // 3. Creation Tools
+        if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
+        {
+            var box = new LaserRectangle { Name = "Rectangle", Position = worldPos, Size = new SizeF(0, 0) };
+            ProjectState.Instance.AddObject(box);
+            _interactionObject = box;
+            _isDragging = true;
+            _dragStartPos = worldPos;
+            return;
+        }
+        
+        if (ToolManager.Instance.CurrentTool == ToolType.DrawLine)
+        {
+            var line = new LaserPath { Name = "Line", Position = worldPos };
+            line.Points.Add(worldPos);
+            line.Points.Add(worldPos); 
+            ProjectState.Instance.AddObject(line);
+            _interactionObject = line;
+            _isDragging = true;
+            return;
+        }
+
+        // 4. Selection Tool
+        if (ToolManager.Instance.CurrentTool == ToolType.Select)
+        {
+            // A. Check Resize Handles
+            int handle = HitTestHandles(worldPos);
+            if (handle != -1)
+            {
+                _dragHandleIndex = handle;
+                _isResizing = true;
+                _dragStartPos = worldPos;
+                _initialGroupBounds = GetSelectionBounds();
+                SnapshotSelection();
+                Invalidate();
+                return;
             }
+
+            // B. Hit Test Objects
+            float hitTolerance = 8.0f / _zoom; 
+            var hitObj = ProjectState.Instance.Objects.Reverse().FirstOrDefault(o => o.HitTest(worldPos, hitTolerance));
+
+            if (hitObj != null)
+            {
+                bool isCtrl = (Control.ModifierKeys == Keys.Control);
+                bool isSelected = ProjectState.Instance.SelectedObjects.Contains(hitObj);
+
+                if (isCtrl)
+                {
+                    // Toggle Selection
+                    var newSelection = new List<LaserObject>(ProjectState.Instance.SelectedObjects);
+                    if (isSelected)
+                    {
+                        newSelection.Remove(hitObj);
+                        ProjectState.Instance.SelectedObjects = newSelection;
+                    }
+                    else
+                    {
+                        newSelection.Add(hitObj);
+                        ProjectState.Instance.SelectedObjects = newSelection;
+                        // Prepare for move
+                        _interactionObject = hitObj;
+                        _isMoving = true;
+                        _dragStartPos = worldPos;
+                        _moveStartPos = worldPos;
+                    }
+                }
+                else
+                {
+                    // Normal Click
+                    if (isSelected)
+                    {
+                        // Clicked on already selected object -> Prepare for move (Group move)
+                        _interactionObject = hitObj;
+                        _isMoving = true;
+                        _dragStartPos = worldPos;
+                        _moveStartPos = worldPos;
+                    }
+                    else
+                    {
+                        // Select ONLY this object
+                        ProjectState.Instance.SelectedObjects = new List<LaserObject> { hitObj };
+                        _interactionObject = hitObj;
+                        _isMoving = true;
+                        _dragStartPos = worldPos;
+                        _moveStartPos = worldPos;
+                    }
+                }
+            }
+            else
+            {
+                // C. Clicked Empty Space -> Start Selection Box
+                _isSelecting = true;
+                _dragStartPos = worldPos;
+            }
+
+            Invalidate();
         }
     }
 
