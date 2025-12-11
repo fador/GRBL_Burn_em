@@ -1,5 +1,6 @@
 using System.Drawing;
 using System;
+using System.Drawing.Drawing2D;
 
 namespace laser_gui_test.Data;
 
@@ -156,15 +157,38 @@ public class LaserImage : LaserObject
     {
         if (Image != null)
         {
-            // Draw image within bounds
-            g.DrawImage(Image, Position.X, Position.Y, Size.Width, Size.Height);
+            
+            // We want to draw the image UPRIGHT with Position as Bottom-Left.
+            // Image (0,0) [Top] should be at Position.Y + Height.
+            // Image (0,H) [Bottom] should be at Position.Y.
+            
+            GraphicsState state = g.Save();
+            
+            // Move to Top-Left of the target rect (which is Pos.Y + Height)
+            // Flip Y axis so Y+ is Down (Standard Image drawing)
+            g.TranslateTransform(Position.X, Position.Y + Size.Height);
+            g.ScaleTransform(1, -1);
+            
+            // Draw standard top-down image at 0,0
+            g.DrawImage(Image, 0, 0, Size.Width, Size.Height);
+            
+            g.Restore(state);
         }
         else
         {
             // Placeholder
+             // Save state to handle rectangle? 
+             // Rectangle is vector, it works fine with inverted Y (it just draws -H or +H).
+             // But text "Img Missing" needs flip.
+            
             using var pen = new Pen(Color.Red, 1.0f / scale);
             g.DrawRectangle(pen, Position.X, Position.Y, Size.Width, Size.Height);
-            g.DrawString("Img Missing", SystemFonts.DefaultFont, Brushes.Red, Position);
+            
+            var state = g.Save();
+            g.TranslateTransform(Position.X, Position.Y);
+            g.ScaleTransform(1, -1);
+            g.DrawString("Img Missing", SystemFonts.DefaultFont, Brushes.Red, 0, 0);
+            g.Restore(state);
         }
     }
 
@@ -207,15 +231,25 @@ public class LaserText : LaserObject
         // But if we resize via 'Size' property we might want to scale it.
         // For simple MVP usage: DrawString uses Font Size.
         
-        using var font = new Font(FontName, FontSize);
-        g.DrawString(Text, font, brush, Position);
+        // Text drawing needs unflip
+        // Text drawing needs unflip
+        var state = g.Save();
+        g.TranslateTransform(Position.X, Position.Y);
+        g.ScaleTransform(1, -1);
         
-        // Update Size to match actual text size for HitTest/Selection
-        // Warning: Measuring in Draw might be expensive or cause side effects? 
-        // Ideally we measure when property changes.
-        // But we need 'g' to measure.
-        var size = g.MeasureString(Text, font);
-        this.Size = size;
+        using (var font = new Font(FontName, FontSize))
+        {
+            g.DrawString(Text, font, brush, 0, 0); // Local 0,0
+            
+            // Measure while font is alive
+            // Note: MeasureString might be affected by transform?
+            // If scale is 1, -1. Width is 1 * w. Height is -1 * h?
+            // Usually returns positive SizeF.
+            var size = g.MeasureString(Text, font);
+            this.Size = size;
+        }
+
+        g.Restore(state);
     }
 
     public override bool HitTest(PointF point, float tolerance)

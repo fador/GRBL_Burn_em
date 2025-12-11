@@ -16,8 +16,24 @@ public class SvgImporter
         var laserObjects = new List<LaserObject>();
         var doc = SvgDocument.Open(filePath);
         
-        // Use a default matrix
-        using var mat = new Matrix();
+        // Calculate document height to flip Y axis
+        // Prefer ViewBox height if available, else Document Height
+        float docH = 0;
+        if (doc.ViewBox.Height > 0)
+        {
+             docH = doc.ViewBox.Height;
+        }
+        else
+        {
+             docH = doc.Height.ToDeviceValue(null, UnitRenderingType.Vertical, doc);
+        }
+
+        // Create transform: Scale(1, -1) then Translate(0, docH)
+        // Matrix(m11, m12, m21, m22, dx, dy)
+        // x' = x
+        // y' = -y + docH
+        using var mat = new Matrix(1, 0, 0, -1, 0, docH);
+        
         ImportElement(doc, laserObjects, mat);
         
         return laserObjects;
@@ -99,12 +115,17 @@ public class SvgImporter
                          var lImg = new LaserImage();
                          lImg.Name = image.ID ?? "Image";
                          lImg.Image = new Bitmap(bitmap);
-                         lImg.Position = pts[0];
-                         lImg.Size = new SizeF(w, h); // Scale? Ideally we check matrix scale.
                          
                          // Extract scale from matrix
                          float scaleX = (float)Math.Sqrt(currentTransform.Elements[0] * currentTransform.Elements[0] + currentTransform.Elements[1] * currentTransform.Elements[1]);
-                         lImg.Size = new SizeF(lImg.Size.Width * scaleX, lImg.Size.Height * scaleX);
+                         float scaleY = (float)Math.Sqrt(currentTransform.Elements[2] * currentTransform.Elements[2] + currentTransform.Elements[3] * currentTransform.Elements[3]); 
+                         
+                         float finalW = w * scaleX;
+                         float finalH = h * scaleX;
+                         
+                         lImg.Size = new SizeF(finalW, finalH);
+                         // Shift Y down by Height to map Top-Left to Bottom-Left
+                         lImg.Position = new PointF(pts[0].X, pts[0].Y - finalH);
 
                          list.Add(lImg);
                      }

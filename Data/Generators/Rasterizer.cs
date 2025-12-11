@@ -30,7 +30,13 @@ public static class Rasterizer
         for (int y = 0; y < bmp.Height; y++)
         {
             // Calculate physical Y
-            float currentY = startY + (y * pixelHeight);
+            // Y-Up: StartY is Bottom. StartY + Height is Top.
+            // Scanlines normally go Top to Bottom for image rastering?
+            // Or we scan the logic Y?
+            // y=0 is Top of bitmap.
+            // So y=0 matches Physical Top (StartY + Height).
+            // y=H matches Physical Bottom (StartY).
+            float currentY = (startY + height) - (y * pixelHeight) - (pixelHeight / 2); // Center of pixel
             
             // Move to start of line (fast move)
             // Left-to-Right

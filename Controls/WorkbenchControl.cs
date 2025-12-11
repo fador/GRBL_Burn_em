@@ -40,12 +40,62 @@ public class WorkbenchControl : Control
 
         // Apply transformations
         g.TranslateTransform(Width / 2f + _panOffset.X, Height / 2f + _panOffset.Y);
-        g.ScaleTransform(_zoom, _zoom);
+        g.ScaleTransform(_zoom, -_zoom); // Y-Up coordinate system
 
         DrawGrid(g);
+        DrawWorkArea(g); // Draw Work Area before Origin
         DrawOrigin(g);
         DrawObjects(g);
         DrawRulerOverlay(g);
+    }
+
+    private void DrawWorkArea(Graphics g)
+    {
+        float w = AppConfiguration.Instance.WorkAreaWidth;
+        float h = AppConfiguration.Instance.WorkAreaHeight;
+        string origin = AppConfiguration.Instance.WorkOrigin;
+        
+        float x = 0;
+        float y = 0;
+        
+        // Coordinate system: 
+        // We assume World Coordinates: X Right, Y Down (standard GDI+).
+        // BUT for Laser/CNC, Y is usually Up.
+        // If we want "Bottom Left" to be 0,0.
+        // If our view assumes Y+ is Down...
+        // Let's stick to the visual representation.
+        // User sends G-code. Only GrblGenerator cares about coordinate flipping if needed.
+        // In this GUI, let's assume standard Cartesian for the user interaction if possible?
+        // Or standard Screen.
+        // If "Bottom Left" is 0,0, and Y+ is Down (Screen).
+        // Then "Up" is negative Y.
+        
+        // Let's interpret "Work Area Height" as extending in the "Height" direction.
+        
+        if (origin == "BottomLeft")
+        {
+             // 0,0 is Bottom Left. Box extends Right (+X) and Up (+Y).
+             x = 0;
+             y = 0; 
+        }
+        else if (origin == "TopLeft")
+        {
+             // 0,0 is Top Left. Box extends Right (+X) and Down (-Y).
+             x = 0;
+             y = -h;
+        }
+        else if (origin == "Center")
+        {
+             x = -w / 2;
+             y = -h / 2;
+        }
+        
+        using var pen = new Pen(Color.Black, 3.0f / _zoom);
+        g.DrawRectangle(pen, x, y, w, h);
+        
+        // Label?
+        // using var font = new Font("Arial", 10f / _zoom);
+        // g.DrawString($"Area {w}x{h}", font, Brushes.Gray, x + 5/ _zoom, y + 5/_zoom);
     }
 
     private void DrawGrid(Graphics g)
@@ -144,6 +194,7 @@ public class WorkbenchControl : Control
              string text = $"{dist:F1} mm";
              
              // Invert zoom for font size to keep it readable
+             // And we must unflip the Y axis for text drawing
              float fontSize = 12.0f / _zoom;
              if (fontSize < 0.1f) fontSize = 0.1f; // Safety
              
@@ -151,13 +202,21 @@ public class WorkbenchControl : Control
              using var bgBrush = new SolidBrush(Color.FromArgb(180, Color.White));
              using var textBrush = new SolidBrush(Color.DarkBlue);
              
+             // Calculate size and position
              var size = g.MeasureString(text, font);
-             // Center text at mid
              float tx = mid.X - size.Width / 2;
              float ty = mid.Y - size.Height / 2;
+
+             // Save state to flip back for text
+             var state = g.Save();
+             g.TranslateTransform(tx, ty);
+             g.ScaleTransform(1, -1); // Flip Y back for text
              
-             g.FillRectangle(bgBrush, tx, ty, size.Width, size.Height);
-             g.DrawString(text, font, textBrush, tx, ty);
+             // Draw at 0,0 (relative to Translate)
+             g.FillRectangle(bgBrush, 0, 0, size.Width, size.Height);
+             g.DrawString(text, font, textBrush, 0, 0);
+             
+             g.Restore(state);
         }
     }
 
@@ -206,7 +265,6 @@ public class WorkbenchControl : Control
             ProjectState.Instance.AddObject(line);
             _interactionObject = line;
             _isDragging = true;
-            return;
             return;
         }
 
@@ -750,7 +808,7 @@ public class WorkbenchControl : Control
         // World = (Screen - Center - Offset) / Scale
         
         float x = (screenPoint.X - Width / 2f - _panOffset.X) / _zoom;
-        float y = (screenPoint.Y - Height / 2f - _panOffset.Y) / _zoom;
+        float y = (screenPoint.Y - Height / 2f - _panOffset.Y) / -_zoom; // Note negative zoom
         return new PointF(x, y);
     }
 }
