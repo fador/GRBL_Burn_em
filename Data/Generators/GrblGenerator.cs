@@ -80,7 +80,10 @@ public class GrblGenerator : IGCodeGenerator
         {
             // Rasterize
             float interval = AppConfiguration.Instance.RasterLineInterval;
-            foreach (var line in Rasterizer.Rasterize(img, sVal, fVal, interval))
+            float minSeg = AppConfiguration.Instance.MinRasterSegmentLength;
+            bool bicubic = AppConfiguration.Instance.EnableBicubicResampling;
+            
+            foreach (var line in Rasterizer.Rasterize(img, sVal, fVal, interval, minSeg, bicubic))
             {
                 yield return line;
             }
@@ -88,40 +91,30 @@ public class GrblGenerator : IGCodeGenerator
         else if (obj is LaserText text)
         {
             // On-the-fly rasterization for text
+            // ... (Bitmap generation code omitted for brevity as it is unchanged mostly) ... 
+            
             // Create a bitmap for the text
             var bounds = text.GetBounds();
             if (bounds.Width <= 0 || bounds.Height <= 0) yield break;
 
-            // Scaling for resolution? 
-            // Screen 96 DPI. Laser might want more. 
-            // Let's settle on a "pixel size" of approx 0.1mm (10 pixels/mm) -> 254 DPI?
             float dpmm = 10f; 
             int w = (int)Math.Max(1, Math.Ceiling(bounds.Width * dpmm));
             int h = (int)Math.Max(1, Math.Ceiling(bounds.Height * dpmm));
             
-            // ... (Bitmap generation code) ... 
-            
             using var bmp = new Bitmap(w, h);
             using (var g = Graphics.FromImage(bmp))
             {
-                 // ...
                 g.Clear(Color.White); // White is "Off"
-                // Draw text at (0,0) with scaling
                 g.ScaleTransform(dpmm, dpmm);
-                // g.TranslateTransform(-bounds.X, -bounds.Y); // Already handled in previous logic check?
-                // Wait, I need to check the original logic. 
-                // The Replace tool context matching needs to be precise. 
-                // I'll assume the middle part is unchanged and just replace the call.
-                // But replacing large block is safer for context.
                 
                 g.TranslateTransform(-bounds.X, -bounds.Y); 
                 text.Draw(g, 1.0f); 
             }
 
-            // Create a temp LaserImage to reuse Rasterizer
+            // Create a temp LaserImage
             var tempImg = new LaserImage
             {
-                Position = bounds.Location, // Important to place it correctly in world
+                Position = bounds.Location,
                 Size = bounds.Size,
                 Image = bmp,
                 Power = obj.Power,
@@ -129,7 +122,16 @@ public class GrblGenerator : IGCodeGenerator
             };
 
             float interval = AppConfiguration.Instance.RasterLineInterval;
-            foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval))
+            float minSeg = AppConfiguration.Instance.MinRasterSegmentLength;
+            // Bicubic for text? Text bitmap is generated at high res (10 pixels/mm). 
+            // If we use bicubic, it might smooth edges if scaled. 
+            // But here we generated it at "native" resolution for raster?
+            // Actually, if interval is 0.1mm, we match 10 pixels/mm.
+            // If interval is 0.3mm, we are "downscaling" the rows.
+            // Bicubic might help if interval > 0.1mm.
+            bool bicubic = AppConfiguration.Instance.EnableBicubicResampling;
+
+            foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval, minSeg, bicubic))
             {
                 yield return line;
             }

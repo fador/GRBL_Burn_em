@@ -11,6 +11,8 @@ public class OptionsForm : Form
     private NumericUpDown _numWidth = null!;
     private NumericUpDown _numHeight = null!;
     private NumericUpDown _numInterval = null!;
+    private NumericUpDown _numMinSegment = null!;
+    private CheckBox _chkBicubic = null!;
     private ComboBox _cbOrigin = null!;
     private Button _btnSave = null!;
     private Button _btnCancel = null!;
@@ -24,7 +26,7 @@ public class OptionsForm : Form
     private void InitializeComponent()
     {
         this.Text = "Options";
-        this.Size = new Size(300, 400);
+        this.Size = new Size(300, 500); // Increased height
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
@@ -54,8 +56,13 @@ public class OptionsForm : Form
         var lblInterval = new Label { Text = "Line Interval:", Location = new Point(20, 260), AutoSize = true };
         _numInterval = new NumericUpDown { Location = new Point(100, 257), Width = 150, Minimum = 0.01m, Maximum = 5.0m, DecimalPlaces = 3, Increment = 0.01m };
 
-        _btnSave = new Button { Text = "Save", Location = new Point(110, 320), DialogResult = DialogResult.OK };
-        _btnCancel = new Button { Text = "Cancel", Location = new Point(195, 320), DialogResult = DialogResult.Cancel };
+        var lblMinSeg = new Label { Text = "Min Seg (mm):", Location = new Point(20, 300), AutoSize = true };
+        _numMinSegment = new NumericUpDown { Location = new Point(100, 297), Width = 150, Minimum = 0m, Maximum = 10.0m, DecimalPlaces = 2, Increment = 0.1m };
+
+        _chkBicubic = new CheckBox { Text = "Bicubic Resampling", Location = new Point(100, 340), AutoSize = true };
+
+        _btnSave = new Button { Text = "Save", Location = new Point(110, 400), DialogResult = DialogResult.OK };
+        _btnCancel = new Button { Text = "Cancel", Location = new Point(195, 400), DialogResult = DialogResult.Cancel };
 
         _btnSave.Click += BtnSave_Click;
 
@@ -73,6 +80,9 @@ public class OptionsForm : Form
         this.Controls.Add(_cbOrigin);
         this.Controls.Add(lblInterval);
         this.Controls.Add(_numInterval);
+        this.Controls.Add(lblMinSeg);
+        this.Controls.Add(_numMinSegment);
+        this.Controls.Add(_chkBicubic);
         this.Controls.Add(_btnSave);
         this.Controls.Add(_btnCancel);
         
@@ -123,6 +133,8 @@ public class OptionsForm : Form
         _numWidth.Value = (decimal)AppConfiguration.Instance.WorkAreaWidth;
         _numHeight.Value = (decimal)AppConfiguration.Instance.WorkAreaHeight;
         _numInterval.Value = (decimal)AppConfiguration.Instance.RasterLineInterval;
+        _numMinSegment.Value = (decimal)AppConfiguration.Instance.MinRasterSegmentLength;
+        _chkBicubic.Checked = AppConfiguration.Instance.EnableBicubicResampling;
         
         string org = AppConfiguration.Instance.WorkOrigin;
         if (_cbOrigin.Items.Contains(org)) _cbOrigin.SelectedItem = org;
@@ -149,6 +161,8 @@ public class OptionsForm : Form
         AppConfiguration.Instance.WorkAreaWidth = (float)_numWidth.Value;
         AppConfiguration.Instance.WorkAreaHeight = (float)_numHeight.Value;
         AppConfiguration.Instance.RasterLineInterval = (float)_numInterval.Value;
+        AppConfiguration.Instance.MinRasterSegmentLength = (float)_numMinSegment.Value;
+        AppConfiguration.Instance.EnableBicubicResampling = _chkBicubic.Checked;
 
         if(_cbOrigin.SelectedItem != null)
              AppConfiguration.Instance.WorkOrigin = _cbOrigin.SelectedItem.ToString() ?? "BottomLeft";
