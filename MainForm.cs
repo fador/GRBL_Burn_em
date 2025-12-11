@@ -34,6 +34,7 @@ public partial class MainForm : Form
         fileMenu.DropDownItems.Add("New", null, (s, e) => 
         {
             ProjectState.Instance.Objects.Clear();
+            CommandManager.Instance.Clear();
             _workbench.Invalidate();
         });
 
@@ -43,6 +44,7 @@ public partial class MainForm : Form
             if (ofd.ShowDialog() == DialogResult.OK)
             {
                  ProjectSerializer.Load(ofd.FileName);
+                 CommandManager.Instance.Clear();
                  _workbench.Invalidate();
             }
         });
@@ -450,6 +452,7 @@ public partial class MainForm : Form
                  lbHistory.Items.Add(desc);
              }
              // Add current stack indicator logic if needed, but simple list for now
+             _workbench.Invalidate();
         };
 
         _controlPanel.Controls.Add(flow);

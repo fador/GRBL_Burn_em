@@ -42,6 +42,13 @@ public class CommandManager
             StateChanged?.Invoke(this, EventArgs.Empty);
         }
     }
+
+    public void Clear()
+    {
+        _undoStack.Clear();
+        _redoStack.Clear();
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
     
     public IEnumerable<string> GetHistory()
     {
