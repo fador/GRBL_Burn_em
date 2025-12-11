@@ -109,7 +109,7 @@ public partial class MainForm : Form
             Dock = DockStyle.Right,
             Width = 250,
             Orientation = Orientation.Horizontal,
-            SplitterDistance = 400
+            SplitterDistance = 200
         };
 
         // Object List (Top of Right)
@@ -120,7 +120,8 @@ public partial class MainForm : Form
             DataSource = ProjectState.Instance.Objects,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             RowHeadersVisible = false,
-            MultiSelect = true
+            MultiSelect = true,
+            Height = 200
         };
         _objectList.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = "IsEnabled", HeaderText = "On", Width = 30 });
         _objectList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Name", HeaderText = "Name", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
@@ -436,6 +437,42 @@ public partial class MainForm : Form
         flowGroup.Controls.Add(btnGroup);
         flowGroup.Controls.Add(btnUngroup);
         flow.Controls.Add(flowGroup);
+        
+        flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); 
+
+        // Framing
+        var grpFraming = new GroupBox { Text = "Framing", Width = 200, Height = 140 };
+        var flowFraming = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown };
+        
+        var lblPwr = new Label { Text = "Power (%):", AutoSize = true };
+        var numFramePower = new NumericUpDown { Minimum = 0, Maximum = 100, Value = (decimal)AppConfiguration.Instance.FramingPower };
+        
+        var lblSpd = new Label { Text = "Speed:", AutoSize = true };
+        var numFrameSpeed = new NumericUpDown { Minimum = 100, Maximum = 10000, Value = (decimal)AppConfiguration.Instance.FramingSpeed, Increment = 100 };
+
+        var btnFrame = new Button { Text = "Frame Bounds", Width = 180, BackColor = Color.LightYellow };
+        
+        btnFrame.Click += (s, e) => 
+        {
+            AppConfiguration.Instance.FramingPower = (float)numFramePower.Value;
+            AppConfiguration.Instance.FramingSpeed = (float)numFrameSpeed.Value;
+            AppConfiguration.Instance.Save();
+            
+            var gen = new GrblGenerator();
+            var lines = gen.GenerateFraming(ProjectState.Instance.Objects, AppConfiguration.Instance.FramingPower, AppConfiguration.Instance.FramingSpeed);
+            
+            var gcode = string.Join(Environment.NewLine, lines);
+            using var dlg = new DebugCodeForm(gcode);
+            dlg.ShowDialog();
+        };
+
+        flowFraming.Controls.Add(lblPwr);
+        flowFraming.Controls.Add(numFramePower);
+        flowFraming.Controls.Add(lblSpd);
+        flowFraming.Controls.Add(numFrameSpeed);
+        flowFraming.Controls.Add(btnFrame);
+        grpFraming.Controls.Add(flowFraming);
+        flow.Controls.Add(grpFraming);
         
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); 
         flow.Controls.Add(new Label { Text = "History:", AutoSize = true });

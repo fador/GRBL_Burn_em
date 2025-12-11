@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Linq;
 using System.Text;
 
 namespace laser_gui_test.Data.Generators;
@@ -136,5 +137,41 @@ public class GrblGenerator : IGCodeGenerator
                 yield return line;
             }
         }
+    }
+    public IEnumerable<string> GenerateFraming(IEnumerable<LaserObject> objects, float power, float speed)
+    {
+        var enabled = objects.Where(o => o.IsEnabled).ToList();
+        if (enabled.Count == 0) yield break;
+
+        float minX = float.MaxValue;
+        float minY = float.MaxValue;
+        float maxX = float.MinValue;
+        float maxY = float.MinValue;
+
+        foreach (var obj in enabled)
+        {
+            var b = obj.GetBounds();
+            if (b.Left < minX) minX = b.Left;
+            if (b.Top < minY) minY = b.Top;
+            if (b.Right > maxX) maxX = b.Right;
+            if (b.Bottom > maxY) maxY = b.Bottom;
+        }
+
+        yield return "G21";
+        yield return "G90";
+        yield return "M4 S0"; 
+
+        yield return $"G0 X{minX:F3} Y{minY:F3}";
+        
+        float sVal = power * 10f; 
+        yield return $"G1 F{speed:F0}";
+        yield return $"G1 X{maxX:F3} Y{minY:F3} S{sVal:F0}";
+        yield return $"G1 X{maxX:F3} Y{maxY:F3} S{sVal:F0}";
+        yield return $"G1 X{minX:F3} Y{maxY:F3} S{sVal:F0}";
+        yield return $"G1 X{minX:F3} Y{minY:F3} S{sVal:F0}";
+        
+        yield return "G1 S0";
+        yield return "M5";
+        yield return "G0 X0 Y0";
     }
 }

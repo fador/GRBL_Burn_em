@@ -84,11 +84,10 @@ public static class Rasterizer
                 
                 // Invert: 0 (Black) -> Max Power, 255 (White) -> 0 Power
                 // Also handle Alpha
-                float intensity = 0;
-                if (pixel.A > 10) // Threshold for transparency
-                {
-                    intensity = (255f - gray) / 255f; // 0.0 to 1.0
-                }
+                float intensity = (255f - gray) / 255f; // 0.0 to 1.0
+
+                intensity *= pixel.A / 255f;
+
 
                 if (Math.Abs(intensity - currentIntensity) < 0.01f)
                 {

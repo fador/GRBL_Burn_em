@@ -17,6 +17,8 @@ public class AppConfiguration
     public float RasterLineInterval { get; set; } = 0.3f;
     public float MinRasterSegmentLength { get; set; } = 0.2f;
     public bool EnableBicubicResampling { get; set; } = true;
+    public float FramingPower { get; set; } = 0f;
+    public float FramingSpeed { get; set; } = 1000f;
 
     private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
 
