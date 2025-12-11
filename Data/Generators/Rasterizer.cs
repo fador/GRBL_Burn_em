@@ -53,7 +53,7 @@ public static class Rasterizer
         float pixelWidth = width / scanBmp.Width;
         // pixelHeight is effective lineInterval for Y stepping
 
-        bool direction = true; // Zig-zag scanning: true = right, false = left (Only Right currently implemented)
+        // bool direction = true; // Zig-zag scanning not implemented yet
 
         for (int i = 0; i < numLines; i++)
         {

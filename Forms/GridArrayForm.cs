@@ -11,12 +11,12 @@ public class GridArrayForm : Form
     public float GapX { get; private set; }
     public float GapY { get; private set; }
 
-    private NumericUpDown _numRows;
-    private NumericUpDown _numCols;
-    private NumericUpDown _numGapX;
-    private NumericUpDown _numGapY;
-    private Button _btnOk;
-    private Button _btnCancel;
+    private NumericUpDown _numRows = null!;
+    private NumericUpDown _numCols = null!;
+    private NumericUpDown _numGapX = null!;
+    private NumericUpDown _numGapY = null!;
+    private Button _btnOk = null!;
+    private Button _btnCancel = null!;
 
     public GridArrayForm()
     {
