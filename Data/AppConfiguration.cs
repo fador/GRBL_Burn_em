@@ -9,6 +9,7 @@ public class AppConfiguration
 
     public string LastPortName { get; set; } = "";
     public int BaudRate { get; set; } = 115200;
+    public string GCodeGenerator { get; set; } = "Grbl";
 
     private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
 

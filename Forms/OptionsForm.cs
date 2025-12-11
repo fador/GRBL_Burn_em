@@ -7,6 +7,7 @@ public class OptionsForm : Form
 {
     private ComboBox _cbPorts = null!;
     private ComboBox _cbBaud = null!;
+    private ComboBox _cbGenerator = null!;
     private Button _btnSave = null!;
     private Button _btnCancel = null!;
 
@@ -19,7 +20,7 @@ public class OptionsForm : Form
     private void InitializeComponent()
     {
         this.Text = "Options";
-        this.Size = new Size(300, 200);
+        this.Size = new Size(300, 250);
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
@@ -32,8 +33,12 @@ public class OptionsForm : Form
         _cbBaud = new ComboBox { Location = new Point(100, 57), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
         _cbBaud.Items.AddRange(new object[] { 9600, 19200, 38400, 57600, 115200, 230400, 250000 });
 
-        _btnSave = new Button { Text = "Save", Location = new Point(110, 110), DialogResult = DialogResult.OK };
-        _btnCancel = new Button { Text = "Cancel", Location = new Point(195, 110), DialogResult = DialogResult.Cancel };
+        var lblGen = new Label { Text = "Generator:", Location = new Point(20, 100), AutoSize = true };
+        _cbGenerator = new ComboBox { Location = new Point(100, 97), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cbGenerator.Items.AddRange(new object[] { "Grbl", "GCode", "Dummy" });
+
+        _btnSave = new Button { Text = "Save", Location = new Point(110, 150), DialogResult = DialogResult.OK };
+        _btnCancel = new Button { Text = "Cancel", Location = new Point(195, 150), DialogResult = DialogResult.Cancel };
 
         _btnSave.Click += BtnSave_Click;
 
@@ -41,6 +46,8 @@ public class OptionsForm : Form
         this.Controls.Add(_cbPorts);
         this.Controls.Add(lblBaud);
         this.Controls.Add(_cbBaud);
+        this.Controls.Add(lblGen);
+        this.Controls.Add(_cbGenerator);
         this.Controls.Add(_btnSave);
         this.Controls.Add(_btnCancel);
         
@@ -76,6 +83,17 @@ public class OptionsForm : Form
         {
             _cbBaud.SelectedItem = 115200;
         }
+
+        // Select Configured Generator
+        string gen = AppConfiguration.Instance.GCodeGenerator;
+        if (_cbGenerator.Items.Contains(gen))
+        {
+            _cbGenerator.SelectedItem = gen;
+        }
+        else
+        {
+             _cbGenerator.SelectedIndex = 0;
+        }
     }
 
     private void BtnSave_Click(object? sender, EventArgs e)
@@ -88,6 +106,11 @@ public class OptionsForm : Form
         if (_cbBaud.SelectedItem != null && int.TryParse(_cbBaud.SelectedItem.ToString(), out int baud))
         {
             AppConfiguration.Instance.BaudRate = baud;
+        }
+
+        if (_cbGenerator.SelectedItem != null)
+        {
+            AppConfiguration.Instance.GCodeGenerator = _cbGenerator.SelectedItem.ToString() ?? "Grbl";
         }
 
         AppConfiguration.Instance.Save();

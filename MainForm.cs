@@ -5,6 +5,7 @@ using System.ComponentModel;
 using laser_gui_test.Data.Commands;
 using System.Linq;
 using laser_gui_test.Forms;
+using laser_gui_test.Data.Generators;
 
 namespace laser_gui_test;
 
@@ -403,6 +404,12 @@ public partial class MainForm : Form
 
         flow.Controls.Add(btnConnect);
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); // Spacer
+        
+        var btnGenerate = new Button { Text = "Generate G-Code", Width = 200, BackColor = Color.LightBlue };
+        btnGenerate.Click += (s, e) => GenerateGCode();
+        flow.Controls.Add(btnGenerate);
+        flow.Controls.Add(new Label { Text = "--------", AutoSize = true });
+
         flow.Controls.Add(btnStart);
 
         flow.Controls.Add(btnPause);
@@ -572,5 +579,33 @@ public partial class MainForm : Form
         _isUpdatingSelection = false;
 
         return true;
+    }
+
+    private void GenerateGCode()
+    {
+        string generatorName = AppConfiguration.Instance.GCodeGenerator;
+        IGCodeGenerator? generator = null;
+
+        if (generatorName == "Grbl") generator = new GrblGenerator();
+        // Add others here
+
+        if (generator == null)
+        {
+             // Default
+             generator = new GrblGenerator();
+        }
+
+        try
+        {
+            var lines = generator.Generate(ProjectState.Instance.Objects);
+            var gcode = string.Join(Environment.NewLine, lines);
+            
+            using var dlg = new DebugCodeForm(gcode);
+            dlg.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Generation failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 }
