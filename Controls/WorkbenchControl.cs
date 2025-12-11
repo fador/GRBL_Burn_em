@@ -19,9 +19,8 @@ public class WorkbenchControl : Control
     private bool _isPanning = false;
 
     // Grid settings
-    private const float GridSizeCm = 1.0f; // 1 cm
-    private const float Dpi = 96.0f; // Standard screen DPI
-    private float GridInPixels => GridSizeCm / 2.54f * Dpi;
+    private const float GridSizeMm = 10.0f; // 10 mm
+    private float GridStep => GridSizeMm;
 
     public WorkbenchControl()
     {
@@ -46,6 +45,7 @@ public class WorkbenchControl : Control
         DrawGrid(g);
         DrawOrigin(g);
         DrawObjects(g);
+        DrawRulerOverlay(g);
     }
 
     private void DrawGrid(Graphics g)
@@ -53,7 +53,7 @@ public class WorkbenchControl : Control
         var pen = new Pen(Color.LightGray, 1.0f / _zoom);
         
         int lines = 100;
-        float step = GridInPixels;
+        float step = GridStep; // 10.0 world units
 
         for (int i = -lines; i <= lines; i++)
         {
@@ -126,6 +126,41 @@ public class WorkbenchControl : Control
         }
     }
 
+    private void DrawRulerOverlay(Graphics g)
+    {
+        if (ToolManager.Instance.CurrentTool == ToolType.Ruler && _isMeasuring)
+        {
+             using var pen = new Pen(Color.Red, 2.0f / _zoom);
+             pen.DashStyle = DashStyle.Solid;
+             pen.EndCap = LineCap.ArrowAnchor;
+             pen.StartCap = LineCap.DiamondAnchor;
+
+             g.DrawLine(pen, _measureStart, _measureEnd);
+             
+             // Draw Text
+             float dist = (float)Math.Sqrt(Math.Pow(_measureEnd.X - _measureStart.X, 2) + Math.Pow(_measureEnd.Y - _measureStart.Y, 2));
+             PointF mid = new PointF((_measureStart.X + _measureEnd.X)/2, (_measureStart.Y + _measureEnd.Y)/2);
+             
+             string text = $"{dist:F1} mm";
+             
+             // Invert zoom for font size to keep it readable
+             float fontSize = 12.0f / _zoom;
+             if (fontSize < 0.1f) fontSize = 0.1f; // Safety
+             
+             using var font = new Font("Arial", fontSize);
+             using var bgBrush = new SolidBrush(Color.FromArgb(180, Color.White));
+             using var textBrush = new SolidBrush(Color.DarkBlue);
+             
+             var size = g.MeasureString(text, font);
+             // Center text at mid
+             float tx = mid.X - size.Width / 2;
+             float ty = mid.Y - size.Height / 2;
+             
+             g.FillRectangle(bgBrush, tx, ty, size.Width, size.Height);
+             g.DrawString(text, font, textBrush, tx, ty);
+        }
+    }
+
     private PointF _currentMouseWorld;
     private bool _isSelecting = false;
 
@@ -172,6 +207,16 @@ public class WorkbenchControl : Control
             _interactionObject = line;
             _isDragging = true;
             return;
+            return;
+        }
+
+        if (ToolManager.Instance.CurrentTool == ToolType.Ruler)
+        {
+             _isMeasuring = true;
+             _measureStart = worldPos;
+             _measureEnd = worldPos;
+             Invalidate();
+             return;
         }
 
         // 4. Selection Tool
@@ -256,6 +301,11 @@ public class WorkbenchControl : Control
     private bool _isDragging = false; // For creation
     private bool _isMoving = false; // For moving existing objects
     private PointF _dragStartPos; // Used as "Last Mouse Pos" for moving
+    
+    // Ruler
+    private bool _isMeasuring = false;
+    private PointF _measureStart;
+    private PointF _measureEnd;
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
@@ -320,6 +370,13 @@ public class WorkbenchControl : Control
             }
             Invalidate();
             return;
+        }
+        
+        if (_isMeasuring)
+        {
+             _measureEnd = worldPos;
+             Invalidate();
+             return;
         }
 
         // 5. Selection Box
@@ -429,6 +486,12 @@ public class WorkbenchControl : Control
                CommandManager.Instance.Execute(cmd);
             }
             _interactionObject = null;
+        }
+
+        if (_isMeasuring)
+        {
+             _isMeasuring = false;
+             Invalidate();
         }
 
         if (_isMoving)

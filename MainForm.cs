@@ -321,7 +321,8 @@ public partial class MainForm : Form
         {
             { "Select", ToolType.Select },
             { "Line", ToolType.DrawLine },
-            { "Box", ToolType.DrawBox }
+            { "Box", ToolType.DrawBox },
+            { "Ruler", ToolType.Ruler }
         };
 
         foreach (var kvp in toolMap)

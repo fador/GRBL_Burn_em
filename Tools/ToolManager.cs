@@ -6,7 +6,8 @@ public enum ToolType
 {
     Select,
     DrawLine,
-    DrawBox
+    DrawBox,
+    Ruler
 }
 
 public class ToolManager
