@@ -292,6 +292,7 @@ public class WorkbenchControl : Control
         PointF worldPos = ScreenToWorld(e.Location);
         _currentMouseWorld = worldPos;
 
+        // 1. Panning
         if (_isPanning)
         {
             float dx = e.X - _lastMousePos.X;
@@ -302,82 +303,32 @@ public class WorkbenchControl : Control
             Invalidate();
             return;
         }
-        
-        // Cursor Update Logic
-        if (!_isSelecting && !_isDragging && !_isMoving && !_isResizing && !_isPanning)
-        {
-            if (ToolManager.Instance.CurrentTool == ToolType.Select)
-            {
-                // Check handles
-                if (HitTestHandles(worldPos) != -1)
-                {
-                    // Basic cursor for handles, could be specific (SizeNWSE etc) but Default or Cross is fine for now, 
-                    // or let's use SizeAll for now as requested for "moving", but for handles "SizeAll" is ambiguous.
-                    // User asked for "move" cursor when in position to START MOVING an object.
-                    // Handles are for resizing.
-                    // Let's check object hit.
-                    Cursor = Cursors.SizeAll; // Simplify for handles too for now? Or keep Default. 
-                    // Actually handles should probably be SizeNESW etc.
-                    // Let's stick to the request: "changes to the 'move' when mouse is in position where you can start moving an object"
-                }
-                else
-                {
-                    bool hitObject = false;
-                    float hitTolerance = 8.0f / _zoom;
-                    foreach (var obj in ProjectState.Instance.Objects.Reverse())
-                    {
-                        if (obj.HitTest(worldPos, hitTolerance))
-                        {
-                            hitObject = true;
-                            break;
-                        }
-                    }
-                    
-                    if (hitObject)
-                    {
-                        Cursor = Cursors.SizeAll;
-                    }
-                    else
-                    {
-                        Cursor = Cursors.Default;
-                    }
-                }
-            }
-            else
-            {
-                Cursor = Cursors.Default;
-            }
-        }
 
-        if (_isSelecting)
-        {
-            Invalidate(); // Draw selection box
-        }
-        
+        // 2. Resizing
         if (_isResizing)
         {
             UpdateResize(worldPos);
             return;
         }
 
+        // 3. Moving Objects
         if (_isMoving && _interactionObject != null)
         {
-             Cursor = Cursors.SizeAll; // Ensure we keep the move cursor while moving
-             float dx = worldPos.X - _dragStartPos.X;
-             float dy = worldPos.Y - _dragStartPos.Y;
-             
-             // Move all Selected Objects
-             foreach(var obj in ProjectState.Instance.SelectedObjects)
-             {
-                 MoveObject(obj, dx, dy);
-             }
-             
-             _dragStartPos = worldPos; // Update for next delta
-             Invalidate();
-             return;
+            Cursor = Cursors.SizeAll;
+            float dx = worldPos.X - _dragStartPos.X;
+            float dy = worldPos.Y - _dragStartPos.Y;
+            
+            foreach(var obj in ProjectState.Instance.SelectedObjects)
+            {
+                MoveObject(obj, dx, dy);
+            }
+            
+            _dragStartPos = worldPos;
+            Invalidate();
+            return;
         }
 
-
+        // 4. Creating Objects (Dragging)
         if (_isDragging && _interactionObject != null)
         {
             if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
@@ -388,16 +339,50 @@ public class WorkbenchControl : Control
                 float h = Math.Abs(worldPos.Y - _dragStartPos.Y);
                 _interactionObject.Position = new PointF(x, y);
                 _interactionObject.Size = new SizeF(w, h);
-                Invalidate();
             }
             else if (ToolManager.Instance.CurrentTool == ToolType.DrawLine)
             {
                 if (_interactionObject is LaserPath path && path.Points.Count >= 2)
                 {
                     path.Points[1] = worldPos;
-                    Invalidate();
                 }
             }
+            Invalidate();
+            return;
+        }
+
+        // 5. Selection Box
+        if (_isSelecting)
+        {
+            Invalidate();
+            return;
+        }
+
+        // 6. Cursor Updates
+        if (ToolManager.Instance.CurrentTool == ToolType.Select)
+        {
+            if (HitTestHandles(worldPos) != -1)
+            {
+                Cursor = Cursors.SizeAll;
+            }
+            else
+            {
+                float hitTolerance = 8.0f / _zoom;
+                bool hit = false;
+                foreach (var obj in ProjectState.Instance.Objects.Reverse())
+                {
+                    if (obj.HitTest(worldPos, hitTolerance))
+                    {
+                        hit = true;
+                        break;
+                    }
+                }
+                Cursor = hit ? Cursors.SizeAll : Cursors.Default;
+            }
+        }
+        else
+        {
+            Cursor = Cursors.Default;
         }
     }
 
