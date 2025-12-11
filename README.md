@@ -7,7 +7,9 @@ A comprehensive Windows Forms application designed for controlling laser cutters
 - **Advanced Object Management**: Support for grouping, ungrouping, moving, and resizing objects.
 - **Layer System**: Organizes objects into layers for easier management and processing order.
 - **Robust Undo/Redo**: Full history support for all modification actions (Move, Resize, Group, Add).
-- **SVG Support**: Import and process SVG files with `SvgImporter`.
+- **Array Cloning**: Create grid layouts (Rows × Cols) with precise gap control.
+- **Laser Framing**: Trace the job's bounding box with low-power laser to verify positioning.
+- **SVG & Image Support**: Import and process SVG vectors and images with advanced rasterization options (Bicubic handling, segment optimization).
 - **Hardware Control**: Direct serial communication interface for laser machines.
 - **Save/Load**: Persist projects using JSON serialization.
 - **Interactive Workbench**: Custom scalable and pan-able workspace (`WorkbenchControl`).
@@ -61,8 +63,10 @@ dotnet run
     -   **Select**: Click to select objects. Hold Shift to multi-select.
     -   **Move/Resize**: Drag handles to resize, drag body to move.
     -   **Group**: Select multiple objects and use the Group command to treat them as a single unit.
-4.  **Layers**: Manage object visibility and processing order using the layer panel.
-5.  **Serial Control**: Connect to your laser cutter via the Options/Settings menu to stream G-code.
+    -   **Array**: Create multiple copies of selected objects in a grid pattern.
+4.  **Framing**: Use the side panel to set Framing Speed/Power and trace the work area bounds.
+5.  **Layers**: Manage object visibility and processing order using the layer panel.
+6.  **Serial Control**: Connect to your laser cutter via the Options/Settings menu to stream G-code.
 
 ## 🛠 Architecture
 
