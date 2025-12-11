@@ -174,9 +174,12 @@ public class WorkbenchControl : Control
                 
                     // Hit test logic
                     bool hit = false;
+                    // Calculate tolerance based on zoom
+                    float hitTolerance = 8.0f / _zoom; 
+                    
                     foreach (var obj in ProjectState.Instance.Objects.Reverse())
                     {
-                        if (obj.HitTest(worldPos))
+                        if (obj.HitTest(worldPos, hitTolerance))
                         {
                             hit = true;
                             
@@ -235,7 +238,10 @@ public class WorkbenchControl : Control
                     {
                         // Clicked empty space
                         // Start Selection Box
-                        //ProjectState.Instance.SelectedObjects = new List<LaserObject>(); // Clear selection immediately
+                        if (Control.ModifierKeys != Keys.Control)
+                        {
+                            ProjectState.Instance.SelectedObjects = new List<LaserObject>();
+                        }
                         _isSelecting = true;
                         _dragStartPos = worldPos;
                     }
@@ -317,9 +323,10 @@ public class WorkbenchControl : Control
                 else
                 {
                     bool hitObject = false;
+                    float hitTolerance = 8.0f / _zoom;
                     foreach (var obj in ProjectState.Instance.Objects.Reverse())
                     {
-                        if (obj.HitTest(worldPos))
+                        if (obj.HitTest(worldPos, hitTolerance))
                         {
                             hitObject = true;
                             break;
@@ -426,7 +433,20 @@ public class WorkbenchControl : Control
                     list.Add(obj);
                 }
             }
-            ProjectState.Instance.SelectedObjects = list;
+            if (Control.ModifierKeys == Keys.Control)
+            {
+                 var current = new List<LaserObject>(ProjectState.Instance.SelectedObjects);
+                 // Merge and Distinct
+                 foreach(var item in list)
+                 {
+                     if (!current.Contains(item)) current.Add(item);
+                 }
+                 ProjectState.Instance.SelectedObjects = current;
+            }
+            else
+            {
+                ProjectState.Instance.SelectedObjects = list;
+            }
 
             // Popup window listing the selected objects            
             if(false && list.Count > 0)

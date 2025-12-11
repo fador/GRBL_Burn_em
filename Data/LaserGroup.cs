@@ -22,11 +22,11 @@ public class LaserGroup : LaserObject
         }
     }
 
-    public override bool HitTest(PointF point)
+    public override bool HitTest(PointF point, float tolerance)
     {
         foreach (var child in Children)
         {
-            if (child.HitTest(point)) return true;
+            if (child.HitTest(point, tolerance)) return true;
         }
         return false;
     }

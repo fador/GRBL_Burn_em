@@ -27,7 +27,7 @@ public abstract class LaserObject
     public LaserObject? Parent { get; set; }
 
     public abstract void Draw(Graphics g, float scale);
-    public abstract bool HitTest(PointF point);
+    public abstract bool HitTest(PointF point, float tolerance);
     
     public virtual RectangleF GetBounds()
     {
@@ -66,13 +66,10 @@ public class LaserPath : LaserObject
         g.DrawLines(pen, Points.ToArray());
     }
 
-    public override bool HitTest(PointF point)
+    public override bool HitTest(PointF point, float tolerance)
     {
-        const float Tolerance = 10.0f; // Increased for better usability
-        // Actually grid is 1cm = 37.8px. 5px is small.
-        
         // BBox optimization
-        float bBuffer = Tolerance;
+        float bBuffer = tolerance;
         float minX = Points.Min(p => p.X) - bBuffer;
         float minY = Points.Min(p => p.Y) - bBuffer;
         float maxX = Points.Max(p => p.X) + bBuffer;
@@ -83,7 +80,7 @@ public class LaserPath : LaserObject
 
         for (int i = 0; i < Points.Count - 1; i++)
         {
-            if (DistanceToSegment(point, Points[i], Points[i + 1]) <= Tolerance)
+            if (DistanceToSegment(point, Points[i], Points[i + 1]) <= tolerance)
                 return true;
         }
         return false;
@@ -121,24 +118,22 @@ public class LaserRectangle : LaserObject
         g.DrawRectangle(pen, Position.X, Position.Y, Size.Width, Size.Height);
     }
     
-    public override bool HitTest(PointF point)
+    public override bool HitTest(PointF point, float tolerance)
     {
          // Edge-only hit test for Laser Cutting (Hollow)
-         const float Tolerance = 8.0f; 
-         
          float l = Position.X;
          float t = Position.Y;
          float r = l + Size.Width;
          float b = t + Size.Height;
          
-         if (point.X < l - Tolerance || point.X > r + Tolerance || point.Y < t - Tolerance || point.Y > b + Tolerance) 
+         if (point.X < l - tolerance || point.X > r + tolerance || point.Y < t - tolerance || point.Y > b + tolerance) 
              return false;
              
          // Check distance to 4 lines
-         bool hitLeft = Math.Abs(point.X - l) <= Tolerance && point.Y >= t - Tolerance && point.Y <= b + Tolerance;
-         bool hitRight = Math.Abs(point.X - r) <= Tolerance && point.Y >= t - Tolerance && point.Y <= b + Tolerance;
-         bool hitTop = Math.Abs(point.Y - t) <= Tolerance && point.X >= l - Tolerance && point.X <= r + Tolerance;
-         bool hitBottom = Math.Abs(point.Y - b) <= Tolerance && point.X >= l - Tolerance && point.X <= r + Tolerance;
+         bool hitLeft = Math.Abs(point.X - l) <= tolerance && point.Y >= t - tolerance && point.Y <= b + tolerance;
+         bool hitRight = Math.Abs(point.X - r) <= tolerance && point.Y >= t - tolerance && point.Y <= b + tolerance;
+         bool hitTop = Math.Abs(point.Y - t) <= tolerance && point.X >= l - tolerance && point.X <= r + tolerance;
+         bool hitBottom = Math.Abs(point.Y - b) <= tolerance && point.X >= l - tolerance && point.X <= r + tolerance;
          
          return hitLeft || hitRight || hitTop || hitBottom;
     }
@@ -173,8 +168,9 @@ public class LaserImage : LaserObject
         }
     }
 
-    public override bool HitTest(PointF point)
+    public override bool HitTest(PointF point, float tolerance)
     {
+        // For Image, we generally want selection if inside
         return new RectangleF(Position, Size).Contains(point);
     }
 }
@@ -222,7 +218,7 @@ public class LaserText : LaserObject
         this.Size = size;
     }
 
-    public override bool HitTest(PointF point)
+    public override bool HitTest(PointF point, float tolerance)
     {
         // Simple bounding box hit test
         return new RectangleF(Position, Size).Contains(point);
