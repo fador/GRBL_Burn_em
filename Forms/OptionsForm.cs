@@ -10,6 +10,7 @@ public class OptionsForm : Form
     private ComboBox _cbGenerator = null!;
     private NumericUpDown _numWidth = null!;
     private NumericUpDown _numHeight = null!;
+    private NumericUpDown _numInterval = null!;
     private ComboBox _cbOrigin = null!;
     private Button _btnSave = null!;
     private Button _btnCancel = null!;
@@ -50,8 +51,11 @@ public class OptionsForm : Form
         _cbOrigin = new ComboBox { Location = new Point(100, 217), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
         _cbOrigin.Items.AddRange(new object[] { "BottomLeft", "TopLeft", "Center" });
 
-        _btnSave = new Button { Text = "Save", Location = new Point(110, 280), DialogResult = DialogResult.OK };
-        _btnCancel = new Button { Text = "Cancel", Location = new Point(195, 280), DialogResult = DialogResult.Cancel };
+        var lblInterval = new Label { Text = "Line Interval:", Location = new Point(20, 260), AutoSize = true };
+        _numInterval = new NumericUpDown { Location = new Point(100, 257), Width = 150, Minimum = 0.01m, Maximum = 5.0m, DecimalPlaces = 3, Increment = 0.01m };
+
+        _btnSave = new Button { Text = "Save", Location = new Point(110, 320), DialogResult = DialogResult.OK };
+        _btnCancel = new Button { Text = "Cancel", Location = new Point(195, 320), DialogResult = DialogResult.Cancel };
 
         _btnSave.Click += BtnSave_Click;
 
@@ -67,6 +71,8 @@ public class OptionsForm : Form
         this.Controls.Add(_numHeight);
         this.Controls.Add(lblOrg);
         this.Controls.Add(_cbOrigin);
+        this.Controls.Add(lblInterval);
+        this.Controls.Add(_numInterval);
         this.Controls.Add(_btnSave);
         this.Controls.Add(_btnCancel);
         
@@ -116,6 +122,7 @@ public class OptionsForm : Form
 
         _numWidth.Value = (decimal)AppConfiguration.Instance.WorkAreaWidth;
         _numHeight.Value = (decimal)AppConfiguration.Instance.WorkAreaHeight;
+        _numInterval.Value = (decimal)AppConfiguration.Instance.RasterLineInterval;
         
         string org = AppConfiguration.Instance.WorkOrigin;
         if (_cbOrigin.Items.Contains(org)) _cbOrigin.SelectedItem = org;
@@ -141,6 +148,8 @@ public class OptionsForm : Form
 
         AppConfiguration.Instance.WorkAreaWidth = (float)_numWidth.Value;
         AppConfiguration.Instance.WorkAreaHeight = (float)_numHeight.Value;
+        AppConfiguration.Instance.RasterLineInterval = (float)_numInterval.Value;
+
         if(_cbOrigin.SelectedItem != null)
              AppConfiguration.Instance.WorkOrigin = _cbOrigin.SelectedItem.ToString() ?? "BottomLeft";
 

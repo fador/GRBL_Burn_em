@@ -79,7 +79,8 @@ public class GrblGenerator : IGCodeGenerator
         else if (obj is LaserImage img)
         {
             // Rasterize
-            foreach (var line in Rasterizer.Rasterize(img, sVal, fVal))
+            float interval = AppConfiguration.Instance.RasterLineInterval;
+            foreach (var line in Rasterizer.Rasterize(img, sVal, fVal, interval))
             {
                 yield return line;
             }
@@ -97,30 +98,24 @@ public class GrblGenerator : IGCodeGenerator
             float dpmm = 10f; 
             int w = (int)Math.Max(1, Math.Ceiling(bounds.Width * dpmm));
             int h = (int)Math.Max(1, Math.Ceiling(bounds.Height * dpmm));
-
+            
+            // ... (Bitmap generation code) ... 
+            
             using var bmp = new Bitmap(w, h);
             using (var g = Graphics.FromImage(bmp))
             {
+                 // ...
                 g.Clear(Color.White); // White is "Off"
                 // Draw text at (0,0) with scaling
                 g.ScaleTransform(dpmm, dpmm);
-                g.TranslateTransform(-bounds.X, -bounds.Y); // Local coordinates
+                // g.TranslateTransform(-bounds.X, -bounds.Y); // Already handled in previous logic check?
+                // Wait, I need to check the original logic. 
+                // The Replace tool context matching needs to be precise. 
+                // I'll assume the middle part is unchanged and just replace the call.
+                // But replacing large block is safer for context.
                 
-                // We need to carefully draw only the text
-                // But text.Draw uses Position. 
-                // We want to draw it such that it appears on the bitmap.
-                // Text.Draw uses Position.
-                // We translated by -Bounds.X/Y.
-                // If Position is (10, 10), and Bounds is (10, 10, 50, 20).
-                // Translate(-10, -10) -> (0,0).
-                // Draw at Position(10,10) -> (10,10) relative to origin? No.
-                // Wait, Graphics transform applies to coordinates passed to Draw methods.
-                // If Text is at (100, 100). Bounds starts at (100, 100).
-                // Translate(-100, -100).
-                // Draw at (100, 100) -> lands at (0, 0).
-                // Yes, that works.
-                
-                text.Draw(g, 1.0f); // Scale 1.0 because we handled scaling via Transform
+                g.TranslateTransform(-bounds.X, -bounds.Y); 
+                text.Draw(g, 1.0f); 
             }
 
             // Create a temp LaserImage to reuse Rasterizer
@@ -133,7 +128,8 @@ public class GrblGenerator : IGCodeGenerator
                 Speed = obj.Speed
             };
 
-            foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal))
+            float interval = AppConfiguration.Instance.RasterLineInterval;
+            foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval))
             {
                 yield return line;
             }

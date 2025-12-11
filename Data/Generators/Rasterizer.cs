@@ -5,7 +5,7 @@ namespace laser_gui_test.Data.Generators;
 
 public static class Rasterizer
 {
-    public static IEnumerable<string> Rasterize(LaserImage image, float maxPower, float speed)
+    public static IEnumerable<string> Rasterize(LaserImage image, float maxPower, float speed, float lineInterval)
     {
         if (image.Image == null) yield break;
 
@@ -23,20 +23,28 @@ public static class Rasterizer
         float height = image.Size.Height;
         
         float pixelWidth = width / bmp.Width;
-        float pixelHeight = height / bmp.Height;
+        // Pixel Height is now determined by lineInterval for scanning.
+        // But we still need mapping to bitmap.
 
         bool direction = true; // Zig-zag scanning: true = right, false = left
 
-        for (int y = 0; y < bmp.Height; y++)
+        // Number of lines
+        int numLines = (int)Math.Truncate(height / lineInterval);
+
+        for (int i = 0; i <= numLines; i++)
         {
             // Calculate physical Y
             // Y-Up: StartY is Bottom. StartY + Height is Top.
-            // Scanlines normally go Top to Bottom for image rastering?
-            // Or we scan the logic Y?
-            // y=0 is Top of bitmap.
-            // So y=0 matches Physical Top (StartY + Height).
-            // y=H matches Physical Bottom (StartY).
-            float currentY = (startY + height) - (y * pixelHeight) - (pixelHeight / 2); // Center of pixel
+            // i=0 -> Top.
+            float currentY = (startY + height) - (i * lineInterval);
+            
+            // Map to Bitmap Y
+            // relativeY from Top = i * lineInterval.
+            // Scale to Bitmap Height.
+            int y = (int)((i * lineInterval) / height * bmp.Height);
+            
+            if (y < 0) y = 0;
+            if (y >= bmp.Height) y = bmp.Height - 1;
             
             // Move to start of line (fast move)
             // Left-to-Right
