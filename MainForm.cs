@@ -420,8 +420,9 @@ public partial class MainForm : Form
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true });
         
         var flowGroup = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
-        var btnGroup = new Button { Text = "Group", Width = 95 };
-        var btnUngroup = new Button { Text = "Ungroup", Width = 95 };
+        var btnGroup = new Button { Text = "Group", Width = 60 };
+        var btnUngroup = new Button { Text = "Ungroup", Width = 60 };
+        var btnArray = new Button { Text = "Array", Width = 60 };
         
         btnGroup.Click += (s, e) => 
         {
@@ -433,9 +434,23 @@ public partial class MainForm : Form
             var sel = ProjectState.Instance.SelectedObjects;
             if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
         };
+        btnArray.Click += (s, e) =>
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 0) return;
+            
+            using var dlg = new GridArrayForm();
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                var cmd = new CloneArrayCommand(sel, dlg.Rows, dlg.Cols, dlg.GapX, dlg.GapY);
+                CommandManager.Instance.Execute(cmd);
+                _workbench.Invalidate();
+            }
+        };
         
         flowGroup.Controls.Add(btnGroup);
         flowGroup.Controls.Add(btnUngroup);
+        flowGroup.Controls.Add(btnArray);
         flow.Controls.Add(flowGroup);
         
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); 

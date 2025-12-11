@@ -34,6 +34,8 @@ public abstract class LaserObject
     {
         return new RectangleF(Position, Size);
     }
+
+    public abstract LaserObject Clone();
 }
 
 public class LaserPath : LaserObject
@@ -99,6 +101,24 @@ public class LaserPath : LaserObject
 
     private float Dist(PointF p1, PointF p2) => (float)Math.Sqrt(DistSq(p1, p2));
     private float DistSq(PointF p1, PointF p2) => (p1.X - p2.X) * (p1.X - p2.X) + (p1.Y - p2.Y) * (p1.Y - p2.Y);
+
+    public override LaserObject Clone()
+    {
+        var clone = new LaserPath
+        {
+            Id = Guid.NewGuid(),
+            Name = this.Name + " (Copy)",
+            LayerId = this.LayerId,
+            IsEnabled = this.IsEnabled,
+            Power = this.Power,
+            Speed = this.Speed,
+            Position = this.Position,
+            Rotation = this.Rotation,
+            Size = this.Size,
+            Points = this.Points.ToList() 
+        };
+        return clone;
+    }
 }
 
 public class LaserRectangle : LaserObject
@@ -137,6 +157,23 @@ public class LaserRectangle : LaserObject
          bool hitBottom = Math.Abs(point.Y - b) <= tolerance && point.X >= l - tolerance && point.X <= r + tolerance;
          
          return hitLeft || hitRight || hitTop || hitBottom;
+    }
+
+    public override LaserObject Clone()
+    {
+        var clone = new LaserRectangle
+        {
+            Id = Guid.NewGuid(),
+            Name = this.Name + " (Copy)",
+            LayerId = this.LayerId,
+            IsEnabled = this.IsEnabled,
+            Power = this.Power,
+            Speed = this.Speed,
+            Position = this.Position,
+            Rotation = this.Rotation,
+            Size = this.Size
+        };
+        return clone;
     }
 }
 
@@ -197,6 +234,28 @@ public class LaserImage : LaserObject
         // For Image, we generally want selection if inside
         return new RectangleF(Position, Size).Contains(point);
     }
+
+    public override LaserObject Clone()
+    {
+        var clone = new LaserImage
+        {
+            Id = Guid.NewGuid(),
+            Name = this.Name + " (Copy)",
+            LayerId = this.LayerId,
+            IsEnabled = this.IsEnabled,
+            Power = this.Power,
+            Speed = this.Speed,
+            Position = this.Position,
+            Rotation = this.Rotation,
+            Size = this.Size,
+            ImagePath = this.ImagePath
+        };
+        if (this.Image != null)
+        {
+            clone.Image = new Bitmap(this.Image);
+        }
+        return clone;
+    }
 }
 
 public class LaserText : LaserObject
@@ -256,5 +315,25 @@ public class LaserText : LaserObject
     {
         // Simple bounding box hit test
         return new RectangleF(Position, Size).Contains(point);
+    }
+
+    public override LaserObject Clone()
+    {
+        var clone = new LaserText
+        {
+            Id = Guid.NewGuid(),
+            Name = this.Name + " (Copy)",
+            LayerId = this.LayerId,
+            IsEnabled = this.IsEnabled,
+            Power = this.Power,
+            Speed = this.Speed,
+            Position = this.Position,
+            Rotation = this.Rotation,
+            Size = this.Size,
+            Text = this.Text,
+            FontName = this.FontName,
+            FontSize = this.FontSize
+        };
+        return clone;
     }
 }

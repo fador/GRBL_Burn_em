@@ -73,4 +73,26 @@ public class LaserGroup : LaserObject
     
     // Let's implement Position updating logic later in Workbench or Command.
     // For now, pure data structure.
+    public override LaserObject Clone()
+    {
+        var clone = new LaserGroup
+        {
+            Id = Guid.NewGuid(),
+            Name = this.Name + " (Copy)",
+            LayerId = this.LayerId,
+            IsEnabled = this.IsEnabled,
+            Power = this.Power,
+            Speed = this.Speed,
+            Position = this.Position,
+            Rotation = this.Rotation,
+            Size = this.Size,
+            Children = this.Children.Select(c => c.Clone()).ToList()
+        };
+        // Fix parent references if we had them?
+        foreach(var child in clone.Children)
+        {
+            child.Parent = clone;
+        }
+        return clone;
+    }
 }
