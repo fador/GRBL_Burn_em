@@ -235,7 +235,7 @@ public class WorkbenchControl : Control
                     {
                         // Clicked empty space
                         // Start Selection Box
-                        ProjectState.Instance.SelectedObjects = new List<LaserObject>(); // Clear selection immediately
+                        //ProjectState.Instance.SelectedObjects = new List<LaserObject>(); // Clear selection immediately
                         _isSelecting = true;
                         _dragStartPos = worldPos;
                     }
@@ -297,6 +297,51 @@ public class WorkbenchControl : Control
             return;
         }
         
+        // Cursor Update Logic
+        if (!_isSelecting && !_isDragging && !_isMoving && !_isResizing && !_isPanning)
+        {
+            if (ToolManager.Instance.CurrentTool == ToolType.Select)
+            {
+                // Check handles
+                if (HitTestHandles(worldPos) != -1)
+                {
+                    // Basic cursor for handles, could be specific (SizeNWSE etc) but Default or Cross is fine for now, 
+                    // or let's use SizeAll for now as requested for "moving", but for handles "SizeAll" is ambiguous.
+                    // User asked for "move" cursor when in position to START MOVING an object.
+                    // Handles are for resizing.
+                    // Let's check object hit.
+                    Cursor = Cursors.SizeAll; // Simplify for handles too for now? Or keep Default. 
+                    // Actually handles should probably be SizeNESW etc.
+                    // Let's stick to the request: "changes to the 'move' when mouse is in position where you can start moving an object"
+                }
+                else
+                {
+                    bool hitObject = false;
+                    foreach (var obj in ProjectState.Instance.Objects.Reverse())
+                    {
+                        if (obj.HitTest(worldPos))
+                        {
+                            hitObject = true;
+                            break;
+                        }
+                    }
+                    
+                    if (hitObject)
+                    {
+                        Cursor = Cursors.SizeAll;
+                    }
+                    else
+                    {
+                        Cursor = Cursors.Default;
+                    }
+                }
+            }
+            else
+            {
+                Cursor = Cursors.Default;
+            }
+        }
+
         if (_isSelecting)
         {
             Invalidate(); // Draw selection box
@@ -310,6 +355,7 @@ public class WorkbenchControl : Control
 
         if (_isMoving && _interactionObject != null)
         {
+             Cursor = Cursors.SizeAll; // Ensure we keep the move cursor while moving
              float dx = worldPos.X - _dragStartPos.X;
              float dy = worldPos.Y - _dragStartPos.Y;
              
@@ -383,7 +429,7 @@ public class WorkbenchControl : Control
             ProjectState.Instance.SelectedObjects = list;
 
             // Popup window listing the selected objects            
-            if(0 && list.Count > 0)
+            if(false && list.Count > 0)
             {
                 var selectedObjectsForm = new SelectedObjectsForm(list);
                 selectedObjectsForm.ShowDialog();
