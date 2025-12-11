@@ -5,10 +5,10 @@ namespace laser_gui_test.Forms;
 
 public class OptionsForm : Form
 {
-    private ComboBox _cbPorts;
-    private ComboBox _cbBaud;
-    private Button _btnSave;
-    private Button _btnCancel;
+    private ComboBox _cbPorts = null!;
+    private ComboBox _cbBaud = null!;
+    private Button _btnSave = null!;
+    private Button _btnCancel = null!;
 
     public OptionsForm()
     {

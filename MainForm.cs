@@ -10,11 +10,11 @@ namespace laser_gui_test;
 
 public partial class MainForm : Form
 {
-    private WorkbenchControl _workbench;
-    private DataGridView _objectList;
-    private FlowLayoutPanel _layerPanel;
-    private FlowLayoutPanel _toolsPanel;
-    private GroupBox _controlPanel;
+    private WorkbenchControl _workbench = null!;
+    private DataGridView _objectList = null!;
+    private FlowLayoutPanel _layerPanel = null!;
+    private FlowLayoutPanel _toolsPanel = null!;
+    private GroupBox _controlPanel = null!;
 
     public MainForm()
     {

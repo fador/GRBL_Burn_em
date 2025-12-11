@@ -16,7 +16,7 @@ public class ProjectDataDto
 public abstract class LaserObjectDto
 {
     public Guid Id { get; set; }
-    public string Name { get; set; }
+    public string Name { get; set; } = "";
     public Guid LayerId { get; set; }
     public bool IsEnabled { get; set; }
     public float Power { get; set; }
@@ -28,20 +28,20 @@ public abstract class LaserObjectDto
 
 public class LaserPathDto : LaserObjectDto
 {
-    public List<PointF> Points { get; set; }
+    public List<PointF> Points { get; set; } = new();
 }
 
 public class LaserRectangleDto : LaserObjectDto { }
 
 public class LaserImageDto : LaserObjectDto
 {
-    public string ImagePath { get; set; }
+    public string ImagePath { get; set; } = "";
 }
 
 public class LaserTextDto : LaserObjectDto
 {
-    public string Text { get; set; }
-    public string FontName { get; set; }
+    public string Text { get; set; } = "";
+    public string FontName { get; set; } = "Arial";
     public float FontSize { get; set; }
 }
 

@@ -15,7 +15,7 @@ public enum LaserObjectType
 public abstract class LaserObject
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public string Name { get; set; }
+    public string Name { get; set; } = "Object";
     public Guid LayerId { get; set; }
     public bool IsEnabled { get; set; } = true;
     public float Power { get; set; } = 100f; // 0-100%
