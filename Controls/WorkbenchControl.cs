@@ -718,8 +718,118 @@ public class WorkbenchControl : Control
         float newH = newB - newT;
         
         // Determine Scale Factors
+        // Determine Scale Factors
         float scaleX = (b.Width == 0) ? 1 : newW / b.Width;
         float scaleY = (b.Height == 0) ? 1 : newH / b.Height;
+
+        // Aspect Ratio Lock (Ctrl)
+        if (Control.ModifierKeys == Keys.Control)
+        {
+            // Determine if corner or side
+            bool isCorner = (_dragHandleIndex == 0 || _dragHandleIndex == 2 || _dragHandleIndex == 4 || _dragHandleIndex == 6);
+            bool isTopBottom = (_dragHandleIndex == 1 || _dragHandleIndex == 5);
+            bool isLeftRight = (_dragHandleIndex == 3 || _dragHandleIndex == 7);
+
+            float lockedScale = 1.0f;
+
+            if (isCorner)
+            {
+                // Take the larger scale change magnitude
+                lockedScale = (Math.Abs(scaleX) > Math.Abs(scaleY)) ? scaleX : scaleY; 
+                // However, we want to look at the aspect ratio of the inputs? 
+                // e.g. if I drag X way out, I want Y to match.
+                // The above logic does simple max magnitude. 
+                // But we must respect the SIGN of the other axis.
+                // Actually, if we lock aspect, we usually preserve the original "flippedness" relative to the drag?
+                // If I drag TL to BR (flip both), scaleX and scaleY are both negative. lockedScale negative. Correct.
+                
+                // If I drag TL to TR (flip Y only) -> scaleY negative. scaleX positive.
+                // If I start from TL and move Mouse to TR...
+                // newW is positive (width decreases then increases?). 
+                // Wait, logic: newW = newR - newL.
+                // If I drag TL past TR, newL > newR --> newW negative.
+                
+                // We desire scaleX and scaleY to have the SAME MAGNITUDE.
+                // What about signs?
+                // If I'm doing a uniform scale, signs usually match?
+                // Or do we allow flipping one axis while keeping the other?
+                // "Aspect Ratio Lock" usually implies keeping the shape 1:1.
+                // So scaleX should equal scaleY (ignoring signs? No).
+                // Let's enforce: scaleX_new = lockedScale * sign(scaleX_original)? 
+                // No, just scaleX = scaleY = lockedScale?
+                // If I flip horizontally, I usually expect the image to flip vertically too if "Locked"?
+                // Let's stick to: scaleX = sign(scaleX) * MaxMag; scaleY = sign(scaleY) * MaxMag.
+                float mag = Math.Max(Math.Abs(scaleX), Math.Abs(scaleY));
+                scaleX = Math.Sign(scaleX) * mag;
+                scaleY = Math.Sign(scaleY) * mag;
+                
+                // For Corner: scaleX and scaleY usually have consistent signs with the drag quadrant.
+            }
+            else if (isTopBottom)
+            {
+                // Height drives Width
+                scaleX = Math.Sign(scaleX) * Math.Abs(scaleY); // Maintain X sign but take Y magnitude?
+                // Actually if I pull Top, ScaleX is 1.0 (unchanged) in raw.
+                // I want to scale X by the same amount I scaled Y.
+                scaleX = Math.Abs(scaleY); // Assume X positive
+                // Center scaling for X? Handled below.
+            }
+            else if (isLeftRight)
+            {
+                // Width drives Height
+                scaleY = Math.Abs(scaleX);
+            }
+            
+            // Recalculate Bounds
+            float finalW = b.Width * scaleX;
+            float finalH = b.Height * scaleY;
+            
+            // Re-apply to L/T/R/B based on Anchor
+            // Handle 0 (TL): Right/Bottom fixed.
+            if (_dragHandleIndex == 0) { newL = b.Right - finalW; newT = b.Bottom - finalH; }
+            
+            // Handle 1 (T): Bottom fixed. Center X.
+            if (_dragHandleIndex == 1) 
+            { 
+                 newT = b.Bottom - finalH; 
+                 float cx = (b.Left + b.Right) / 2;
+                 newL = cx - finalW / 2;
+                 newR = cx + finalW / 2; // Not used for object pos calculation but needed if we relied on newR later? No, loop updates from newL/newT.
+            }
+            
+            // Handle 2 (TR): Left/Bottom fixed.
+            if (_dragHandleIndex == 2) { newL = b.Left; newT = b.Bottom - finalH; } // Width extends from Left. Height extends from Bottom.
+            
+            // Handle 3 (R): Left fixed. Center Y.
+            if (_dragHandleIndex == 3)
+            {
+                newL = b.Left;
+                float cy = (b.Top + b.Bottom) / 2;
+                newT = cy - finalH / 2;
+            }
+            
+            // Handle 4 (BR): Left/Top fixed.
+            if (_dragHandleIndex == 4) { newL = b.Left; newT = b.Top; }
+            
+            // Handle 5 (B): Top fixed. Center X.
+            if (_dragHandleIndex == 5)
+            {
+                newT = b.Top;
+                float cx = (b.Left + b.Right) / 2;
+                newL = cx - finalW / 2;
+            }
+
+            // Handle 6 (BL): Right/Top fixed.
+            if (_dragHandleIndex == 6) { newL = b.Right - finalW; newT = b.Top; }
+            
+            // Handle 7 (L): Right fixed. Center Y.
+            if (_dragHandleIndex == 7)
+            {
+                newL = b.Right - finalW;
+                float cy = (b.Top + b.Bottom) / 2;
+                newT = cy - finalH / 2;
+            }
+        }
         
         // Apply to objects
         foreach (var kvp in _initialStates)
