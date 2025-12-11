@@ -22,6 +22,12 @@ public partial class MainForm : Form
 
     private bool _isUpdatingSelection = false;
 
+    private NumericUpDown _numPosX = null!;
+    private NumericUpDown _numPosY = null!;
+    private NumericUpDown _numSizeW = null!;
+    private NumericUpDown _numSizeH = null!;
+    private bool _isUpdatingUI = false;
+
     public MainForm()
     {
         InitializeComponent();
@@ -451,11 +457,91 @@ public partial class MainForm : Form
         flowGroup.Controls.Add(btnGroup);
         flowGroup.Controls.Add(btnUngroup);
         flowGroup.Controls.Add(btnArray);
+        
         flow.Controls.Add(flowGroup);
+        
+        // --- Transform / Properties ---
+        var grpProps = new GroupBox { Text = "Transform", Width = 200, Height = 140 };
+        var pnlProps = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4 };
+        
+        pnlProps.Controls.Add(new Label { Text = "X (mm):", AutoSize = true }, 0, 0);
+        _numPosX = new NumericUpDown { DecimalPlaces = 2, Minimum = -1000, Maximum = 1000, Width = 80 };
+        pnlProps.Controls.Add(_numPosX, 1, 0);
+
+        pnlProps.Controls.Add(new Label { Text = "Y (mm):", AutoSize = true }, 0, 1);
+        _numPosY = new NumericUpDown { DecimalPlaces = 2, Minimum = -1000, Maximum = 1000, Width = 80 };
+        pnlProps.Controls.Add(_numPosY, 1, 1);
+
+        pnlProps.Controls.Add(new Label { Text = "Width:", AutoSize = true }, 0, 2);
+        _numSizeW = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 1000, Width = 80 };
+        pnlProps.Controls.Add(_numSizeW, 1, 2);
+
+        pnlProps.Controls.Add(new Label { Text = "Height:", AutoSize = true }, 0, 3);
+        _numSizeH = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 1000, Width = 80 };
+        pnlProps.Controls.Add(_numSizeH, 1, 3);
+        
+        grpProps.Controls.Add(pnlProps);
+        flow.Controls.Add(grpProps);
+        
+        // Logic for Properties
+        EventHandler valChanged = (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1)
+            {
+                var obj = sel[0];
+                float nx = (float)_numPosX.Value;
+                float ny = (float)_numPosY.Value;
+                float nw = (float)_numSizeW.Value;
+                float nh = (float)_numSizeH.Value;
+                
+                // Only create command if changed
+                if(Math.Abs(obj.Position.X - nx) > 0.01 || Math.Abs(obj.Position.Y - ny) > 0.01)
+                {
+                     // Move Absolute? MoveCommand is Relative.
+                     float dx = nx - obj.Position.X;
+                     float dy = ny - obj.Position.Y;
+                     CommandManager.Instance.Execute(new MoveCommand(sel, dx, dy));
+                }
+                
+                if(Math.Abs(obj.Size.Width - nw) > 0.01 || Math.Abs(obj.Size.Height - nh) > 0.01)
+                {
+                     // Resize? ResizeCommand expects Dictionary of States.
+                     var oldState = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)>();
+                     var newState = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)>();
+                     
+                     oldState[obj] = (obj.Position, obj.Size, (obj as LaserPath)?.Points?.ToList());
+                     
+                     // We need to set the new size directly on a temp object or calculate expected state?
+                     // Actually ResizeCommand takes "New States".
+                     // So we construct what we WANT.
+                     var newSz = new SizeF(nw, nh);
+                     newState[obj] = (obj.Position, newSz, (obj as LaserPath)?.Points?.ToList()); // Points scaling is tricky here without UpdateResize logic.
+                     // For simple Width/Height update, we might need a dedicated command or careful scaling.
+                     // IMPORTANT: Setting Size directly might not scale points for Paths.
+                     // Checking LaserObject.cs...
+                }
+            }
+        };
+        
+        _numPosX.ValueChanged += valChanged;
+        _numPosY.ValueChanged += valChanged;
+        // Size updates are tricky for Paths, limiting to Position for robust MVP or carefully implementing.
+        // Let's allow Position editing fully. Size editing... maybe just disables for Paths?
+        // Or we implement a "SetBounds" method that scales?
+        // Let's wire Position first.
+        
+        // Snapping Toggle
+        var chkSnap = new CheckBox { Text = "Snap to Grid", AutoSize = true };
+        chkSnap.CheckedChanged += (s, e) => { _workbench.IsSnappingEnabled = chkSnap.Checked; };
+        flow.Controls.Add(chkSnap);
+
+        flow.Controls.Add(new Label { Text = "--------", AutoSize = true });
         
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); 
 
-        // Framing
+        // Drawing Framing
         var grpFraming = new GroupBox { Text = "Framing", Width = 200, Height = 140 };
         var flowFraming = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown };
         
@@ -528,7 +614,6 @@ public partial class MainForm : Form
                     {
                         if (ProjectState.Instance.ActiveLayer != null)
                              obj.LayerId = ProjectState.Instance.ActiveLayer.Id;
-                        // Don't add directly, let Execute do it
                     }
                     CommandManager.Instance.Execute(cmd);
                 }
@@ -577,6 +662,8 @@ public partial class MainForm : Form
             }
         }
     }
+
+
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if (keyData == (Keys.Control | Keys.Z))
@@ -615,6 +702,39 @@ public partial class MainForm : Form
 
     public bool UpdateSelectedObjects()
     {
+        _workbench.Invalidate();
+        var sel = ProjectState.Instance.SelectedObjects;
+        
+        _isUpdatingUI = true;
+        if (sel.Count == 1)
+        {
+            var obj = sel[0];
+            _numPosX.Enabled = true;
+            _numPosY.Enabled = true;
+            _numSizeW.Enabled = true;
+            _numSizeH.Enabled = true;
+            
+            _numPosX.Value = (decimal)obj.Position.X;
+            _numPosY.Value = (decimal)obj.Position.Y;
+            _numSizeW.Value = (decimal)obj.Size.Width;
+            _numSizeH.Value = (decimal)obj.Size.Height;
+        }
+        else
+        {
+            _numPosX.Enabled = false;
+            _numPosY.Enabled = false;
+            _numSizeW.Enabled = false;
+            _numSizeH.Enabled = false;
+            
+            _numPosX.Value = 0;
+            _numPosY.Value = 0;
+            _numSizeW.Value = 0;
+            _numSizeH.Value = 0;
+        }
+        _isUpdatingUI = false;
+        
+        // Update layer buttons based on selection?
+        
         _isUpdatingSelection = true;
         var current = new HashSet<LaserObject>(ProjectState.Instance.SelectedObjects);
         

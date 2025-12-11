@@ -12,6 +12,7 @@ public class OptionsForm : Form
     private NumericUpDown _numHeight = null!;
     private NumericUpDown _numInterval = null!;
     private NumericUpDown _numMinSegment = null!;
+    private NumericUpDown _numSnapGrid = null!;
     private CheckBox _chkBicubic = null!;
     private ComboBox _cbOrigin = null!;
     private Button _btnSave = null!;
@@ -59,6 +60,9 @@ public class OptionsForm : Form
         var lblMinSeg = new Label { Text = "Min Seg (mm):", Location = new Point(20, 300), AutoSize = true };
         _numMinSegment = new NumericUpDown { Location = new Point(100, 297), Width = 150, Minimum = 0m, Maximum = 10.0m, DecimalPlaces = 2, Increment = 0.1m };
 
+        var lblSnap = new Label { Text = "Snap Grid (mm):", Location = new Point(20, 340), AutoSize = true };
+        _numSnapGrid = new NumericUpDown { Location = new Point(100, 337), Width = 150, Minimum = 0.1m, Maximum = 100.0m, DecimalPlaces = 2, Increment = 0.5m };
+
         _chkBicubic = new CheckBox { Text = "Bicubic Resampling", Location = new Point(100, 340), AutoSize = true };
 
         _btnSave = new Button { Text = "Save", Location = new Point(110, 400), DialogResult = DialogResult.OK };
@@ -82,6 +86,8 @@ public class OptionsForm : Form
         this.Controls.Add(_numInterval);
         this.Controls.Add(lblMinSeg);
         this.Controls.Add(_numMinSegment);
+        this.Controls.Add(lblSnap);
+        this.Controls.Add(_numSnapGrid);
         this.Controls.Add(_chkBicubic);
         this.Controls.Add(_btnSave);
         this.Controls.Add(_btnCancel);
@@ -134,6 +140,7 @@ public class OptionsForm : Form
         _numHeight.Value = (decimal)AppConfiguration.Instance.WorkAreaHeight;
         _numInterval.Value = (decimal)AppConfiguration.Instance.RasterLineInterval;
         _numMinSegment.Value = (decimal)AppConfiguration.Instance.MinRasterSegmentLength;
+        _numSnapGrid.Value = (decimal)AppConfiguration.Instance.SnapGridSize;
         _chkBicubic.Checked = AppConfiguration.Instance.EnableBicubicResampling;
         
         string org = AppConfiguration.Instance.WorkOrigin;
@@ -162,6 +169,7 @@ public class OptionsForm : Form
         AppConfiguration.Instance.WorkAreaHeight = (float)_numHeight.Value;
         AppConfiguration.Instance.RasterLineInterval = (float)_numInterval.Value;
         AppConfiguration.Instance.MinRasterSegmentLength = (float)_numMinSegment.Value;
+        AppConfiguration.Instance.SnapGridSize = (float)_numSnapGrid.Value;
         AppConfiguration.Instance.EnableBicubicResampling = _chkBicubic.Checked;
 
         if(_cbOrigin.SelectedItem != null)

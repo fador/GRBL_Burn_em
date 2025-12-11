@@ -9,6 +9,8 @@ using laser_gui_test.Tools;
 using laser_gui_test.Data.Commands;
 using laser_gui_test.Forms;
 
+using System.ComponentModel;
+
 namespace laser_gui_test.Controls;
 
 public class WorkbenchControl : Control
@@ -21,6 +23,19 @@ public class WorkbenchControl : Control
     // Grid settings
     private const float GridSizeMm = 10.0f; // 10 mm
     private float GridStep => GridSizeMm;
+    
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool IsSnappingEnabled { get; set; } = false;
+    public float SnapInterval => AppConfiguration.Instance.SnapGridSize;
+
+    private PointF Snap(PointF p)
+    {
+        if (!IsSnappingEnabled) return p;
+        float interval = SnapInterval;
+        float x = (float)Math.Round(p.X / interval) * interval;
+        float y = (float)Math.Round(p.Y / interval) * interval;
+        return new PointF(x, y);
+    }
 
     public WorkbenchControl()
     {
@@ -233,7 +248,9 @@ public class WorkbenchControl : Control
         if (e.Button == MouseButtons.Left && !_isPanning) ResetInteractionState();
 
         PointF worldPos = ScreenToWorld(e.Location);
-        _currentMouseWorld = worldPos;
+        _currentMouseWorld = worldPos; // Keep raw for selection hit testing
+        
+        PointF snappedPos = Snap(worldPos);
 
         // 2. Panning (Right Click)
         if (e.Button == MouseButtons.Right)
@@ -249,19 +266,19 @@ public class WorkbenchControl : Control
         // 3. Creation Tools
         if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
         {
-            var box = new LaserRectangle { Name = "Rectangle", Position = worldPos, Size = new SizeF(0, 0) };
+            var box = new LaserRectangle { Name = "Rectangle", Position = snappedPos, Size = new SizeF(0, 0) };
             ProjectState.Instance.AddObject(box);
             _interactionObject = box;
             _isDragging = true;
-            _dragStartPos = worldPos;
+            _dragStartPos = snappedPos;
             return;
         }
         
         if (ToolManager.Instance.CurrentTool == ToolType.DrawLine)
         {
-            var line = new LaserPath { Name = "Line", Position = worldPos };
-            line.Points.Add(worldPos);
-            line.Points.Add(worldPos); 
+            var line = new LaserPath { Name = "Line", Position = snappedPos };
+            line.Points.Add(snappedPos);
+            line.Points.Add(snappedPos); 
             ProjectState.Instance.AddObject(line);
             _interactionObject = line;
             _isDragging = true;
@@ -286,7 +303,13 @@ public class WorkbenchControl : Control
             {
                 _dragHandleIndex = handle;
                 _isResizing = true;
-                _dragStartPos = worldPos;
+                _dragStartPos = snappedPos; // Snap start of resize too? Maybe or maybe raw? Resizing logic snaps Current.
+                                            // Ideally we want Consistent Logic. 
+                                            // If we snap Current, we should snap Start to avoid jumps?
+                                            // But Handle might not be on grid.
+                                            // Let's use Raw for Start? No, UpdateResize uses Absolute position.
+                                            // So _dragStartPos is not used for Resize delta.
+                                            // It is used for hit test though.
                 _initialGroupBounds = GetSelectionBounds();
                 SnapshotSelection();
                 Invalidate();
@@ -315,11 +338,13 @@ public class WorkbenchControl : Control
                     {
                         newSelection.Add(hitObj);
                         ProjectState.Instance.SelectedObjects = newSelection;
+                        newSelection.Add(hitObj);
+                        ProjectState.Instance.SelectedObjects = newSelection;
                         // Prepare for move
                         _interactionObject = hitObj;
                         _isMoving = true;
-                        _dragStartPos = worldPos;
-                        _moveStartPos = worldPos;
+                        _dragStartPos = snappedPos;
+                        _moveStartPos = snappedPos;
                     }
                 }
                 else
@@ -330,8 +355,8 @@ public class WorkbenchControl : Control
                         // Clicked on already selected object -> Prepare for move (Group move)
                         _interactionObject = hitObj;
                         _isMoving = true;
-                        _dragStartPos = worldPos;
-                        _moveStartPos = worldPos;
+                        _dragStartPos = snappedPos;
+                        _moveStartPos = snappedPos;
                     }
                     else
                     {
@@ -339,8 +364,8 @@ public class WorkbenchControl : Control
                         ProjectState.Instance.SelectedObjects = new List<LaserObject> { hitObj };
                         _interactionObject = hitObj;
                         _isMoving = true;
-                        _dragStartPos = worldPos;
-                        _moveStartPos = worldPos;
+                        _dragStartPos = snappedPos;
+                        _moveStartPos = snappedPos;
                     }
                 }
             }
@@ -369,7 +394,11 @@ public class WorkbenchControl : Control
     {
         base.OnMouseMove(e);
         PointF worldPos = ScreenToWorld(e.Location);
-        _currentMouseWorld = worldPos;
+        _currentMouseWorld = worldPos; // Raw for some interactions? 
+                                       // Actually, effective mouse world should be Snapped for creation/move.
+                                       // But for selection hit testing it should be raw.
+                                       
+        PointF effectivePos = Snap(worldPos);
 
         // 1. Panning
         if (_isPanning)
@@ -386,7 +415,7 @@ public class WorkbenchControl : Control
         // 2. Resizing
         if (_isResizing)
         {
-            UpdateResize(worldPos);
+            UpdateResize(effectivePos); // Snap resize handle
             return;
         }
 
@@ -394,28 +423,69 @@ public class WorkbenchControl : Control
         if (_isMoving && _interactionObject != null)
         {
             Cursor = Cursors.SizeAll;
-            float dx = worldPos.X - _dragStartPos.X;
-            float dy = worldPos.Y - _dragStartPos.Y;
+            // Calculate delta based on Effective Positions to ensure we move in steps
+            float dx = effectivePos.X - Snap(_dragStartPos).X; // Delta from Snapped Start to Snapped Current
+            float dy = effectivePos.Y - Snap(_dragStartPos).Y;
+            
+            // If we didn't snap _dragStartPos at global level, we might get offsets.
+            // Best practice: When starting drag, we record the "Anchor" relative to Object?
+            // Or just Delta.
+            // If I click at 10.5 and move to 11.5 (Snap=1.0). Snap(10.5)=11. Snap(11.5)=12. dx=1.
+            // If I click at 10.1 and move to 10.9. Snap(10)=10. Snap(11)=11. dx=1. Correct.
             
             foreach(var obj in ProjectState.Instance.SelectedObjects)
             {
-                MoveObject(obj, dx, dy);
+                 // MoveObject accumulates? No, MoveObject is absolute or relative?
+                 // MoveObject implementation adds dx/dy to current. 
+                 // Wait, we emit MoveCOmmand with TOTAL delta.
+                 // But interactively we call MoveObject.
+                 // We need to RESET object position and re-apply total delta?
+                 // Or we apply incremental delta?
+                 // The current OnMouseMove logic:
+                 // float dx = worldPos.X - _dragStartPos.X;
+                 // Loop MoveObject(obj, dx, dy).
+                 // _dragStartPos = worldPos;
+                 // This is INCREMENTAL.
+                 
+                 // If we use Snapped values for incremental:
+                 // _dragStartPos must be updated to the Snapped value used for calculation?
+                 // Logic:
+                 // dx = effectivePos.X - _lastSnappedPos.X
+                 // MoveObject(dx)
+                 // _lastSnappedPos = effectivePos
             }
             
-            _dragStartPos = worldPos;
+            float incDx = effectivePos.X - _dragStartPos.X; // _dragStartPos here acts as "Last Pos"
+            float incDy = effectivePos.Y - _dragStartPos.Y;
+            
+            if (Math.Abs(incDx) > 0.0001 || Math.Abs(incDy) > 0.0001)
+            {
+                foreach(var obj in ProjectState.Instance.SelectedObjects)
+                {
+                    MoveObject(obj, incDx, incDy);
+                }
+                _dragStartPos = effectivePos; // Update to the position we moved TO
+            }
+            
             Invalidate();
+            MainForm.Instance.UpdateSelectedObjects(); // Update UI
             return;
         }
 
         // 4. Creating Objects (Dragging)
         if (_isDragging && _interactionObject != null)
         {
+            PointF start = Snap(_dragStartPos); // This might have been raw on MouseDown?
+            // If we want start to be snapped, we should have snapped it on MouseDown or here.
+            // Let's assume DragStartPos IS snapped if we handled it in MouseDown? 
+            // Or we just map it here.
+            
             if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
             {
-                float x = Math.Min(_dragStartPos.X, worldPos.X);
-                float y = Math.Min(_dragStartPos.Y, worldPos.Y);
-                float w = Math.Abs(worldPos.X - _dragStartPos.X);
-                float h = Math.Abs(worldPos.Y - _dragStartPos.Y);
+                float x = Math.Min(start.X, effectivePos.X);
+                float y = Math.Min(start.Y, effectivePos.Y);
+                float w = Math.Abs(effectivePos.X - start.X);
+                float h = Math.Abs(effectivePos.Y - start.Y);
                 _interactionObject.Position = new PointF(x, y);
                 _interactionObject.Size = new SizeF(w, h);
             }
@@ -423,7 +493,8 @@ public class WorkbenchControl : Control
             {
                 if (_interactionObject is LaserPath path && path.Points.Count >= 2)
                 {
-                    path.Points[1] = worldPos;
+                    path.Points[0] = start; // Ensure start point is snapped too if we want
+                    path.Points[1] = effectivePos;
                 }
             }
             Invalidate();
@@ -713,11 +784,23 @@ public class WorkbenchControl : Control
         if (_dragHandleIndex == 2 || _dragHandleIndex == 3 || _dragHandleIndex == 4) newR = currentPos.X;
         if (_dragHandleIndex == 4 || _dragHandleIndex == 5 || _dragHandleIndex == 6) newB = currentPos.Y;
         
-        // Validate inverted bounds (flip if needed, but for now simple clamp or allow flip)
+            // Validate inverted bounds
         float newW = newR - newL;
         float newH = newB - newT;
         
-        // Determine Scale Factors
+        // Size Snapping
+        if (IsSnappingEnabled)
+        {
+            float interval = SnapInterval;
+            if (Math.Abs(interval) > 0.001f)
+            {
+                newW = (float)Math.Round(newW / interval) * interval;
+                newH = (float)Math.Round(newH / interval) * interval;
+                if (newW < interval) newW = interval; // Min size?
+                if (newH < interval) newH = interval;
+            }
+        }
+
         // Determine Scale Factors
         float scaleX = (b.Width == 0) ? 1 : newW / b.Width;
         float scaleY = (b.Height == 0) ? 1 : newH / b.Height;
@@ -736,47 +819,16 @@ public class WorkbenchControl : Control
             {
                 // Take the larger scale change magnitude
                 lockedScale = (Math.Abs(scaleX) > Math.Abs(scaleY)) ? scaleX : scaleY; 
-                // However, we want to look at the aspect ratio of the inputs? 
-                // e.g. if I drag X way out, I want Y to match.
-                // The above logic does simple max magnitude. 
-                // But we must respect the SIGN of the other axis.
-                // Actually, if we lock aspect, we usually preserve the original "flippedness" relative to the drag?
-                // If I drag TL to BR (flip both), scaleX and scaleY are both negative. lockedScale negative. Correct.
-                
-                // If I drag TL to TR (flip Y only) -> scaleY negative. scaleX positive.
-                // If I start from TL and move Mouse to TR...
-                // newW is positive (width decreases then increases?). 
-                // Wait, logic: newW = newR - newL.
-                // If I drag TL past TR, newL > newR --> newW negative.
-                
-                // We desire scaleX and scaleY to have the SAME MAGNITUDE.
-                // What about signs?
-                // If I'm doing a uniform scale, signs usually match?
-                // Or do we allow flipping one axis while keeping the other?
-                // "Aspect Ratio Lock" usually implies keeping the shape 1:1.
-                // So scaleX should equal scaleY (ignoring signs? No).
-                // Let's enforce: scaleX_new = lockedScale * sign(scaleX_original)? 
-                // No, just scaleX = scaleY = lockedScale?
-                // If I flip horizontally, I usually expect the image to flip vertically too if "Locked"?
-                // Let's stick to: scaleX = sign(scaleX) * MaxMag; scaleY = sign(scaleY) * MaxMag.
                 float mag = Math.Max(Math.Abs(scaleX), Math.Abs(scaleY));
                 scaleX = Math.Sign(scaleX) * mag;
                 scaleY = Math.Sign(scaleY) * mag;
-                
-                // For Corner: scaleX and scaleY usually have consistent signs with the drag quadrant.
             }
             else if (isTopBottom)
             {
-                // Height drives Width
-                scaleX = Math.Sign(scaleX) * Math.Abs(scaleY); // Maintain X sign but take Y magnitude?
-                // Actually if I pull Top, ScaleX is 1.0 (unchanged) in raw.
-                // I want to scale X by the same amount I scaled Y.
-                scaleX = Math.Abs(scaleY); // Assume X positive
-                // Center scaling for X? Handled below.
+                scaleX = Math.Abs(scaleY); // Maintain X sign but take Y magnitude? No, just match Y scale.
             }
             else if (isLeftRight)
             {
-                // Width drives Height
                 scaleY = Math.Abs(scaleX);
             }
             
@@ -794,11 +846,11 @@ public class WorkbenchControl : Control
                  newT = b.Bottom - finalH; 
                  float cx = (b.Left + b.Right) / 2;
                  newL = cx - finalW / 2;
-                 newR = cx + finalW / 2; // Not used for object pos calculation but needed if we relied on newR later? No, loop updates from newL/newT.
+                 newR = cx + finalW / 2;
             }
             
             // Handle 2 (TR): Left/Bottom fixed.
-            if (_dragHandleIndex == 2) { newL = b.Left; newT = b.Bottom - finalH; } // Width extends from Left. Height extends from Bottom.
+            if (_dragHandleIndex == 2) { newL = b.Left; newT = b.Bottom - finalH; }
             
             // Handle 3 (R): Left fixed. Center Y.
             if (_dragHandleIndex == 3)
@@ -855,6 +907,7 @@ public class WorkbenchControl : Control
             }
         }
         Invalidate();
+        MainForm.Instance.UpdateSelectedObjects(); // Immediate UI update
     }
     
     private void MoveObject(LaserObject obj, float dx, float dy)
