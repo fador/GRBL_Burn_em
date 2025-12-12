@@ -14,8 +14,13 @@ namespace laser_gui_test.Forms
         private Bitmap? _sourceImage;
         private Bitmap? _canvas;
         private System.Windows.Forms.Timer _timer;
+        
+        // Scanning State
+        private int _currentX = 0;
         private int _currentY = 0;
-        private int _rowsPerTick = 5;
+        private int _scanSpeed = 150; // Pixels per tick (Horizontal speed)
+        private int _scanLineHeight = 20; // Number of rows processed per pass (Thicker beam for speed)
+        
         private float _laserIntensity = 0f;
         
         // Heat Map for "Cooling" effect (0.0 = Original Color, 1.0 = Grayscale/Hot)
@@ -70,7 +75,7 @@ namespace laser_gui_test.Forms
             }
 
             _timer = new System.Windows.Forms.Timer();
-            _timer.Interval = 30; // Faster tick for smoother animation
+            _timer.Interval = 15; // High refresh rate for smooth scanning
             _timer.Tick += Timer_Tick;
             _timer.Start();
         }
@@ -96,23 +101,19 @@ namespace laser_gui_test.Forms
                 return;
             }
 
-            // 1. Update Sparks (Cleanup dead ones first)
+            // 1. Update Sparks
             for (int i = _sparks.Count - 1; i >= 0; i--)
             {
                 var s = _sparks[i];
                 s.X += s.VX;
                 s.Y += s.VY;
-                s.VY += 0.8f; // Stronger gravity
-                s.Life -= 30; // Die much faster (Optimize: Short lifespan)
-                
-                // Update in place
+                s.VY += 0.8f; 
+                s.Life -= 30; 
                 _sparks[i] = s;
-
-                if (s.Life <= 0) 
-                    _sparks.RemoveAt(i);
+                if (s.Life <= 0) _sparks.RemoveAt(i);
             }
 
-            // 2. Process Pixels (Using Marshal.Copy for Managed Performance)
+            // 2. Process Scanning
             Rectangle rect = new Rectangle(0, 0, _canvas.Width, _canvas.Height);
             BitmapData srcData = _sourceImage.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
             BitmapData destData = _canvas.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
@@ -125,84 +126,95 @@ namespace laser_gui_test.Forms
                 byte[] srcBuffer = new byte[bytes];
                 byte[] destBuffer = new byte[bytes];
 
-                // Copy data from unmanaged memory to managed arrays
                 Marshal.Copy(srcData.Scan0, srcBuffer, 0, bytes);
                 Marshal.Copy(destData.Scan0, destBuffer, 0, bytes);
 
                 int width = _canvas.Width;
                 int height = _canvas.Height;
-                int stride = srcData.Stride; // Assume strides are equal for same size/format bitmaps
-                int bpp = 4; // ARGB
+                int stride = srcData.Stride;
+                int bpp = 4;
 
-                // A. Process New Rows (The Laser Cut)
-                int endY = Math.Min(_currentY + _rowsPerTick, height);
-                
-                // Only process if we haven't finished scanning
-                if (_currentY < height)
+                // A. Laser Cutting (Scanning Left to Right)
+                int steps = 0;
+                while (steps < _scanSpeed && _currentY < height)
                 {
-                    for (int y = _currentY; y < endY; y++)
+                    // Process a vertical strip at _currentX (Height = _scanLineHeight)
+                    int yStart = _currentY;
+                    int yEnd = Math.Min(_currentY + _scanLineHeight, height);
+
+                    // Mark these rows as HOT (Reset fade delay)
+                    for (int h = yStart; h < yEnd; h++)
+                        _rowHeat[h] = 2.5f; 
+
+                    for (int y = yStart; y < yEnd; y++)
                     {
-                        int rowOffset = y * stride;
-                        _rowHeat[y] = 2.0f; // Start extra hot (delay fade slightly)
+                        int idx = (y * stride) + (_currentX * bpp);
+                        
+                        byte b = srcBuffer[idx];
+                        byte g = srcBuffer[idx + 1];
+                        byte r = srcBuffer[idx + 2];
+                        byte a = srcBuffer[idx + 3];
 
-                        for (int x = 0; x < width; x++)
+                        float brightness = (0.299f * r + 0.587f * g + 0.114f * b) / 255f;
+                        float visualIntensity = 1.0f - brightness;
+
+                        if (visualIntensity > currentTickMaxDarkness) 
+                            currentTickMaxDarkness = visualIntensity;
+
+                        // Initial Burn (Grayscale)
+                        byte gray = (byte)(brightness * 255);
+                        
+                        destBuffer[idx] = gray;     
+                        destBuffer[idx + 1] = gray; 
+                        destBuffer[idx + 2] = gray; 
+                        destBuffer[idx + 3] = a;    
+
+                        // Sparks
+                        if (visualIntensity > 0.2f && _rnd.NextDouble() < (visualIntensity * 0.05)) 
                         {
-                            int idx = rowOffset + (x * bpp);
-                            byte b = srcBuffer[idx];
-                            byte g = srcBuffer[idx + 1];
-                            byte r = srcBuffer[idx + 2];
-                            byte a = srcBuffer[idx + 3];
-
-                            // Quick brightness calc
-                            float brightness = (0.299f * r + 0.587f * g + 0.114f * b) / 255f;
-                            float visualIntensity = 1.0f - brightness;
-
-                            if (visualIntensity > currentTickMaxDarkness) 
-                                currentTickMaxDarkness = visualIntensity;
-
-                            // Initial "Burn" (Grayscale)
-                            byte gray = (byte)(brightness * 255);
-                            
-                            destBuffer[idx] = gray;     // B
-                            destBuffer[idx + 1] = gray; // G
-                            destBuffer[idx + 2] = gray; // R
-                            destBuffer[idx + 3] = a;    // A
-
-                            // Spawn Spark (Optimized Chance)
-                            if (visualIntensity > 0.2f && _rnd.NextDouble() < (visualIntensity * 0.05)) 
-                            {
-                                _sparks.Add(new Spark 
-                                { 
-                                    X = x, Y = y, 
-                                    VX = (float)(_rnd.NextDouble() * 6 - 3), 
-                                    VY = (float)(_rnd.NextDouble() * -6 - 3), 
-                                    Life = 255,
-                                    BaseColor = (gray < 80) ? Color.Gold : Color.OrangeRed 
-                                });
-                            }
+                            _sparks.Add(new Spark 
+                            { 
+                                X = _currentX, Y = y, 
+                                VX = (float)(_rnd.NextDouble() * 4 - 2), 
+                                VY = (float)(_rnd.NextDouble() * -5 - 2), 
+                                Life = 255,
+                                BaseColor = (gray < 80) ? Color.Gold : Color.OrangeRed 
+                            });
                         }
                     }
-                    _currentY = endY;
+
+                    // Move Horizontal
+                    _currentX++;
+                    
+                    // Wrap around (Carriage Return)
+                    if (_currentX >= width)
+                    {
+                        _currentX = 0;
+                        _currentY += _scanLineHeight;
+                        if (_currentY >= height) break;
+                    }
+                    steps++;
                 }
 
-                // B. Update Cooling Rows (The Fade In)
+                // B. Update Cooling Rows (Fade In)
                 int scanLimitY = Math.Min(_currentY, height);
                 
                 for (int y = 0; y < scanLimitY; y++)
                 {
-                    if (_rowHeat[y] <= 0) continue; // Already cooled
+                    // Don't cool the lines currently being cut
+                    if (y >= _currentY && y < _currentY + _scanLineHeight) continue;
 
-                    _rowHeat[y] -= 0.1f; // Cooling speed
+                    if (_rowHeat[y] <= 0) continue; 
+
+                    _rowHeat[y] -= 0.05f; // Slower fade for better effect
                     if (_rowHeat[y] < 0) _rowHeat[y] = 0;
 
                     float heat = _rowHeat[y];
-                    if (heat > 1.0f) heat = 1.0f; // Clamp visual blend factor
+                    if (heat > 1.0f) heat = 1.0f; 
 
-                    // Only blend if heat is changing
                     if (heat < 1.0f) 
                     {
                         int rowOffset = y * stride;
-
                         for (int x = 0; x < width; x++)
                         {
                             int idx = rowOffset + (x * bpp);
@@ -210,11 +222,9 @@ namespace laser_gui_test.Forms
                             byte g_src = srcBuffer[idx + 1];
                             byte r_src = srcBuffer[idx + 2];
                             
-                            // Get current "burned" gray value
                             float lum = (0.299f * r_src + 0.587f * g_src + 0.114f * b_src);
                             byte gray = (byte)lum;
 
-                            // Lerp
                             destBuffer[idx] = (byte)(b_src + (gray - b_src) * heat);
                             destBuffer[idx + 1] = (byte)(g_src + (gray - g_src) * heat);
                             destBuffer[idx + 2] = (byte)(r_src + (gray - r_src) * heat);
@@ -222,7 +232,6 @@ namespace laser_gui_test.Forms
                     }
                 }
 
-                // Copy modified data back to unmanaged memory
                 Marshal.Copy(destBuffer, 0, destData.Scan0, bytes);
             }
             finally
@@ -231,12 +240,11 @@ namespace laser_gui_test.Forms
                 _canvas.UnlockBits(destData);
             }
             
-            // 3. Laser Physics & Completion Check
+            // 3. Completion Check
             if (_currentY >= _sourceImage.Height)
             {
-                // Ensure all heat is gone before quitting? Or just check sparks
                 bool allCooled = true;
-                for(int k=0; k<_sourceImage.Height; k+=10) // check sparsely
+                for(int k=0; k<_sourceImage.Height; k+=10)
                     if (_rowHeat[k] > 0) { allCooled = false; break; }
 
                 if (_sparks.Count == 0 && allCooled)
@@ -246,29 +254,20 @@ namespace laser_gui_test.Forms
                 }
             }
 
-            // Smooth laser intensity based on actual pixel darkness
             _laserIntensity += (currentTickMaxDarkness - _laserIntensity) * 0.3f;
-
             this.Invalidate();
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            // Do not call base.OnPaint(e) for full control
-            
             if (_canvas != null)
                 e.Graphics.DrawImage(_canvas, 0, 0);
 
-            // Draw Sparks (Optimized)
-            // Grouping isn't strictly necessary for < 500 sparks, but nice for logic
+            // Draw Sparks
             foreach (var s in _sparks)
             {
-                // Simple pixel pushing is faster than creating brushes if we had unsafe access here,
-                // but for GDI+, FillRectangle is okay for low counts.
-                // Alpha fade
                 int a = s.Life; 
-                if (a > 255) a = 255;
-                if (a < 0) a = 0;
+                if (a > 255) a = 255; else if (a < 0) a = 0;
 
                 using (var brush = new SolidBrush(Color.FromArgb(a, s.BaseColor)))
                 {
@@ -276,53 +275,42 @@ namespace laser_gui_test.Forms
                 }
             }
 
-            // Draw Laser "Galvo" Beam
-            if (_currentY < Height && _currentY > 0)
+            // Draw Focused Laser Beam
+            if (_currentY < Height)
             {
-                int y = _currentY;
                 int alpha = (int)(_laserIntensity * 255);
                 if (alpha > 255) alpha = 255;
+                if (alpha < 50) alpha = 50; // Always show faint beam
+
+                // Source: Top Right Corner
+                Point pSource = new Point(Width, 0);
                 
-                // Beam Origin (Top Right Corner)
-                Point origin = new Point(Width, 0); 
+                // Target: Current Cutting Head (Center of scanline block)
+                Point pTarget = new Point(_currentX, _currentY + (_scanLineHeight/2));
                 
-                // Laser Fan (Triangle to the current line)
-                if (alpha > 10)
+                // 1. Draw The Beam
+                using (var beamPen = new Pen(Color.FromArgb(alpha, 255, 50, 50), 2))
                 {
-                    Point p1 = new Point(0, y);
-                    Point p2 = new Point(Width, y);
-                    Point pCenter = new Point(Width / 2, y);
+                    e.Graphics.DrawLine(beamPen, pSource, pTarget);
+                }
 
-                    // 1. Fill the "Volume" of the beam (Solid "Sheet" of light instead of fade)
-                    using (var brush = new SolidBrush(Color.FromArgb(alpha / 4, 255, 0, 0)))
-                    {
-                         e.Graphics.FillPolygon(brush, new Point[] { origin, p1, p2 });
-                    }
+                // 2. Beam Core (Brighter, thinner)
+                using (var corePen = new Pen(Color.FromArgb(alpha, 255, 200, 200), 1))
+                {
+                    e.Graphics.DrawLine(corePen, pSource, pTarget);
+                }
 
-                    // 2. Draw defined edges to make it look like a contained beam
-                    using (var edgePen = new Pen(Color.FromArgb(alpha / 2, 255, 0, 0), 2))
-                    {
-                        e.Graphics.DrawLine(edgePen, origin, p1);
-                        e.Graphics.DrawLine(edgePen, origin, p2);
-                    }
+                // 3. Contact Point Glow
+                int glowSize = 6 + (int)(_laserIntensity * 10);
+                using (var brush = new SolidBrush(Color.FromArgb((int)(alpha * 0.8), 255, 150, 50)))
+                {
+                    e.Graphics.FillEllipse(brush, pTarget.X - glowSize/2, pTarget.Y - glowSize/2, glowSize, glowSize);
+                }
 
-                    // 3. Draw a "Core" ray to simulate intensity/focus
-                    using (var corePen = new Pen(Color.FromArgb(alpha, 255, 200, 200), 1))
-                    {
-                        e.Graphics.DrawLine(corePen, origin, pCenter);
-                    }
-
-                    // 4. Bright hot line at the cut position
-                    using (var burnPen = new Pen(Color.FromArgb(alpha, 255, 255, 255), 2))
-                    {
-                        e.Graphics.DrawLine(burnPen, 0, y, Width, y);
-                    }
-                    
-                    // 5. Impact Glow
-                    using (var brush = new SolidBrush(Color.FromArgb((int)(alpha * 0.4), 255, 100, 50)))
-                    {
-                        e.Graphics.FillRectangle(brush, 0, y - 2, Width, 5);
-                    }
+                // 4. White Hot Center
+                using (var brush = new SolidBrush(Color.FromArgb(255, 255, 255, 255)))
+                {
+                    e.Graphics.FillEllipse(brush, pTarget.X - 2, pTarget.Y - 2, 4, 4);
                 }
             }
         }
