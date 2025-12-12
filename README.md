@@ -4,15 +4,33 @@ A comprehensive Windows Forms application designed for controlling laser cutters
 
 ## ✨ Key Features
 
-- **Advanced Object Management**: Support for grouping, ungrouping, moving, and resizing objects.
-- **Layer System**: Organizes objects into layers for easier management and processing order.
-- **Robust Undo/Redo**: Full history support for all modification actions (Move, Resize, Group, Add).
-- **Array Cloning**: Create grid layouts (Rows × Cols) with precise gap control.
-- **Laser Framing**: Trace the job's bounding box with low-power laser to verify positioning.
-- **SVG & Image Support**: Import and process SVG vectors and images with advanced rasterization options (Bicubic handling, segment optimization).
-- **Hardware Control**: Direct serial communication interface for laser machines.
-- **Save/Load**: Persist projects using JSON serialization.
-- **Interactive Workbench**: Custom scalable and pan-able workspace (`WorkbenchControl`).
+### Object Management & Design
+- **Advanced Transformations**: Move, resize, and rotate objects with precision. Supports robust negative scaling (flipping).
+- **Group/Ungroup**: Organize complex designs by grouping multiple objects.
+- **Grid Array**: Quickly replicate selected objects in a configurable Row × Column grid.
+- **Creation Tools**: Draw Lines and Rectangles directly on the canvas.
+- **Ruler Tool**: Measure distances on the workbench for precise alignment.
+- **Snap-to-Grid**: Toggleable alignment aid with configurable grid size.
+
+### Import & Processing
+- **SVG Import**: High-fidelity vector import with configurable curve smoothness (flatness control) for perfect circles and ellipses.
+- **Image Rasterization**: Import bitmaps (PNG, JPG, BMP) with advanced raster settings:
+  - Configurable Line Interval (resolution).
+  - Minimum Segment Length optimization.
+  - Bicubic Resampling for high-quality scaling.
+- **Layer System**: Color-coded layers to organize parts of your design.
+
+### Machine Control & G-Code
+- **G-Code Generation**: Built-in generator compatible with Grbl controllers.
+- **Framing**: Trace the bounding box of your design with the laser (low power) to verify positioning before cutting.
+- **Serial Connection**: Direct COM port streaming with connection status monitoring.
+- **G-Code Preview**: Debug viewer to inspect the generated G-code before sending.
+
+### Quality of Life
+- **Robust Undo/Redo**: Full history support for all modification actions.
+- **Interactive Workbench**: Smooth Pan (Right-click dragging) and Zoom (Scroll wheel) navigation.
+- **Project Persistence**: Save and Load full project states via JSON.
+- **Customizable Options**: Configure workspace dimensions, origin point, connection defaults, and UI preferences (e.g., Skip Splash Screen).
 
 ## 📁 Project Structure
 
@@ -21,6 +39,7 @@ The solution is organized into logical components:
 ### `Data/`
 Core data models and logic:
 - **Models**: `LaserObject`, `LaserGroup`, `Layer`, `ProjectState`.
+- **Generators**: `GrblGenerator`, `Rasterizer` (Image to G-code logic).
 - **Commands**: Implementation of the Command Pattern (`ICommand`, `CommandManager`) handling undo/redo operations.
 - **IO**: `ProjectSerializer`, `SvgImporter`.
 - **Hardware**: `SerialInterface`.
@@ -30,12 +49,13 @@ Custom User Interface controls:
 - **WorkbenchControl**: The primary drawing surface handling user input, rendering, and tool interactions.
 
 ### `Forms/`
-Secondary windows and dialogs:
-- **OptionsForm**: Application settings and configuration.
-- **MainForm**: The primary application window (located in root).
+- **MainForm**: The primary application window.
+- **OptionsForm**: Comprehensive settings dialog for Machine, Connection, Import, and View preferences.
+- **DebugCodeForm**: Viewer for generated G-code.
+- **GridArrayForm**: Dialog for parameterizing array creation.
 
 ### `Tools/`
-- **ToolManager**: Manages active tools (Select, Move, Draw, etc.) and their interactions with the workbench.
+- **ToolManager**: Manages active tools (Select, DrawLine, DrawBox, Ruler) and their state.
 
 ## 🚀 Getting Started
 
@@ -57,18 +77,25 @@ dotnet run
 
 ## 🎮 Usage
 
-1.  **Workbench**: The main area where you design your job. Right-click to pan, scroll to zoom.
-2.  **Importing**: Use `File -> Import` to load SVG vector graphics or images.
-3.  **Manipulation**:
-    -   **Select**: Click to select objects. Hold Shift to multi-select.
-    -   **Move/Resize**: Drag handles to resize, drag body to move.
-    -   **Group**: Select multiple objects and use the Group command to treat them as a single unit.
-    -   **Array**: Create multiple copies of selected objects in a grid pattern.
-4.  **Framing**: Use the side panel to set Framing Speed/Power and trace the work area bounds.
-5.  **Layers**: Manage object visibility and processing order using the layer panel.
-6.  **Serial Control**: Connect to your laser cutter via the Options/Settings menu to stream G-code.
+1.  **Workbench Navigation**: 
+    -   **Pan**: Right-click and drag.
+    -   **Zoom**: Mouse scroll wheel.
+2.  **Tools Panel** (Left):
+    -   **Select**: Click to select, drag box to area select. Drag handles to resize.
+    -   **Line/Box**: Draw primitives.
+    -   **Ruler**: Measure distances.
+3.  **Importing**: 
+    -   Use `File -> Import` to load designs.
+    -   Configure quality settings in `File -> Options -> Import` (e.g., SVG Curve Flatness).
+4.  **Modification**:
+    -   Use the **Control Panel** (Right) to precisely set X, Y, Width, and Height.
+    -   **Group/Ungroup** and **Array** buttons help manage complex compositions.
+5.  **Output**:
+    -   **Framing**: Set Power/Speed and click "Frame Bounds" to preview the job area.
+    -   **Generate G-Code**: Create and view the text file for the machine.
+    -   **Connect**: Establish serial connection to stream the job.
 
 ## 🛠 Architecture
 
--   **Command Pattern**: All state-modifying actions are encapsulated as commands (`MoveCommand`, `GroupCommand`, etc.), allowing for a robust Undo/Redo stack managed by `CommandManager`.
--   **Composite Pattern**: `LaserGroup` and `LaserObject` allow for treating individual objects and groups of objects uniformly.
+-   **Command Pattern**: All state-modifying actions use `MoveCommand`, `GroupCommand`, `ResizeCommand`, etc., ensuring rock-solid Undo/Redo capability.
+-   **Singleton State**: `ProjectState` and `AppConfiguration` provide centralized access to the application data and settings.
