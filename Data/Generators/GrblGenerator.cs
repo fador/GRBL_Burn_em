@@ -83,8 +83,9 @@ public class GrblGenerator : IGCodeGenerator
             float interval = AppConfiguration.Instance.RasterLineInterval;
             float minSeg = AppConfiguration.Instance.MinRasterSegmentLength;
             bool bicubic = AppConfiguration.Instance.EnableBicubicResampling;
+            bool dither = AppConfiguration.Instance.Enable1BitDithering;
             
-            foreach (var line in Rasterizer.Rasterize(img, sVal, fVal, interval, minSeg, bicubic))
+            foreach (var line in Rasterizer.Rasterize(img, sVal, fVal, interval, minSeg, bicubic, dither))
             {
                 yield return line;
             }
@@ -131,8 +132,9 @@ public class GrblGenerator : IGCodeGenerator
             // If interval is 0.3mm, we are "downscaling" the rows.
             // Bicubic might help if interval > 0.1mm.
             bool bicubic = AppConfiguration.Instance.EnableBicubicResampling;
+            bool dither = AppConfiguration.Instance.Enable1BitDithering;
 
-            foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval, minSeg, bicubic))
+            foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval, minSeg, bicubic, dither))
             {
                 yield return line;
             }

@@ -14,6 +14,7 @@ public class OptionsForm : Form
     private NumericUpDown _numMinSegment = null!;
     private NumericUpDown _numSnapGrid = null!;
     private CheckBox _chkBicubic = null!;
+    private CheckBox _chkDither = null!;
     private CheckBox _chkSkipSplash = null!;
     private ComboBox _cbOrigin = null!;
     private Button _btnSave = null!;
@@ -29,7 +30,7 @@ public class OptionsForm : Form
     private void InitializeComponent()
     {
         this.Text = "Options";
-        this.Size = new Size(400, 450);
+        this.Size = new Size(400, 480);
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
@@ -89,12 +90,14 @@ public class OptionsForm : Form
         _numMinSegment = new NumericUpDown { Location = new Point(160, 67), Width = 120, Minimum = 0m, Maximum = 10.0m, DecimalPlaces = 2, Increment = 0.1m };
 
         _chkBicubic = new CheckBox { Text = "Bicubic Resampling", Location = new Point(20, 110), AutoSize = true };
+        _chkDither = new CheckBox { Text = "Enable 1-bit Dithering", Location = new Point(20, 140), AutoSize = true };
 
         tabRaster.Controls.Add(lblInterval);
         tabRaster.Controls.Add(_numInterval);
         tabRaster.Controls.Add(lblMinSeg);
         tabRaster.Controls.Add(_numMinSegment);
         tabRaster.Controls.Add(_chkBicubic);
+        tabRaster.Controls.Add(_chkDither);
         tabs.TabPages.Add(tabRaster);
 
         // --- View / Grid Tab ---
@@ -184,6 +187,7 @@ public class OptionsForm : Form
         _numMinSegment.Value = (decimal)AppConfiguration.Instance.MinRasterSegmentLength;
         _numSnapGrid.Value = (decimal)AppConfiguration.Instance.SnapGridSize;
         _chkBicubic.Checked = AppConfiguration.Instance.EnableBicubicResampling;
+        _chkDither.Checked = AppConfiguration.Instance.Enable1BitDithering;
         _chkSkipSplash.Checked = AppConfiguration.Instance.SkipSplashScreen;
         
         decimal q = (decimal)AppConfiguration.Instance.SvgCurveQuality;
@@ -219,6 +223,7 @@ public class OptionsForm : Form
         AppConfiguration.Instance.MinRasterSegmentLength = (float)_numMinSegment.Value;
         AppConfiguration.Instance.SnapGridSize = (float)_numSnapGrid.Value;
         AppConfiguration.Instance.EnableBicubicResampling = _chkBicubic.Checked;
+        AppConfiguration.Instance.Enable1BitDithering = _chkDither.Checked;
         AppConfiguration.Instance.SkipSplashScreen = _chkSkipSplash.Checked;
         AppConfiguration.Instance.SvgCurveQuality = (float)_numSvgQuality.Value;
 

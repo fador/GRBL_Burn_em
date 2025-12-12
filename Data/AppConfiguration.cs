@@ -22,6 +22,7 @@ public class AppConfiguration
     public float SnapGridSize { get; set; } = 1.0f;
     public bool SkipSplashScreen { get; set; } = false;
     public float SvgCurveQuality { get; set; } = 0.002f; // Lower is better quality (more points)
+    public bool Enable1BitDithering { get; set; } = false;
 
     private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
 

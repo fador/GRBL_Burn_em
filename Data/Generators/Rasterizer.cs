@@ -6,7 +6,7 @@ namespace laser_gui_test.Data.Generators;
 
 public static class Rasterizer
 {
-    public static IEnumerable<string> Rasterize(LaserImage image, float maxPower, float speed, float lineInterval, float minSegmentLength, bool enableBicubic)
+    public static IEnumerable<string> Rasterize(LaserImage image, float maxPower, float speed, float lineInterval, float minSegmentLength, bool enableBicubic, bool enableDithering)
     {
         if (image.Image == null) yield break;
 
@@ -34,6 +34,8 @@ public static class Rasterizer
         // Check if resize is needed (dimensions differ)
         if (image.Image.Width != targetW || image.Image.Height != targetH)
         {
+             // If dithering is enabled, we MUST resize first, THEN dither.
+             // Quality scaling is good here because it gives us a better source for dithering.
              scanBmp = new Bitmap(targetW, targetH);
              using (var g = Graphics.FromImage(scanBmp))
              {
@@ -49,10 +51,21 @@ public static class Rasterizer
         }
         else
         {
-             // Even if dimensions match, if user really wants 'Bicubic' on an image that is already 1:1, 
-             // it doesn't do anything. Usage implies scaling.
              scanBmp = image.Image;
              disposeBmp = false;
+        }
+        
+        // Helper to clone if we need to modify pixels (Dithering modifies in-place) without touching original
+        if (enableDithering && !disposeBmp)
+        {
+            scanBmp = new Bitmap(image.Image);
+            disposeBmp = true;
+        }
+
+        // Apply Dithering if enabled
+        if (enableDithering)
+        {
+            ApplyDithering(scanBmp);
         }
 
         float pixelWidth = width / scanBmp.Width;
@@ -85,6 +98,9 @@ public static class Rasterizer
                 float intensity = (255f - gray) / 255f; // 0.0 to 1.0
                 intensity *= pixel.A / 255f; // Apply Alpha
 
+                // With dithering, intensity should be mostly 0 or 1.
+                // But let's keep the logic generic.
+                
                 if (Math.Abs(intensity - currentIntensity) < 0.01f)
                 {
                     currentCount++;
@@ -167,5 +183,78 @@ public static class Rasterizer
         
         if (disposeBmp) scanBmp.Dispose();
         yield return "G0 S0"; 
+    }
+
+    private static void ApplyDithering(Bitmap bmp)
+    {
+        // Floyd-Steinberg Dithering
+        // Iterate over pixels, calculate error, diffuse to neighbors.
+        // Requires locking bits for speed, or direct pixel access.
+        // Since we are typically processing on main thread or BG, standard Get/SetPixel is SLOW.
+        // But for simplicity/safety first implementation, we can use Get/SetPixel (performance hit).
+        // Optimization: Use LockBits.
+        
+        int w = bmp.Width;
+        int h = bmp.Height;
+        
+        // We need a floating point buffer to store errors? 
+        // Or we can modify the bitmap directly if we are careful. 
+        // But SetPixel clamps to 0-255. Error propagation needs float/int beyond 255.
+        // So we need a temporary buffer.
+        
+        float[,] buffer = new float[w, h];
+
+        // Fill buffer with grayscale values
+        for(int y=0; y<h; y++)
+        {
+            for(int x=0; x<w; x++)
+            {
+                Color c = bmp.GetPixel(x, y);
+                // Grayscale
+                // Grayscale
+                float gray = 0.299f * c.R + 0.587f * c.G + 0.114f * c.B;
+                
+                // Handle Alpha: Transparent pixels should be considered "White" (No Burn).
+                // We blend the grayscale value with White (255) based on Alpha.
+                // If Alpha=1, use Gray. If Alpha=0, use 255.
+                float alpha = c.A / 255f;
+                buffer[x,y] = (gray * alpha) + (255f * (1f - alpha));
+            }
+        }
+
+        // Dither
+        for(int y=0; y<h; y++)
+        {
+            for(int x=0; x<w; x++)
+            {
+                float oldPixel = buffer[x, y];
+                float newPixel = oldPixel < 128 ? 0 : 255;
+                buffer[x,y] = newPixel;
+                
+                float quantError = oldPixel - newPixel;
+
+                if (x + 1 < w)
+                    buffer[x + 1, y] += quantError * 7 / 16;
+                
+                if (x - 1 >= 0 && y + 1 < h)
+                    buffer[x - 1, y + 1] += quantError * 3 / 16;
+                
+                if (y + 1 < h)
+                    buffer[x, y + 1] += quantError * 5 / 16;
+                
+                if (x + 1 < w && y + 1 < h)
+                    buffer[x + 1, y + 1] += quantError * 1 / 16;
+            }
+        }
+
+        // Write back to Bitmap
+        for(int y=0; y<h; y++)
+        {
+            for(int x=0; x<w; x++)
+            {
+                int val = (int)Math.Clamp(buffer[x, y], 0, 255);
+                bmp.SetPixel(x, y, Color.FromArgb(255, val, val, val));
+            }
+        }
     }
 }
