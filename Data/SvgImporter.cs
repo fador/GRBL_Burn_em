@@ -257,7 +257,7 @@ public class SvgImporter
                     // Apply Transform
                     path.Transform(currentTransform);
                     // Flatten to line segments
-                    path.Flatten(null, 0.1f);
+                    path.Flatten(null, 0.002f);
                     
                     // Create LaserPaths
                     var iterator = new GraphicsPathIterator(path);
