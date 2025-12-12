@@ -27,70 +27,97 @@ public class OptionsForm : Form
     private void InitializeComponent()
     {
         this.Text = "Options";
-        this.Size = new Size(300, 500); // Increased height
+        this.Size = new Size(400, 450);
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
         this.StartPosition = FormStartPosition.CenterParent;
 
-        var lblPort = new Label { Text = "COM Port:", Location = new Point(20, 20), AutoSize = true };
-        _cbPorts = new ComboBox { Location = new Point(100, 17), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        var tabs = new TabControl { Dock = DockStyle.Fill };
+
+        // --- Connection Tab ---
+        var tabConnection = new TabPage("Connection");
+        var lblPort = new Label { Text = "COM Port:", Location = new Point(20, 30), AutoSize = true };
+        _cbPorts = new ComboBox { Location = new Point(120, 27), Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
         
-        var lblBaud = new Label { Text = "Baud Rate:", Location = new Point(20, 60), AutoSize = true };
-        _cbBaud = new ComboBox { Location = new Point(100, 57), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        var lblBaud = new Label { Text = "Baud Rate:", Location = new Point(20, 70), AutoSize = true };
+        _cbBaud = new ComboBox { Location = new Point(120, 67), Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
         _cbBaud.Items.AddRange(new object[] { 9600, 19200, 38400, 57600, 115200, 230400, 250000 });
 
-        var lblGen = new Label { Text = "Generator:", Location = new Point(20, 100), AutoSize = true };
-        _cbGenerator = new ComboBox { Location = new Point(100, 97), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        tabConnection.Controls.Add(lblPort);
+        tabConnection.Controls.Add(_cbPorts);
+        tabConnection.Controls.Add(lblBaud);
+        tabConnection.Controls.Add(_cbBaud);
+        tabs.TabPages.Add(tabConnection);
+
+        // --- Machine Tab ---
+        var tabMachine = new TabPage("Machine");
+
+        var lblGen = new Label { Text = "Generator:", Location = new Point(20, 30), AutoSize = true };
+        _cbGenerator = new ComboBox { Location = new Point(140, 27), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
         _cbGenerator.Items.AddRange(new object[] { "Grbl", "GCode", "Dummy" });
 
-        var lblW = new Label { Text = "Width (mm):", Location = new Point(20, 140), AutoSize = true };
-        _numWidth = new NumericUpDown { Location = new Point(100, 137), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
+        var lblW = new Label { Text = "Work Width (mm):", Location = new Point(20, 70), AutoSize = true };
+        _numWidth = new NumericUpDown { Location = new Point(140, 67), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
         
-        var lblH = new Label { Text = "Height (mm):", Location = new Point(20, 180), AutoSize = true };
-        _numHeight = new NumericUpDown { Location = new Point(100, 177), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
+        var lblH = new Label { Text = "Work Height (mm):", Location = new Point(20, 110), AutoSize = true };
+        _numHeight = new NumericUpDown { Location = new Point(140, 107), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
 
-        var lblOrg = new Label { Text = "Origin:", Location = new Point(20, 220), AutoSize = true };
-        _cbOrigin = new ComboBox { Location = new Point(100, 217), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        var lblOrg = new Label { Text = "Work Origin:", Location = new Point(20, 150), AutoSize = true };
+        _cbOrigin = new ComboBox { Location = new Point(140, 147), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
         _cbOrigin.Items.AddRange(new object[] { "BottomLeft", "TopLeft", "Center" });
 
-        var lblInterval = new Label { Text = "Line Interval:", Location = new Point(20, 260), AutoSize = true };
-        _numInterval = new NumericUpDown { Location = new Point(100, 257), Width = 150, Minimum = 0.01m, Maximum = 5.0m, DecimalPlaces = 3, Increment = 0.01m };
+        tabMachine.Controls.Add(lblGen);
+        tabMachine.Controls.Add(_cbGenerator);
+        tabMachine.Controls.Add(lblW);
+        tabMachine.Controls.Add(_numWidth);
+        tabMachine.Controls.Add(lblH);
+        tabMachine.Controls.Add(_numHeight);
+        tabMachine.Controls.Add(lblOrg);
+        tabMachine.Controls.Add(_cbOrigin);
+        tabs.TabPages.Add(tabMachine);
 
-        var lblMinSeg = new Label { Text = "Min Seg (mm):", Location = new Point(20, 300), AutoSize = true };
-        _numMinSegment = new NumericUpDown { Location = new Point(100, 297), Width = 150, Minimum = 0m, Maximum = 10.0m, DecimalPlaces = 2, Increment = 0.1m };
+        // --- Raster / Image Tab ---
+        var tabRaster = new TabPage("Raster / Image");
+        
+        var lblInterval = new Label { Text = "Line Interval (mm):", Location = new Point(20, 30), AutoSize = true };
+        _numInterval = new NumericUpDown { Location = new Point(160, 27), Width = 120, Minimum = 0.01m, Maximum = 5.0m, DecimalPlaces = 3, Increment = 0.01m };
 
-        var lblSnap = new Label { Text = "Snap Grid (mm):", Location = new Point(20, 340), AutoSize = true };
-        _numSnapGrid = new NumericUpDown { Location = new Point(100, 337), Width = 150, Minimum = 0.1m, Maximum = 100.0m, DecimalPlaces = 2, Increment = 0.5m };
+        var lblMinSeg = new Label { Text = "Min Segment (mm):", Location = new Point(20, 70), AutoSize = true };
+        _numMinSegment = new NumericUpDown { Location = new Point(160, 67), Width = 120, Minimum = 0m, Maximum = 10.0m, DecimalPlaces = 2, Increment = 0.1m };
 
-        _chkBicubic = new CheckBox { Text = "Bicubic Resampling", Location = new Point(100, 340), AutoSize = true };
+        _chkBicubic = new CheckBox { Text = "Bicubic Resampling", Location = new Point(20, 110), AutoSize = true };
 
-        _btnSave = new Button { Text = "Save", Location = new Point(110, 400), DialogResult = DialogResult.OK };
-        _btnCancel = new Button { Text = "Cancel", Location = new Point(195, 400), DialogResult = DialogResult.Cancel };
+        tabRaster.Controls.Add(lblInterval);
+        tabRaster.Controls.Add(_numInterval);
+        tabRaster.Controls.Add(lblMinSeg);
+        tabRaster.Controls.Add(_numMinSegment);
+        tabRaster.Controls.Add(_chkBicubic);
+        tabs.TabPages.Add(tabRaster);
 
+        // --- View / Grid Tab ---
+        var tabView = new TabPage("View / Grid");
+
+        var lblSnap = new Label { Text = "Snap Grid Size (mm):", Location = new Point(20, 30), AutoSize = true };
+        _numSnapGrid = new NumericUpDown { Location = new Point(160, 27), Width = 120, Minimum = 0.1m, Maximum = 100.0m, DecimalPlaces = 2, Increment = 0.5m };
+
+        tabView.Controls.Add(lblSnap);
+        tabView.Controls.Add(_numSnapGrid);
+        tabs.TabPages.Add(tabView);
+
+        // --- Bottom Panel for Buttons ---
+        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 50 };
+        
+        _btnSave = new Button { Text = "Save", Location = new Point(180, 10), DialogResult = DialogResult.OK, Width = 80 };
+        _btnCancel = new Button { Text = "Cancel", Location = new Point(270, 10), DialogResult = DialogResult.Cancel, Width = 80 };
+        
         _btnSave.Click += BtnSave_Click;
+        
+        pnlBottom.Controls.Add(_btnSave);
+        pnlBottom.Controls.Add(_btnCancel);
 
-        this.Controls.Add(lblPort);
-        this.Controls.Add(_cbPorts);
-        this.Controls.Add(lblBaud);
-        this.Controls.Add(_cbBaud);
-        this.Controls.Add(lblGen);
-        this.Controls.Add(_cbGenerator);
-        this.Controls.Add(lblW);
-        this.Controls.Add(_numWidth);
-        this.Controls.Add(lblH);
-        this.Controls.Add(_numHeight);
-        this.Controls.Add(lblOrg);
-        this.Controls.Add(_cbOrigin);
-        this.Controls.Add(lblInterval);
-        this.Controls.Add(_numInterval);
-        this.Controls.Add(lblMinSeg);
-        this.Controls.Add(_numMinSegment);
-        this.Controls.Add(lblSnap);
-        this.Controls.Add(_numSnapGrid);
-        this.Controls.Add(_chkBicubic);
-        this.Controls.Add(_btnSave);
-        this.Controls.Add(_btnCancel);
+        this.Controls.Add(tabs); // Tabs Fill
+        this.Controls.Add(pnlBottom); // Bottom panel dock
         
         this.AcceptButton = _btnSave;
         this.CancelButton = _btnCancel;
@@ -133,7 +160,7 @@ public class OptionsForm : Form
         }
         else
         {
-             _cbGenerator.SelectedIndex = 0;
+            _cbGenerator.SelectedIndex = 0;
         }
 
         _numWidth.Value = (decimal)AppConfiguration.Instance.WorkAreaWidth;
