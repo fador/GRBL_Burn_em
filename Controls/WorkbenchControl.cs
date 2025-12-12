@@ -893,8 +893,18 @@ public class WorkbenchControl : Control
             float relX = init.Pos.X - b.Left;
             float relY = init.Pos.Y - b.Top;
             
-            obj.Position = new PointF(newL + relX * scaleX, newT + relY * scaleY);
-            obj.Size = new SizeF(init.Size.Width * scaleX, init.Size.Height * scaleY);
+            float objX = newL + relX * scaleX;
+            float objY = newT + relY * scaleY;
+            float objW = init.Size.Width * scaleX;
+            float objH = init.Size.Height * scaleY;
+
+            // Normalize negative size for Objects that require positive size (Rect, Image)
+            // Path points handle themselves via transform usually, but LaserObject.Size should be positive.
+            if (objW < 0) { objX += objW; objW = -objW; }
+            if (objH < 0) { objY += objH; objH = -objH; }
+
+            obj.Position = new PointF(objX, objY);
+            obj.Size = new SizeF(objW, objH);
             
             if (obj is LaserPath p && init.Points != null)
             {

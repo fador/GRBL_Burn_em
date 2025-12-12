@@ -18,6 +18,7 @@ public class OptionsForm : Form
     private ComboBox _cbOrigin = null!;
     private Button _btnSave = null!;
     private Button _btnCancel = null!;
+    private NumericUpDown _numSvgQuality = null!;
 
     public OptionsForm()
     {
@@ -109,6 +110,16 @@ public class OptionsForm : Form
         tabView.Controls.Add(_chkSkipSplash);
         tabs.TabPages.Add(tabView);
 
+        // --- Import Tab ---
+        var tabImport = new TabPage("Import");
+        
+        var lblSvgQ = new Label { Text = "SVG Curve Flatness (Lower=More Points):", Location = new Point(20, 30), AutoSize = true };
+        _numSvgQuality = new NumericUpDown { Location = new Point(250, 27), Width = 100, Minimum = 0.001m, Maximum = 10.0m, DecimalPlaces = 4, Increment = 0.001m };
+
+        tabImport.Controls.Add(lblSvgQ);
+        tabImport.Controls.Add(_numSvgQuality);
+        tabs.TabPages.Add(tabImport);
+
         // --- Bottom Panel for Buttons ---
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 50 };
         
@@ -175,6 +186,11 @@ public class OptionsForm : Form
         _chkBicubic.Checked = AppConfiguration.Instance.EnableBicubicResampling;
         _chkSkipSplash.Checked = AppConfiguration.Instance.SkipSplashScreen;
         
+        decimal q = (decimal)AppConfiguration.Instance.SvgCurveQuality;
+        if (q < _numSvgQuality.Minimum) q = _numSvgQuality.Minimum;
+        if (q > _numSvgQuality.Maximum) q = _numSvgQuality.Maximum;
+        _numSvgQuality.Value = q;
+        
         string org = AppConfiguration.Instance.WorkOrigin;
         if (_cbOrigin.Items.Contains(org)) _cbOrigin.SelectedItem = org;
         else _cbOrigin.SelectedIndex = 0;
@@ -204,6 +220,7 @@ public class OptionsForm : Form
         AppConfiguration.Instance.SnapGridSize = (float)_numSnapGrid.Value;
         AppConfiguration.Instance.EnableBicubicResampling = _chkBicubic.Checked;
         AppConfiguration.Instance.SkipSplashScreen = _chkSkipSplash.Checked;
+        AppConfiguration.Instance.SvgCurveQuality = (float)_numSvgQuality.Value;
 
         if(_cbOrigin.SelectedItem != null)
              AppConfiguration.Instance.WorkOrigin = _cbOrigin.SelectedItem.ToString() ?? "BottomLeft";

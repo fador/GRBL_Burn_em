@@ -21,6 +21,7 @@ public class AppConfiguration
     public float FramingSpeed { get; set; } = 1000f;
     public float SnapGridSize { get; set; } = 1.0f;
     public bool SkipSplashScreen { get; set; } = false;
+    public float SvgCurveQuality { get; set; } = 0.002f; // Lower is better quality (more points)
 
     private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
 
