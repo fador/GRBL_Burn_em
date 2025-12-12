@@ -1,3 +1,5 @@
+using laser_gui_test.Forms;
+
 namespace laser_gui_test;
 
 static class Program
@@ -11,6 +13,11 @@ static class Program
         // To customize application configuration such as set high DPI settings or default font,
         // see https://aka.ms/applicationconfiguration.
         ApplicationConfiguration.Initialize();
+        
+        // Show Splash Screen
+        var splash = new SplashForm();
+        Application.Run(splash); // Runs message loop, closes when splash closes
+        
         Application.Run(MainForm.Instance);
     }    
 }
