@@ -1,5 +1,7 @@
 using laser_gui_test.Forms;
 
+using laser_gui_test.Data;
+
 namespace laser_gui_test;
 
 static class Program
@@ -15,8 +17,11 @@ static class Program
         ApplicationConfiguration.Initialize();
         
         // Show Splash Screen
-        var splash = new SplashForm();
-        Application.Run(splash); // Runs message loop, closes when splash closes
+        if (!AppConfiguration.Instance.SkipSplashScreen)
+        {
+            var splash = new SplashForm();
+            Application.Run(splash); // Runs message loop, closes when splash closes
+        }
         
         Application.Run(MainForm.Instance);
     }    

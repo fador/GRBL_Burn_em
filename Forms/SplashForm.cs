@@ -6,6 +6,8 @@ using System.Drawing.Imaging;
 using System.Windows.Forms;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Reflection;
+using System.Linq;
 
 namespace laser_gui_test.Forms
 {
@@ -41,28 +43,39 @@ namespace laser_gui_test.Forms
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.BackColor = Color.White;
+            this.BackColor = Color.Black;
             this.DoubleBuffered = true;
             this.TopMost = true;
 
-            // Load logo
-            string logoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "logo.png");
-            if (!File.Exists(logoPath))
-                logoPath = Path.Combine(Directory.GetCurrentDirectory(), "logo.png");
+            // Load logo from Embedded Resource
+            // This searches for any resource ending in "logo.png" to allow for namespace flexibility
+            var assembly = Assembly.GetExecutingAssembly();
+            var resourceName = assembly.GetManifestResourceNames()
+                                       .FirstOrDefault(r => r.EndsWith("logo.png"));
 
-            if (File.Exists(logoPath))
+            if (resourceName != null)
             {
                 try
                 {
-                    using (var temp = new Bitmap(logoPath))
-                        _sourceImage = new Bitmap(temp);
-                    
-                    this.Size = _sourceImage.Size;
-                    _canvas = new Bitmap(this.Width, this.Height, PixelFormat.Format32bppPArgb);
-                    _rowHeat = new float[this.Height];
-                    
-                    using (var g = Graphics.FromImage(_canvas))
-                        g.Clear(Color.White);
+                    using (Stream? stream = assembly.GetManifestResourceStream(resourceName))
+                    {
+                        if (stream != null)
+                        {
+                            using (var temp = new Bitmap(stream))
+                                _sourceImage = new Bitmap(temp);
+                            
+                            this.Size = _sourceImage.Size;
+                            _canvas = new Bitmap(this.Width, this.Height, PixelFormat.Format32bppPArgb);
+                            _rowHeat = new float[this.Height];
+                            
+                            using (var g = Graphics.FromImage(_canvas))
+                                g.Clear(Color.Black); // Start with black canvas
+                        }
+                        else
+                        {
+                             SetupFallback();
+                        }
+                    }
                 }
                 catch
                 {
@@ -86,7 +99,7 @@ namespace laser_gui_test.Forms
             _sourceImage = new Bitmap(500, 300);
             using(var g = Graphics.FromImage(_sourceImage))
             {
-                g.Clear(Color.White);
+                g.Clear(Color.Black);
                 g.DrawString("LASER CTRL", new Font("Arial", 40, FontStyle.Bold), Brushes.Black, 50, 100);
             }
             _canvas = new Bitmap(500, 300, PixelFormat.Format32bppPArgb);
@@ -256,6 +269,16 @@ namespace laser_gui_test.Forms
 
             _laserIntensity += (currentTickMaxDarkness - _laserIntensity) * 0.3f;
             this.Invalidate();
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape)
+            {
+                EndSplash();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         protected override void OnPaint(PaintEventArgs e)

@@ -20,6 +20,7 @@ public class AppConfiguration
     public float FramingPower { get; set; } = 0f;
     public float FramingSpeed { get; set; } = 1000f;
     public float SnapGridSize { get; set; } = 1.0f;
+    public bool SkipSplashScreen { get; set; } = false;
 
     private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
 

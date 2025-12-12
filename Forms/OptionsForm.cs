@@ -14,6 +14,7 @@ public class OptionsForm : Form
     private NumericUpDown _numMinSegment = null!;
     private NumericUpDown _numSnapGrid = null!;
     private CheckBox _chkBicubic = null!;
+    private CheckBox _chkSkipSplash = null!;
     private ComboBox _cbOrigin = null!;
     private Button _btnSave = null!;
     private Button _btnCancel = null!;
@@ -101,8 +102,11 @@ public class OptionsForm : Form
         var lblSnap = new Label { Text = "Snap Grid Size (mm):", Location = new Point(20, 30), AutoSize = true };
         _numSnapGrid = new NumericUpDown { Location = new Point(160, 27), Width = 120, Minimum = 0.1m, Maximum = 100.0m, DecimalPlaces = 2, Increment = 0.5m };
 
+        _chkSkipSplash = new CheckBox { Text = "Skip Splash Screen", Location = new Point(20, 70), AutoSize = true };
+
         tabView.Controls.Add(lblSnap);
         tabView.Controls.Add(_numSnapGrid);
+        tabView.Controls.Add(_chkSkipSplash);
         tabs.TabPages.Add(tabView);
 
         // --- Bottom Panel for Buttons ---
@@ -169,6 +173,7 @@ public class OptionsForm : Form
         _numMinSegment.Value = (decimal)AppConfiguration.Instance.MinRasterSegmentLength;
         _numSnapGrid.Value = (decimal)AppConfiguration.Instance.SnapGridSize;
         _chkBicubic.Checked = AppConfiguration.Instance.EnableBicubicResampling;
+        _chkSkipSplash.Checked = AppConfiguration.Instance.SkipSplashScreen;
         
         string org = AppConfiguration.Instance.WorkOrigin;
         if (_cbOrigin.Items.Contains(org)) _cbOrigin.SelectedItem = org;
@@ -198,6 +203,7 @@ public class OptionsForm : Form
         AppConfiguration.Instance.MinRasterSegmentLength = (float)_numMinSegment.Value;
         AppConfiguration.Instance.SnapGridSize = (float)_numSnapGrid.Value;
         AppConfiguration.Instance.EnableBicubicResampling = _chkBicubic.Checked;
+        AppConfiguration.Instance.SkipSplashScreen = _chkSkipSplash.Checked;
 
         if(_cbOrigin.SelectedItem != null)
              AppConfiguration.Instance.WorkOrigin = _cbOrigin.SelectedItem.ToString() ?? "BottomLeft";
