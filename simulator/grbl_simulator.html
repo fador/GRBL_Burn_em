@@ -18,6 +18,10 @@
             font-family: 'Consolas', 'Monaco', monospace;
             white-space: pre;
         }
+        /* Visual cue for the editor */
+        textarea:focus {
+            outline: 2px solid #3b82f6;
+        }
     </style>
 </head>
 <body class="bg-slate-100 h-screen flex flex-col overflow-hidden">
@@ -44,7 +48,7 @@
                 </div>
             </div>
             
-            <textarea id="gcode-input" class="flex-1 w-full p-4 resize-none bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs g-code-input text-slate-700" spellcheck="false" placeholder="Paste G-code here..."></textarea>
+            <textarea id="gcode-input" class="flex-1 w-full p-4 resize-none bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs g-code-input text-slate-700" spellcheck="false" placeholder="Paste G-code here... Click a line to highlight it on canvas."></textarea>
             
             <div class="p-4 border-t border-slate-200 bg-slate-50">
                 
@@ -148,6 +152,7 @@ G1 X122.881 S109`;
     // Application State
     let paths = [];
     let bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    let highlightedLine = -1; // New state for selection
     
     // Viewport State
     let view = {
@@ -182,11 +187,10 @@ G1 X122.881 S109`;
             if (y > bounds.maxY) bounds.maxY = y;
         };
         
-        // Track if bounds were actually updated to handle empty files
         let hasMoves = false; 
-        updateBounds(0, 0); // Start at origin
+        updateBounds(0, 0); 
 
-        lines.forEach(line => {
+        lines.forEach((line, index) => { // Added index parameter
             line = line.trim().toUpperCase();
             const commentIndex = line.indexOf(';');
             if (commentIndex !== -1) line = line.substring(0, commentIndex);
@@ -235,7 +239,8 @@ G1 X122.881 S109`;
                     x2: nextX,
                     y2: nextY,
                     power: state.mode === 'G0' ? 0 : nextS,
-                    type: state.mode
+                    type: state.mode,
+                    lineIndex: index // Store the line index
                 });
                 updateBounds(nextX, nextY);
                 state.x = nextX;
@@ -252,7 +257,27 @@ G1 X122.881 S109`;
         return segments;
     }
 
-    // --- Interactive Viewport Logic ---
+    // --- Interaction & Editor Logic ---
+
+    // New function to track cursor position
+    function updateHighlight() {
+        const text = inputArea.value;
+        // Get cursor position
+        const cursorPos = inputArea.selectionStart;
+        // Calculate line number by counting newlines before cursor
+        const currentLine = text.substring(0, cursorPos).split('\n').length - 1;
+        
+        if (highlightedLine !== currentLine) {
+            highlightedLine = currentLine;
+            draw();
+        }
+    }
+
+    // Attach listeners to textarea
+    inputArea.addEventListener('mouseup', updateHighlight);
+    inputArea.addEventListener('keyup', updateHighlight);
+    inputArea.addEventListener('click', updateHighlight);
+    inputArea.addEventListener('focus', updateHighlight);
 
     function handleResize() {
         canvas.width = container.clientWidth;
@@ -370,13 +395,23 @@ G1 X122.881 S109`;
         // Update Info
         canvasInfo.innerHTML = `Scale: ${view.scale.toFixed(2)}x <br> Pan: ${Math.round(view.panX)}, ${Math.round(view.panY)}`;
 
-        // Draw Paths
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
+        ctx.shadowBlur = 0;
 
+        const highlightedSegments = [];
+
+        // Pass 1: Draw standard lines
         paths.forEach(segment => {
             if (!showRapids && (segment.type === 'G0' || segment.power === 0)) {
                 return;
+            }
+
+            // If this is the highlighted line, save for second pass
+            if (segment.lineIndex === highlightedLine) {
+                highlightedSegments.push(segment);
+                // We continue to draw it normally as well to ensure base color exists
+                // or we can skip. Let's draw normally as base.
             }
 
             const x1 = segment.x1 * view.scale + view.panX;
@@ -395,7 +430,7 @@ G1 X122.881 S109`;
 
             if (segment.type === 'G0') {
                 ctx.strokeStyle = 'rgba(50, 200, 100, 0.4)';
-                ctx.lineWidth = 1 / Math.max(1, Math.log10(view.scale)); // Keep rapid lines thin
+                ctx.lineWidth = 1 / Math.max(1, Math.log10(view.scale));
                 ctx.setLineDash([5, 5]);
             } else {
                 const intensity = Math.min(segment.power / maxS, 1);
@@ -404,11 +439,35 @@ G1 X122.881 S109`;
                 } else {
                     ctx.strokeStyle = `rgba(40, 20, 10, ${intensity})`; 
                 }
-                ctx.lineWidth = strokeW * Math.sqrt(view.scale); // Scale line width slightly with zoom
+                ctx.lineWidth = strokeW * Math.sqrt(view.scale);
                 ctx.setLineDash([]);
             }
             ctx.stroke();
         });
+
+        // Pass 2: Draw Highlight Overlay
+        if (highlightedSegments.length > 0) {
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#00ffff'; // Cyan glow
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = (strokeW * Math.sqrt(view.scale)) + 2; // Slightly thicker
+            ctx.setLineDash([]);
+            
+            highlightedSegments.forEach(segment => {
+                const x1 = segment.x1 * view.scale + view.panX;
+                const y1 = height - (segment.y1 * view.scale + view.panY);
+                const x2 = segment.x2 * view.scale + view.panX;
+                const y2 = height - (segment.y2 * view.scale + view.panY);
+
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            });
+            
+            // Reset shadow
+            ctx.shadowBlur = 0;
+        }
     }
 
     function drawGrid(w, h) {
