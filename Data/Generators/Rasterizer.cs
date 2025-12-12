@@ -57,6 +57,8 @@ public static class Rasterizer
 
         float pixelWidth = width / scanBmp.Width;
         
+        bool scanForward = true;
+
         // Loop through lines (Y)
         for (int i = 0; i < targetH; i++)
         {
@@ -132,13 +134,16 @@ public static class Rasterizer
             if (!filteredSegments.Any(s => s.intensity > 0)) continue;
 
             // Generate G-code
-            float currentX = startX;
+            float currentX = scanForward ? startX : startX + width;
             yield return $"G0 X{currentX:F3} Y{currentY:F3}";
             bool lastG0 = true;
 
-            foreach (var segment in filteredSegments)
+            var segmentsToBurn = scanForward ? filteredSegments : Enumerable.Reverse(filteredSegments).ToList();
+
+            foreach (var segment in segmentsToBurn)
             {
-                float nextX = currentX + segment.length;
+                // In reverse, we move -length. In forward, +length.
+                float nextX = scanForward ? currentX + segment.length : currentX - segment.length;
                 float sValue = segment.intensity * maxPower;
                 
                 if (sValue <= 0)
@@ -157,6 +162,7 @@ public static class Rasterizer
                 }
                 currentX = nextX;
             }
+            scanForward = !scanForward; // Toggle for next line
         }
         
         if (disposeBmp) scanBmp.Dispose();
