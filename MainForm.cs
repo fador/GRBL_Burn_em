@@ -28,7 +28,15 @@ public partial class MainForm : Form
     private NumericUpDown _numPosY = null!;
     private NumericUpDown _numSizeW = null!;
     private NumericUpDown _numSizeH = null!;
+
     private bool _isUpdatingUI = false;
+
+    private JobRunner _jobRunner = new JobRunner();
+    private StatusStrip _statusStrip = null!;
+    private ToolStripStatusLabel _lblStatusConnection = null!;
+    private ToolStripStatusLabel _lblStatusState = null!;
+    private ToolStripStatusLabel _lblStatusPos = null!;
+    private ToolStripProgressBar _progressBar = null!;
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -163,6 +171,16 @@ public partial class MainForm : Form
         };
         InitializeLayers();
         this.Controls.Add(_layerPanel);
+
+        // Status Strip
+        _statusStrip = new StatusStrip();
+        _lblStatusConnection = new ToolStripStatusLabel("Disconnected") { ForeColor = Color.Red };
+        _lblStatusState = new ToolStripStatusLabel("State: Unknown");
+        _lblStatusPos = new ToolStripStatusLabel("Pos: 0,0");
+        _progressBar = new ToolStripProgressBar { Width = 100, Visible = false };
+        
+        _statusStrip.Items.AddRange(new ToolStripItem[] { _lblStatusConnection, new ToolStripSeparator(), _lblStatusState, new ToolStripSeparator(), _lblStatusPos, new ToolStripSeparator(), _progressBar });
+        this.Controls.Add(_statusStrip);
 
         // Left: Tools
         _toolsPanel = new FlowLayoutPanel
@@ -451,10 +469,40 @@ public partial class MainForm : Form
         // rightSplit.BringToFront();
         // _workbench.SendToBack();
         
-        menuStrip.BringToFront();
+        // Initial Setup (Added to Controls stack)
+        // Controls.Add adds to Index 0 (Front).
+        // Docking Priority: Back (Highest Index) -> Front (Lowest Index).
+        // Back = Outer-most. Front = Inner-most.
+        
+        // We want (Outer -> Inner):
+        // 1. MenuStrip (Top) / StatusStrip (Bottom)
+        // 2. Tools (Left) / RightSplit (Right) / LayerPanel (Bottom)
+        // 3. Workbench (Fill)
+        
+        // So Z-Order (Front to Back):
+        // 0. Workbench
+        // 1. Layers / Tools / Right
+        // 2. Menu / Status
+        
+        // BringToFront puts at Index 0.
+        // SendToBack puts at Index Count-1.
+        
+        // 1. Fill (Inner-most)
+        _workbench.BringToFront();
+        
+        // 2. Side Panels
+        _layerPanel.BringToFront(); // Dock=Bottom (Inner relative to Status)
         _toolsPanel.BringToFront();
-        _layerPanel.BringToFront(); // or Bottom
         rightSplit.BringToFront();
+        
+        // 3. Outer Bars (Outer-most)
+        // Note: SendToBack pushes to the END of the list.
+        // If we SendToBack(Status), it is Last.
+        // If we then SendToBack(Menu), Menu is Last. Status is Second Last.
+        // So Menu is Outer-most. Status is Second Outer-most.
+        
+        _statusStrip.SendToBack(); 
+        menuStrip.SendToBack();
         
         // Check order
     }
@@ -638,19 +686,112 @@ public partial class MainForm : Form
                 if (connected)
                 {
                     btnConnect.Text = "Disconnect";
-                    btnConnect.BackColor = Color.Salmon; 
+                    btnConnect.BackColor = Color.Salmon;
+                    _lblStatusConnection.Text = "Connected";
+                    _lblStatusConnection.ForeColor = Color.Green;
+                    
+                    // Request Settings to update Work Area
+                    SerialInterface.Instance.Write("$$");
                 }
                 else
                 {
                     btnConnect.Text = "Connect";
                     btnConnect.BackColor = Color.FromName("Control");
+                    _lblStatusConnection.Text = "Disconnected";
+                    _lblStatusConnection.ForeColor = Color.Red;
                 }
             });
         };
+        
+        SerialInterface.Instance.LineReceived += (line) => 
+        {
+             // Parse $130=... (X Max) and $131=... (Y Max)
+             // Format: $130=200.000
+             if (line.StartsWith("$130="))
+             {
+                 if (float.TryParse(line.Substring(5), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float xMax))
+                 {
+                     if (xMax > 0) 
+                     {
+                         AppConfiguration.Instance.WorkAreaWidth = xMax;
+                         _workbench.Invalidate();
+                     }
+                 }
+             }
+             else if (line.StartsWith("$131="))
+             {
+                 if (float.TryParse(line.Substring(5), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float yMax))
+                 {
+                     if (yMax > 0) 
+                     {
+                         AppConfiguration.Instance.WorkAreaHeight = yMax;
+                         _workbench.Invalidate();
+                     }
+                 }
+             }
+        };
+
+        SerialInterface.Instance.StatusReceived += (state, pos) => 
+        {
+            if (_statusStrip.IsDisposed) return;
+            _statusStrip.Invoke(() => 
+            {
+                _lblStatusState.Text = $"State: {state}";
+                _lblStatusPos.Text = $"Pos: {pos.X:F3}, {pos.Y:F3}";
+                
+                // Update Workbench Laser Position
+                _workbench.LaserPosition = pos;
+            });
+        };
+
+        _jobRunner.ProgressChanged += (curr, total) => 
+        {
+             if (_statusStrip.IsDisposed) return;
+             _statusStrip.Invoke(() => 
+             {
+                 _progressBar.Visible = true;
+                 _progressBar.Maximum = total;
+                 _progressBar.Value = Math.Min(curr, total);
+             });
+        };
+        
+        _jobRunner.JobCompleted += () => 
+        {
+             if (_statusStrip.IsDisposed) return;
+             _statusStrip.Invoke(() => 
+             {
+                 _progressBar.Visible = false;
+                 MessageBox.Show("Job Completed!", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+             });
+        };
 
         var btnStart = new Button { Text = "Start", Width = 200, BackColor = Color.LightGreen };
+        btnStart.Click += (s, e) => 
+        {
+            if (!SerialInterface.Instance.IsConnected)
+            {
+                MessageBox.Show("Not connected.", "Error");
+                return;
+            }
+            
+            // Generate GCode
+            var generator = new Data.Generators.GrblGenerator();
+            var lines = generator.Generate(ProjectState.Instance.Objects);
+            _jobRunner.Start(lines);
+        };
+
         var btnStop = new Button { Text = "STOP", Width = 200, BackColor = Color.Red, ForeColor = Color.White };
-        var btnPause = new Button { Text = "Pause", Width = 200, BackColor = Color.Yellow };
+        btnStop.Click += (s, e) => 
+        {
+             _jobRunner.Stop();
+        };
+
+        var btnPause = new Button { Text = "Pause/Resume", Width = 200, BackColor = Color.Yellow };
+        btnPause.Click += (s, e) => 
+        {
+            if (_jobRunner.IsPaused) _jobRunner.Resume();
+            else _jobRunner.Pause();
+        };
 
         flow.Controls.Add(btnConnect);
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); // Spacer

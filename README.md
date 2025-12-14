@@ -2,7 +2,7 @@
 
 A comprehensive Windows Forms application designed for controlling laser cutters, built with .NET 9.0. This tool provides a rich interface for designing, importing, and managing laser cutting jobs with advanced features like layer management, G-code generation, and hardware control.
 
-## ✨ Key Features
+## Key Features
 
 ### Object Management & Design
 - **Advanced Transformations**: Move, resize, and rotate objects with precision. Supports robust negative scaling (flipping).
@@ -18,6 +18,8 @@ A comprehensive Windows Forms application designed for controlling laser cutters
   - Configurable Line Interval (resolution).
   - Minimum Segment Length optimization.
   - Bicubic Resampling for high-quality scaling.
+  - 1 bit dithering for lasers without PWM support.
+  - **Smart Optimization**: Skips empty areas and handles transparency (laser off) automatically.
 - **Layer System**: Color-coded layers to organize parts of your design.
 
 ### Machine Control & G-Code
@@ -28,11 +30,11 @@ A comprehensive Windows Forms application designed for controlling laser cutters
 
 ### Quality of Life
 - **Robust Undo/Redo**: Full history support for all modification actions.
-- **Interactive Workbench**: Smooth Pan (Right-click dragging) and Zoom (Scroll wheel) navigation.
+- **Interactive Workbench**: Smooth Pan (Right-click dragging) and Zoom (Scroll wheel) navigation. **View state (Zoom/Pan) is saved between sessions.**
 - **Project Persistence**: Save and Load full project states via JSON.
 - **Customizable Options**: Configure workspace dimensions, origin point, connection defaults, and UI preferences (e.g., Skip Splash Screen).
 
-## 📁 Project Structure
+## Project Structure
 
 The solution is organized into logical components:
 
@@ -43,6 +45,7 @@ Core data models and logic:
 - **Commands**: Implementation of the Command Pattern (`ICommand`, `CommandManager`) handling undo/redo operations.
 - **IO**: `ProjectSerializer`, `SvgImporter`.
 - **Hardware**: `SerialInterface`.
+- **OpenGL**: Rendering context and resource management.
 
 ### `Controls/`
 Custom User Interface controls:
@@ -53,11 +56,12 @@ Custom User Interface controls:
 - **OptionsForm**: Comprehensive settings dialog for Machine, Connection, Import, and View preferences.
 - **DebugCodeForm**: Viewer for generated G-code.
 - **GridArrayForm**: Dialog for parameterizing array creation.
+- **SplashForm**: Laser simulation loading screen.
 
 ### `Tools/`
 - **ToolManager**: Manages active tools (Select, DrawLine, DrawBox, Ruler) and their state.
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - **.NET 9.0 SDK**: Ensure you have the latest .NET 9.0 SDK installed.
@@ -75,7 +79,7 @@ Start the application with:
 dotnet run
 ```
 
-## 🎮 Usage
+## Usage
 
 1.  **Workbench Navigation**: 
     -   **Pan**: Right-click and drag.
@@ -95,7 +99,13 @@ dotnet run
     -   **Generate G-Code**: Create and view the text file for the machine.
     -   **Connect**: Establish serial connection to stream the job.
 
-## 🛠 Architecture
+## Known issues
+
+-   **OpenGL**: The application may experience issues with OpenGL on some systems.
+-   **G-code**: The G-code generator is custom and only verified on certain GRBL controllers.
+-   **Text rendering**: The text rendering is not optimal and may not be correct.
+
+## Architecture
 
 -   **Command Pattern**: All state-modifying actions use `MoveCommand`, `GroupCommand`, `ResizeCommand`, etc., ensuring rock-solid Undo/Redo capability.
 -   **Singleton State**: `ProjectState` and `AppConfiguration` provide centralized access to the application data and settings.

@@ -28,6 +28,19 @@ public class WorkbenchControl : Control
     public bool IsSnappingEnabled { get; set; } = false;
     public float SnapInterval => AppConfiguration.Instance.SnapGridSize;
 
+    private PointF _laserPosition = new PointF(0,0);
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public PointF LaserPosition
+    {
+        get => _laserPosition;
+        set
+        {
+            _laserPosition = value;
+            Invalidate(); // Redraw when position changes
+        }
+    }
+
     private PointF Snap(PointF p)
     {
         if (!IsSnappingEnabled) return p;
@@ -71,6 +84,7 @@ public class WorkbenchControl : Control
         DrawWorkArea(g); // Draw Work Area before Origin
         DrawOrigin(g);
         DrawObjects(g);
+        DrawLaserPosition(g);
         DrawRulerOverlay(g);
     }
 
@@ -199,6 +213,27 @@ public class WorkbenchControl : Control
                 DrawResizeHandles(g, bounds.Value);
             }
         }
+    }
+
+    private void DrawLaserPosition(Graphics g)
+    {
+        // Draw a crosshair at _laserPosition
+        // _laserPosition is in Machine Coordinates (MPos).
+        // If Work Area Origin matches logic, we assume MPos matches World Pos for now.
+        
+        float x = _laserPosition.X;
+        float y = _laserPosition.Y;
+        
+        // Size in pixels
+        float size = 10.0f / _zoom;
+        
+        using var pen = new Pen(Color.Red, 2.0f / _zoom);
+        // X
+        g.DrawLine(pen, x - size, y - size, x + size, y + size);
+        g.DrawLine(pen, x - size, y + size, x + size, y - size);
+        
+        // Circle
+        g.DrawEllipse(pen, x - size, y - size, size * 2, size * 2);
     }
 
     private void DrawRulerOverlay(Graphics g)

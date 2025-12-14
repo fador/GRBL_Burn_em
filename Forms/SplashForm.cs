@@ -20,7 +20,7 @@ namespace laser_gui_test.Forms
         private Bitmap? _sourceImage;
         private int _currentX = 0;
         private int _currentY = 0;
-        private int _scanSpeed = 150; 
+        // private int _scanSpeed removed
         private int _scanLineHeight = 20; 
         private float _laserIntensity = 0f;
         
@@ -142,25 +142,34 @@ namespace laser_gui_test.Forms
             }
 
             // 2. Scan Logic
-            int steps = 0;
+            int energyUsed = 0;
+            int maxEnergy = 10000; // Total "movement points" per tick
             float currentTickMaxDarkness = 0f;
 
-            // We need to sample darkness for sparks. 
-            // Optim: We can cache a "Darkness Map" or sample Bitmap directly (Bitmap.GetPixel is slow).
-            // Using LockBits ONCE per frame for sampling is better than GetPixel.
-            // But we only need it at _currentX, _currentY.
-            // For now, let's assume random sparks if we don't want to lock bits.
-            // Or just lock bits for the scan region.
-            
-            // Simpler: Just random sparks based on scan speed? 
-            // Original code: visualIntensity from pixel.
-            // We can skip pixel-perfect spark spawning to save CPU or LockBits just the small strip?
-            // Let's Skip pixel reading for performance. Sparks are visual candy anyway.
-
-            while (steps < _scanSpeed && _currentY < height)
+            // Loop until we run out of energy or hit the bottom
+            while (energyUsed < maxEnergy && _currentY < height)
             {
                 int yStart = _currentY;
                 int yEnd = Math.Min(_currentY + _scanLineHeight, height);
+
+                // Sample Brightness in the current strip column to determine Speed (Cost)
+                int maxBrightness = 0;
+                for (int y = yStart; y < yEnd; y++)
+                {
+                    int idx = (y * width) + _currentX;
+                    if (idx >= 0 && idx < _brightnessMap.Length)
+                    {
+                        byte b = _brightnessMap[idx];
+                        if (b > maxBrightness) maxBrightness = b;
+                    }
+                }
+
+                // Cost Calculation
+                // Base cost = 10 (Fastest speed on black)
+                // White pixel adds up to 200 cost (Slowest speed on white)
+                // Ratio: ~20x speed difference between pure black and pure white
+                int cost = 10 + (int)((maxBrightness / 255.0f) * 200);
+                energyUsed += cost;
 
                 // Keep Active Rows Hot
                 for (int h = yStart; h < yEnd; h++)
@@ -203,7 +212,6 @@ namespace laser_gui_test.Forms
                     _currentY += _scanLineHeight;
                     if (_currentY >= height) break;
                 }
-                steps++;
             }
 
             // 3. Cool Down
@@ -501,7 +509,7 @@ namespace laser_gui_test.Forms
                     float sx = _owner.Width;
                     float sy = 0;
                     
-                    GL.glLineWidth(2f);
+                    GL.glLineWidth(10f);
                     GL.glBegin(GL.GL_LINES);
                     
                     // Outer Beam
