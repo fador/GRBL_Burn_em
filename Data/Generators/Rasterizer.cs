@@ -91,12 +91,21 @@ public static class Rasterizer
             for (int x = 0; x < scanBmp.Width; x++)
             {
                 Color pixel = scanBmp.GetPixel(x, y);
-                // Simple grayscale conversion: 0.299R + 0.587G + 0.114B
-                float gray = 0.299f * pixel.R + 0.587f * pixel.G + 0.114f * pixel.B;
                 
-                // Invert: 0 (Black) -> Max Power, 255 (White) -> 0 Power
-                float intensity = (255f - gray) / 255f; // 0.0 to 1.0
-                intensity *= pixel.A / 255f; // Apply Alpha
+                float intensity = 0;
+                if (pixel.A == 0)
+                {
+                    intensity = 0;
+                }
+                else
+                {
+                    // Simple grayscale conversion: 0.299R + 0.587G + 0.114B
+                    float gray = 0.299f * pixel.R + 0.587f * pixel.G + 0.114f * pixel.B;
+                
+                    // Invert: 0 (Black) -> Max Power, 255 (White) -> 0 Power
+                    intensity = (255f - gray) / 255f; // 0.0 to 1.0
+                    intensity *= pixel.A / 255f; // Apply Alpha
+                }
 
                 // With dithering, intensity should be mostly 0 or 1.
                 // But let's keep the logic generic.
@@ -146,18 +155,48 @@ public static class Rasterizer
                 }
             }
             
-            // Check if row has data (any non-zero intensity)
-            if (!filteredSegments.Any(s => s.intensity > 0)) continue;
+            // Find Active Segment Range (Trim Start/End zeros)
+            int startIndex = -1;
+            int endIndex = -1;
+
+            for (int k = 0; k < filteredSegments.Count; k++)
+            {
+                if (filteredSegments[k].intensity > 0)
+                {
+                    if (startIndex == -1) startIndex = k;
+                    endIndex = k;
+                }
+            }
+
+            if (startIndex == -1) continue; // Empty line
+
+            // Calculate Offsets
+            float preOffset = 0;
+            for (int k = 0; k < startIndex; k++) preOffset += filteredSegments[k].length;
+
+            float activeLength = 0;
+            for (int k = startIndex; k <= endIndex; k++) activeLength += filteredSegments[k].length;
 
             // Generate G-code
-            float currentX = scanForward ? startX : startX + width;
+            // Determine Start Position for this pass
+            float startScanX = startX + preOffset;
+            float endScanX = startX + preOffset + activeLength;
+
+            float currentX = scanForward ? startScanX : endScanX;
             yield return $"G0 X{currentX:F3} Y{currentY:F3}";
             bool lastG0 = true;
 
-            var segmentsToBurn = scanForward ? filteredSegments : Enumerable.Reverse(filteredSegments).ToList();
+            // Loop logic
+            // Forward: startIndex -> endIndex
+            // Reverse: endIndex -> startIndex
+            
+            var range = scanForward 
+                ? Enumerable.Range(startIndex, endIndex - startIndex + 1) 
+                : Enumerable.Range(startIndex, endIndex - startIndex + 1).Reverse();
 
-            foreach (var segment in segmentsToBurn)
+            foreach (int k in range)
             {
+                var segment = filteredSegments[k];
                 // In reverse, we move -length. In forward, +length.
                 float nextX = scanForward ? currentX + segment.length : currentX - segment.length;
                 float sValue = segment.intensity * maxPower;
@@ -165,6 +204,7 @@ public static class Rasterizer
                 if (sValue <= 0)
                 {
                     // Travel / Off
+                    // Even inside the active area, we might have gaps.
                     if(lastG0) yield return $"G1 X{nextX:F3} S0";
                     else yield return $"X{nextX:F3} S0";
                     lastG0 = false;

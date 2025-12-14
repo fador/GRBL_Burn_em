@@ -213,7 +213,11 @@ G1 X122.881 S109`;
 
                 switch (letter) {
                     case 'G':
-                        if (value === 0) state.mode = 'G0';
+                        if (value === 0) {
+                            state.mode = 'G0';
+                            // Implicitly set power to 0 for G0 to reset state for subsequent moves
+                            nextS = 0; 
+                        }
                         if (value === 1) state.mode = 'G1';
                         if (value === 90) state.isRelative = false;
                         if (value === 91) state.isRelative = true;
@@ -403,15 +407,16 @@ G1 X122.881 S109`;
 
         // Pass 1: Draw standard lines
         paths.forEach(segment => {
-            if (!showRapids && (segment.type === 'G0' || segment.power === 0)) {
+            // Treat G1 with S0 as a travel move visually (dashed)
+            const isTravel = segment.type === 'G0' || segment.power === 0;
+
+            if (!showRapids && isTravel) {
                 return;
             }
 
             // If this is the highlighted line, save for second pass
             if (segment.lineIndex === highlightedLine) {
                 highlightedSegments.push(segment);
-                // We continue to draw it normally as well to ensure base color exists
-                // or we can skip. Let's draw normally as base.
             }
 
             const x1 = segment.x1 * view.scale + view.panX;
@@ -428,17 +433,14 @@ G1 X122.881 S109`;
             ctx.moveTo(x1, y1);
             ctx.lineTo(x2, y2);
 
-            if (segment.type === 'G0') {
+            if (isTravel) {
+                // Dashed style for G0 AND G1 S0
                 ctx.strokeStyle = 'rgba(50, 200, 100, 0.4)';
                 ctx.lineWidth = 1 / Math.max(1, Math.log10(view.scale));
                 ctx.setLineDash([5, 5]);
             } else {
                 const intensity = Math.min(segment.power / maxS, 1);
-                if (intensity <= 0.01) {
-                    ctx.strokeStyle = 'rgba(0,0,0,0.05)';
-                } else {
-                    ctx.strokeStyle = `rgba(40, 20, 10, ${intensity})`; 
-                }
+                ctx.strokeStyle = `rgba(40, 20, 10, ${intensity})`; 
                 ctx.lineWidth = strokeW * Math.sqrt(view.scale);
                 ctx.setLineDash([]);
             }
