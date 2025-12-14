@@ -273,29 +273,96 @@ public class WorkbenchControl : Control
 
         if (e.Button != MouseButtons.Left) return;
 
-        // 3. Creation Tools
-        if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
+    
+    // 3. Tool Creation
+    if (ToolManager.Instance.CurrentTool == ToolType.DrawLine)
+    {
+         var line = new LaserPath { Name = "Line", Position = snappedPos };
+         line.Points.Add(snappedPos);
+         line.Points.Add(snappedPos);
+         ProjectState.Instance.AddObject(line);
+         _interactionObject = line;
+         _isDragging = true;
+         _dragStartPos = snappedPos;
+         _moveStartPos = snappedPos; // Track end of line
+         return;
+    }
+    else if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
+    {
+         var box = new LaserRectangle { Name = "Rectangle", Position = snappedPos, Size = new SizeF(0, 0) };
+         ProjectState.Instance.AddObject(box);
+         _interactionObject = box;
+         _isDragging = true;
+         _dragStartPos = snappedPos;
+         return;
+    }
+    else if (ToolManager.Instance.CurrentTool == ToolType.Text)
+    {
+        // Prompt for text
+        string val = "Text";
+        // Simple Input Dialog using Form
+        using (var form = new Form())
+        using (var txt = new TextBox())
+        using (var btn = new Button())
         {
-            var box = new LaserRectangle { Name = "Rectangle", Position = snappedPos, Size = new SizeF(0, 0) };
-            ProjectState.Instance.AddObject(box);
-            _interactionObject = box;
-            _isDragging = true;
-            _dragStartPos = snappedPos;
-            return;
-        }
-        
-        if (ToolManager.Instance.CurrentTool == ToolType.DrawLine)
-        {
-            var line = new LaserPath { Name = "Line", Position = snappedPos };
-            line.Points.Add(snappedPos);
-            line.Points.Add(snappedPos); 
-            ProjectState.Instance.AddObject(line);
-            _interactionObject = line;
-            _isDragging = true;
-            return;
+            form.Text = "Enter Text";
+            form.Size = new Size(300, 150);
+            form.StartPosition = FormStartPosition.CenterParent;
+            form.FormBorderStyle = FormBorderStyle.FixedDialog;
+            form.MaximizeBox = false;
+            form.MinimizeBox = false;
+            
+            txt.Text = "Text";
+            txt.Location = new Point(10, 10);
+            txt.Width = 260;
+            
+            btn.Text = "OK";
+            btn.DialogResult = DialogResult.OK;
+            btn.Location = new Point(190, 50);
+            
+            form.Controls.Add(txt);
+            form.Controls.Add(btn);
+            form.AcceptButton = btn;
+            
+            if (form.ShowDialog() == DialogResult.OK)
+            {
+                val = txt.Text;
+            }
+            else
+            {
+                return; // Cancelled
+            }
         }
 
-        if (ToolManager.Instance.CurrentTool == ToolType.Ruler)
+        if (string.IsNullOrWhiteSpace(val)) return;
+
+        var t = new LaserText();
+        t.Text = val;
+        t.Position = snappedPos;
+        // Size will be calculated on Draw or we set a default?
+        // Let's force a measure? Or let Draw handle it.
+        // Draw calculates Size if it changes? 
+        // LaserText.Draw updates .Size property.
+        // Issue: Selection Box needs Size immediately for HitTest/Draw Highlight.
+        // We can create a temporary bitmap to measure.
+        using (var tmpBmp = new Bitmap(1, 1))
+        using (var g = Graphics.FromImage(tmpBmp))
+        using (var f = new Font(t.FontName, t.FontSize))
+        {
+             t.Size = g.MeasureString(t.Text, f);
+        }
+
+        ProjectState.Instance.AddObject(t);
+        
+        // Auto-select
+        ProjectState.Instance.SelectedObjects = new List<LaserObject> { t };
+        
+        // Switch back to select for convenience
+        ToolManager.Instance.SetTool(ToolType.Select);
+        
+        Invalidate();
+        return;
+    }    if (ToolManager.Instance.CurrentTool == ToolType.Ruler)
         {
              _isMeasuring = true;
              _measureStart = worldPos;
@@ -563,6 +630,16 @@ public class WorkbenchControl : Control
         {
             _isPanning = false;
             Cursor = Cursors.Default;
+            // If we were panning, we are done.
+            return;
+        }
+
+        if (e.Button == MouseButtons.Left && ToolManager.Instance.CurrentTool == ToolType.Text)
+        {
+            // Cancel? No, just finish.
+            // Actually, preventing text creation on drag end.
+            // For now, text creation is on MouseDown, so this might be redundant unless we want drag-to-size.
+            // Let's assume click-only for now.
         }
 
         if (_isSelecting)

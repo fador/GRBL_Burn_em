@@ -293,12 +293,17 @@ public class LaserText : LaserObject
         // Text drawing needs unflip
         // Text drawing needs unflip
         var state = g.Save();
-        g.TranslateTransform(Position.X, Position.Y);
+        // Position is Bottom-Left. We want to draw text starting there, but Graphics.DrawString draws Top-Down.
+        // And we have Y-Up world coordinates.
+        // We need to translate to Top-Left of the text box (Position.Y + Size.Height).
+        // Then flip Y to get Top-Down coordinates for DrawString.
+        
+        g.TranslateTransform(Position.X, Position.Y + Size.Height);
         g.ScaleTransform(1, -1);
         
         using (var font = new Font(FontName, FontSize))
         {
-            g.DrawString(Text, font, brush, 0, 0); // Local 0,0
+            g.DrawString(Text, font, brush, 0, 0); // Local 0,0 is now Top-Left of text
             
             // Measure while font is alive
             // Note: MeasureString might be affected by transform?

@@ -570,6 +570,7 @@ public partial class MainForm : Form
             { "Select", ToolType.Select },
             { "Line", ToolType.DrawLine },
             { "Box", ToolType.DrawBox },
+            { "Text", ToolType.Text },
             { "Ruler", ToolType.Ruler }
         };
 
