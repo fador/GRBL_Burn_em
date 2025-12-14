@@ -111,13 +111,16 @@ public class PreviewForm : Form
             GL.glEnd();
 
             // 2. Cut Moves (Future)
-            GL.glColor4f(0f, 0f, 0f, 0.1f); // Faint Gray/Black
             GL.glBegin(GL.GL_LINES);
             for (int i = 0; i < Commands.Count; i++)
             {
                var cmd = Commands[i];
                if (cmd.Type == CommandType.Cut && i > CurrentIndex)
                {
+                   float alpha = cmd.Power / 1000f;
+                   if (alpha < 0.05f) alpha = 0.05f; // Min visibility
+                   GL.glColor4f(0f, 0f, 0f, alpha * 0.5f); // Faint Black with power opacity
+
                    GL.glVertex2f(cmd.Start.X, cmd.Start.Y);
                    GL.glVertex2f(cmd.End.X, cmd.End.Y);
                }

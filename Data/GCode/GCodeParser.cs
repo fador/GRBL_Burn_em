@@ -50,7 +50,7 @@ public class GCodeParser
 
                 foreach (var part in parts)
                 {
-                    if (part.StartsWith("G0")) { currentMode = CommandType.Travel; }
+                    if (part.StartsWith("G0")) { currentMode = CommandType.Travel; currentPower = 0; }
                     else if (part.StartsWith("G1")) { currentMode = CommandType.Cut; }
                     else if (part.StartsWith("M3") || part.StartsWith("M4")) { isLaserOn = true; }
                     else if (part.StartsWith("M5")) { isLaserOn = false; currentPower = 0; }
@@ -80,6 +80,12 @@ public class GCodeParser
                 cmd.End = new PointF(newX, newY);
                 cmd.Power = isLaserOn ? currentPower : 0; 
                 if (!isLaserOn) cmd.Power = 0;
+
+                // User Request: Treat Power 0 as Travel
+                if (cmd.Type == CommandType.Cut && cmd.Power <= 0)
+                {
+                    cmd.Type = CommandType.Travel;
+                }
                 
                 result.Add(cmd);
             }
