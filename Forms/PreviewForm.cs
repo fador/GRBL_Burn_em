@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
 using laser_gui_test.Data.GCode;
+using laser_gui_test.Controls;
+using laser_gui_test.Data.OpenGL;
 
 namespace laser_gui_test.Forms;
 
@@ -12,7 +13,8 @@ public class PreviewForm : Form
 {
     private SplitContainer _split = null!;
     private DataGridView _grid = null!;
-    private PictureBox _renderArea = null!;
+    // Use our custom OpenGLControl instead of PictureBox
+    private PreviewGLControl _renderArea = null!;
     private Panel _controlsPanel = null!;
     private Button _btnPlay = null!;
     private Button _btnPause = null!;
@@ -24,11 +26,135 @@ public class PreviewForm : Form
     private int _currentIndex = 0;
     private System.Windows.Forms.Timer _playTimer = null!;
 
-    // View Transforms
+    // View Transforms (Now handled by OpenGL projection)
     private float _scale = 10f; // Pixels per mm
-    private PointF _pan = PointF.Empty;
-    private Point _lastMouse;
-    private bool _isPanning;
+    private float _panX = 0;
+    private float _panY = 0;
+    
+    // Internal class for Render Logic
+    private class PreviewGLControl : OpenGLControl
+    {
+        public List<GCodeCommand>? Commands;
+        public int CurrentIndex;
+        public float ViewScale = 1f;
+        public float PanX = 0f;
+        public float PanY = 0f;
+        public float RasterInterval = 0.1f;
+
+        public override void OnRender()
+        {
+            GL.glClearColor(1f, 1f, 1f, 1f); // White BG
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT);
+
+            if (Commands == null || Commands.Count == 0) return;
+
+            // Setup Projection
+            GL.glMatrixMode(GL.GL_PROJECTION);
+            GL.glLoadIdentity();
+            // Origin is bottom-left in G-code usually, but screen is top-left. 
+            // Let's keep specific coordinate system:
+            // glOrtho(left, right, bottom, top, -1, 1)
+            // We want (0,0) to be where Pan says, scaled by Scale.
+            // Actually, simplest is: Map 0..Width to 0..Width/Scale
+            
+            float w = Width / ViewScale;
+            float h = Height / ViewScale;
+            // Center logic:
+            // The view shows [PanX, PanX + w] x [PanY, PanY + h]
+            // Standard Cartesian: Y up. GDI+ was Y down (Top-Left 0,0).
+            // G-Code is usually Y up (Bottom-Left 0,0).
+            // Let's use Y Up for OGL.
+            
+            GL.glOrtho(PanX, PanX + w, PanY, PanY + h, -1, 1);
+            
+            GL.glMatrixMode(GL.GL_MODELVIEW);
+            GL.glLoadIdentity();
+
+            // Set Line Width
+            // GL standard line width is pixels. 
+            // If we want physical width, we need to draw QUADS or ensure Scale acts on it.
+            // standard glLineWidth is screen pixels.
+            // User wanted "RasterLineInterval" thickness.
+            // If Interval is 0.1mm, and Scale is 10px/mm, then width is 1px.
+            
+            float pixelWidth = Math.Max(1.0f, RasterInterval * ViewScale); 
+            GL.glLineWidth(pixelWidth);
+
+            GL.glEnable(GL.GL_BLEND);
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA);
+
+            // Draw Full Path (Faint) - Future
+            // OPTIMIZATION: Use Vertex Arrays if this is too slow. Initialize loop is OK for <100k points in immediate mode for modern CPUs.
+            
+            // 1. Travel Moves (Future)
+            GL.glColor3f(0.8f, 0.8f, 1.0f); // Light Blue
+            GL.glBegin(GL.GL_LINES);
+            for (int i = 0; i < Commands.Count; i++)
+            {
+               var cmd = Commands[i];
+               if (cmd.Type == CommandType.Travel && i > CurrentIndex)
+               {
+                   GL.glVertex2f(cmd.Start.X, cmd.Start.Y);
+                   GL.glVertex2f(cmd.End.X, cmd.End.Y);
+               }
+            }
+            GL.glEnd();
+
+            // 2. Cut Moves (Future)
+            GL.glColor4f(0f, 0f, 0f, 0.1f); // Faint Gray/Black
+            GL.glBegin(GL.GL_LINES);
+            for (int i = 0; i < Commands.Count; i++)
+            {
+               var cmd = Commands[i];
+               if (cmd.Type == CommandType.Cut && i > CurrentIndex)
+               {
+                   GL.glVertex2f(cmd.Start.X, cmd.Start.Y);
+                   GL.glVertex2f(cmd.End.X, cmd.End.Y);
+               }
+            }
+            GL.glEnd();
+
+            // 3. Executed Moves
+            GL.glBegin(GL.GL_LINES);
+            for (int i = 0; i <= Math.Min(CurrentIndex, Commands.Count - 1); i++)
+            {
+                var cmd = Commands[i];
+                if (cmd.Type == CommandType.Travel)
+                {
+                    GL.glColor3f(0f, 0f, 1f); // Blue
+                    GL.glVertex2f(cmd.Start.X, cmd.Start.Y);
+                    GL.glVertex2f(cmd.End.X, cmd.End.Y);
+                }
+                else if (cmd.Type == CommandType.Cut)
+                {
+                    // Power variable opacity
+                    float alpha = cmd.Power / 1000f;
+                    if (alpha < 0.1f) alpha = 0.1f;
+                    GL.glColor4f(1f, 0f, 0f, alpha); // Red
+                    GL.glVertex2f(cmd.Start.X, cmd.Start.Y);
+                    GL.glVertex2f(cmd.End.X, cmd.End.Y);
+                }
+            }
+            GL.glEnd();
+
+            // 4. Head Position
+            if (CurrentIndex < Commands.Count)
+            {
+                var cmd = Commands[CurrentIndex];
+                var head = cmd.End;
+                float size = 5f / ViewScale; // 5 screen pixels in world coords
+                
+                GL.glColor3f(1f, 0f, 0f);
+                GL.glLineWidth(2f);
+                GL.glBegin(GL.GL_LINES);
+                GL.glVertex2f(head.X - size, head.Y - size);
+                GL.glVertex2f(head.X + size, head.Y + size);
+                GL.glVertex2f(head.X + size, head.Y - size);
+                GL.glVertex2f(head.X - size, head.Y + size);
+                GL.glEnd();
+            }
+        }
+    }
 
     public PreviewForm(string gcode)
     {
@@ -36,10 +162,12 @@ public class PreviewForm : Form
         
         _commands = GCodeParser.Parse(gcode);
         _grid.DataSource = _commands;
+        _renderArea.RasterInterval = Data.AppConfiguration.Instance.RasterLineInterval;
         
         if (_commands.Count > 0)
         {
              _timeline.Maximum = _commands.Count - 1;
+             _renderArea.Commands = _commands;
              FitToScreen();
         }
 
@@ -49,7 +177,7 @@ public class PreviewForm : Form
 
     private void InitializeComponent()
     {
-        this.Text = "Laser Preview";
+        this.Text = "Laser Preview (OpenGL)";
         this.Size = new Size(1000, 700);
         this.StartPosition = FormStartPosition.CenterParent;
 
@@ -88,6 +216,7 @@ public class PreviewForm : Form
                 {
                     _currentIndex = idx;
                     _timeline.Value = Math.Min(idx, _timeline.Maximum);
+                    _renderArea.CurrentIndex = _currentIndex;
                     _renderArea.Invalidate();
                 }
             }
@@ -99,10 +228,14 @@ public class PreviewForm : Form
         var rightPanel = new Panel { Dock = DockStyle.Fill };
         
         _controlsPanel = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = Color.LightGray };
-        _renderArea = new PictureBox { Dock = DockStyle.Fill, BackColor = Color.White };
+        
+        // Initialize OpenGL Control
+        _renderArea = new PreviewGLControl { Dock = DockStyle.Fill, BackColor = Color.White };
         
         // Render Area Events
-        _renderArea.Paint += RenderArea_Paint;
+        Point _lastMouse = Point.Empty;
+        bool _isPanning = false;
+
         _renderArea.MouseDown += (s, e) => 
         { 
             if (e.Button == MouseButtons.Middle || e.Button == MouseButtons.Right) 
@@ -115,8 +248,29 @@ public class PreviewForm : Form
         {
             if (_isPanning)
             {
-                _pan.X += e.X - _lastMouse.X;
-                _pan.Y += e.Y - _lastMouse.Y;
+                // In OpenGL orthographic, moving mouse right (positive X) should move View Left (PanX decreases)
+                // But typically Pan represents the "Camera Position" or "Window Left".
+                // If I drag mouse Left (-X), I want to see more Right. So Window Left increases.
+                float dx = (e.X - _lastMouse.X) / _scale;
+                float dy = (e.Y - _lastMouse.Y) / _scale; 
+                
+                // GDI+ Translate was: g.Translate(PanX, PanY).
+                // If I moved mouse right (+50px), PanX increased +50. GDI+ shifted content Right.
+                // Here, PanX is "Left Edge of View".
+                // To shift content Right, we need to show content that is further Left. So PanX should Decrease.
+                
+                _panX -= dx;
+                _panY += dy; // Y is inverted in screen vs world usually?
+                // Screen Y is down. Mouse move down = +Y.
+                // World Y is up.
+                // If I drag mouse Down (+Y), I expect content to move Down.
+                // If content moves down, I am seeing more "Top" content.
+                // So Window Bottom (PanY) should Increase? 
+                // Let's test standard behavior.
+                
+                _renderArea.PanX = _panX;
+                _renderArea.PanY = _panY;
+                
                 _lastMouse = e.Location;
                 _renderArea.Invalidate();
             }
@@ -125,11 +279,28 @@ public class PreviewForm : Form
         _renderArea.MouseWheel += (s, e) => 
         {
             float factor = e.Delta > 0 ? 1.1f : 0.9f;
-            _scale *= factor;
+            // Zoom at Mouse Pointer?
+            // Current World Pos at Mouse:
+            // Wx = PanX + MouseX / Scale
+            // New Scale = Scale * Factor
+            // New PanX needs such that Wx = NewPanX + MouseX / NewScale
+            // NewPanX = Wx - MouseX / NewScale
+            
+            float mouseWorldX = _panX + e.X / _scale;
+            float mouseWorldY = _panY + (_renderArea.Height - e.Y) / _scale; // OGL Height flip
+
+             _scale *= factor;
+            
+            _panX = mouseWorldX - e.X / _scale;
+            _panY = mouseWorldY - (_renderArea.Height - e.Y) / _scale;
+
+            _renderArea.ViewScale = _scale;
+            _renderArea.PanX = _panX;
+            _renderArea.PanY = _panY;
             _renderArea.Invalidate();
         };
 
-        // Controls
+        // Controls (Same as before)
         _btnPlay = new Button { Text = "Play", Location = new Point(10, 10) };
         _btnPause = new Button { Text = "Pause", Location = new Point(90, 10) };
         _btnStop = new Button { Text = "Stop", Location = new Point(170, 10) };
@@ -142,12 +313,13 @@ public class PreviewForm : Form
         {
             _currentIndex = _timeline.Value;
             UpdateSelection();
+            _renderArea.CurrentIndex = _currentIndex;
             _renderArea.Invalidate();
         };
 
         _btnPlay.Click += (s, e) => { _playTimer.Start(); };
         _btnPause.Click += (s, e) => { _playTimer.Stop(); };
-        _btnStop.Click += (s, e) => { _playTimer.Stop(); _currentIndex = 0; UpdateSelection(); _renderArea.Invalidate(); };
+        _btnStop.Click += (s, e) => { _playTimer.Stop(); _currentIndex = 0; UpdateSelection(); _renderArea.CurrentIndex = 0; _renderArea.Invalidate(); };
 
         _controlsPanel.Controls.Add(_btnPlay);
         _controlsPanel.Controls.Add(_btnPause);
@@ -174,6 +346,7 @@ public class PreviewForm : Form
         }
         
         UpdateSelection();
+        _renderArea.CurrentIndex = _currentIndex;
         _renderArea.Invalidate();
         _timeline.Value = Math.Min(_currentIndex, _timeline.Maximum);
     }
@@ -192,78 +365,6 @@ public class PreviewForm : Form
             catch{}
         }
     }
-
-    private void RenderArea_Paint(object? sender, PaintEventArgs e)
-    {
-        if (_commands == null || _commands.Count == 0) return;
-
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.None; // Crisp pixels for raster lines
-        g.InterpolationMode = InterpolationMode.NearestNeighbor;
-        g.PixelOffsetMode = PixelOffsetMode.Half; // Aligns pixels better
-        g.TranslateTransform(_pan.X, _pan.Y);
-        g.ScaleTransform(_scale, _scale);
-
-        // Draw Background (All commands as faint lines?)
-        // Caching: We should draw ALL commands to a bitmap once, then draw that bitmap.
-        // But for "Progress" we want to highlight executed ones.
-        // Strategy:
-        // 1. Draw "Future" lines in Light Gray.
-        // 2. Draw "Past" lines in Dark Color/Red.
-        // 3. Draw Laser Head.
-        
-       
-        // Simple implementation first: Iterate all loop. Optimization later.
-        
-        using var penTravel = new Pen(Color.LightBlue, 0) { DashStyle = DashStyle.Dot }; // 0 width = 1 pixel always
-        
-        // Raster Line Interval for Cut width
-        float interval = Data.AppConfiguration.Instance.RasterLineInterval;
-        if (interval <= 0) interval = 0.1f;
-        
-        using var penCut = new Pen(Color.FromArgb(50, 0, 0, 0), interval); // Future Cut (Faint)
-        using var penExecuted = new Pen(Color.Red, interval); // Past Cut
-        using var penTravelExecuted = new Pen(Color.Blue, 0) { DashStyle = DashStyle.Dot }; // Past Travel
-
-        // naive render loop
-        // Optimization: dynamic step?
-        // Let's try drawing only a window of commands? No, we need context.
-        
-        for (int i = 0; i < _commands.Count; i++)
-        {
-            var cmd = _commands[i];
-            if (cmd.Type == CommandType.Other) continue;
-
-            bool isPast = i <= _currentIndex;
-            var pen = cmd.Type == CommandType.Travel 
-                ? (isPast ? penTravelExecuted : penTravel)
-                : (isPast ? penExecuted : penCut);
-            
-            // Adjust Opacity for Power?
-            if (cmd.Type == CommandType.Cut && isPast)
-            {
-                 int alpha = (int)(255 * (cmd.Power / 1000f));
-                 if (alpha < 20) alpha = 20; // Min visibility
-                 penExecuted.Color = Color.FromArgb(alpha, 255, 0, 0);
-                 pen = penExecuted;
-            }
-
-            g.DrawLine(pen, cmd.Start, cmd.End);
-        }
-
-        // Draw Head
-        if (_currentIndex < _commands.Count)
-        {
-            var cmd = _commands[_currentIndex];
-            var headPos = cmd.End; // Current position is end of current command
-            
-            float headSize = 5f / _scale;
-            using var rPen = new Pen(Color.Red, 2f / _scale);
-            g.DrawLine(rPen, headPos.X - headSize, headPos.Y - headSize, headPos.X + headSize, headPos.Y + headSize);
-            g.DrawLine(rPen, headPos.X + headSize, headPos.Y - headSize, headPos.X - headSize, headPos.Y + headSize);
-        }
-    }
-
     
     private void FitToScreen()
     {
@@ -291,9 +392,22 @@ public class PreviewForm : Form
         float ratioY = (_renderArea.Height - 40) / h;
         _scale = Math.Min(ratioX, ratioY);
         
-        // Center
-        _pan = new PointF(20 - minX * _scale, 20 - minY * _scale);
+        // Center: Pan X/Y are "Left/Bottom" of view in World coords
+        // We want Center of Model to be Center of Screen.
+        // Screen Center = [W/2, H/2]
+        // Model Center = [MinX + w/2, MinY + h/2]
         
+        // ViewWidth in World = ScreenWidth / Scale;
+        
+        float viewW = _renderArea.Width / _scale;
+        float viewH = _renderArea.Height / _scale;
+        
+        _panX = (minX + w / 2) - viewW / 2;
+        _panY = (minY + h / 2) - viewH / 2;
+        
+        _renderArea.ViewScale = _scale;
+        _renderArea.PanX = _panX;
+        _renderArea.PanY = _panY;
         _renderArea.Invalidate();
     }
 }
