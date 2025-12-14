@@ -41,103 +41,183 @@ public class GrblGenerator : IGCodeGenerator
             yield break;
         }
 
-        // Common settings
-        float sVal = obj.Power * 10f; // 0-100 -> 0-1000
-        float fVal = obj.Speed;
+        // Get Layer Settings
+        var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId) 
+                    ?? ProjectState.Instance.Layers.FirstOrDefault();
+        
+        float pwrPercent = layer?.Power ?? obj.Power;
+        float speedVal = layer?.Speed ?? obj.Speed;
+        LayerMode mode = layer?.Mode ?? LayerMode.Cut;
 
-        if (obj is LaserPath path)
+        // Force Fill for Images (they are always raster) works naturally
+        // But if user sets Image layer to "Cut", what happens? Images can't be cut effectively without vectorizing.
+        // We will treat Images as Raster always, but use Layer Speed/Power.
+
+        float sVal = pwrPercent * 10f; // 0-100 -> 0-1000
+        float fVal = speedVal;
+
+        // If Mode is CUT, generate Vector GCode (unless Image)
+        if (mode == LayerMode.Cut && !(obj is LaserImage))
         {
-            if (path.Points.Count < 2) yield break;
-
-            // Move to start
-            var start = path.Points[0];
-            yield return $"G0 X{start.X:F3} Y{start.Y:F3}";
-            yield return $"G1 F{fVal:F0}"; // Set speed
-
-            for (int i = 1; i < path.Points.Count; i++)
+            if (obj is LaserText text)
             {
-                var p = path.Points[i];
-                yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                // Text "Cut" means Outline?
+                // GraphicsPath from text can be used.
+                // For now, let's assume Text in Cut mode is Outline.
+                // Converting Text to Path is complex without GraphicsPath APIs.
+                // Simplest fallback: If Text is in Cut mode, treat as Fill (Raster) for now or warn?
+                // Or maybe the user expects valid "Cut" behavior for text?
+                // Let's fallback to Raster for Text even in Cut mode because we don't have a Vectorizer here yet,
+                // UNLESS we implement GraphicsPath iterator.
+                // Given the scope, let's Rasterize Text always for now to guarantee output.
+                // OR: Implement simple vector text if possible. 
+                // Let's stick to Raster for Text for safety in this iteration.
+                mode = LayerMode.Fill; 
             }
-            yield return "G1 S0"; // Turn off after path
-        }
-        else if (obj is LaserRectangle rect)
-        {
-            float l = rect.Position.X;
-            float t = rect.Position.Y;
-            float r = l + rect.Size.Width;
-            float b = t + rect.Size.Height;
-
-            yield return $"G0 X{l:F3} Y{t:F3}";
-            yield return $"G1 F{fVal:F0}";
-
-            yield return $"G1 X{r:F3} Y{t:F3} S{sVal:F0}";
-            yield return $"G1 X{r:F3} Y{b:F3} S{sVal:F0}";
-            yield return $"G1 X{l:F3} Y{b:F3} S{sVal:F0}";
-            yield return $"G1 X{l:F3} Y{t:F3} S{sVal:F0}";
-            yield return "G1 S0";
-        }
-        else if (obj is LaserImage img)
-        {
-            // Rasterize
-            float interval = AppConfiguration.Instance.RasterLineInterval;
-            float minSeg = AppConfiguration.Instance.MinRasterSegmentLength;
-            bool bicubic = AppConfiguration.Instance.EnableBicubicResampling;
-            bool dither = AppConfiguration.Instance.Enable1BitDithering;
-            
-            foreach (var line in Rasterizer.Rasterize(img, sVal, fVal, interval, minSeg, bicubic, dither))
+            else if (obj is LaserPath path)
             {
-                yield return line;
+                if (path.Points.Count < 2) yield break;
+                // Move to start
+                var start = path.Points[0];
+                yield return $"G0 X{start.X:F3} Y{start.Y:F3}";
+                yield return $"G1 F{fVal:F0}"; 
+
+                for (int i = 1; i < path.Points.Count; i++)
+                {
+                    var p = path.Points[i];
+                    yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                }
+                yield return "G1 S0"; 
+                yield break;
+            }
+            else if (obj is LaserRectangle rect)
+            {
+                float l = rect.Position.X;
+                float t = rect.Position.Y;
+                float r = l + rect.Size.Width;
+                float b = t + rect.Size.Height;
+
+                yield return $"G0 X{l:F3} Y{t:F3}";
+                yield return $"G1 F{fVal:F0}";
+
+                yield return $"G1 X{r:F3} Y{t:F3} S{sVal:F0}";
+                yield return $"G1 X{r:F3} Y{b:F3} S{sVal:F0}";
+                yield return $"G1 X{l:F3} Y{b:F3} S{sVal:F0}";
+                yield return $"G1 X{l:F3} Y{t:F3} S{sVal:F0}";
+                yield return "G1 S0";
+                yield break;
             }
         }
-        else if (obj is LaserText text)
+
+        // If we are here, it is either FILL Mode OR it is an Image
+        // Rasterization Logic
+        
+        Bitmap? bitmapToRasterize = null;
+        bool disposeBitmap = false;
+        PointF rasterPos = obj.Position;
+        SizeF rasterSize = obj.Size;
+
+        if (obj is LaserImage img)
         {
-            // On-the-fly rasterization for text
-            // ... (Bitmap generation code omitted for brevity as it is unchanged mostly) ... 
-            
-            // Create a bitmap for the text
-            var bounds = text.GetBounds();
+             bitmapToRasterize = img.Image;
+        }
+        else
+        {
+            // Vector to Bitmap for Fill
+            var bounds = obj.GetBounds();
             if (bounds.Width <= 0 || bounds.Height <= 0) yield break;
 
-            float dpmm = 10f; 
-            int w = (int)Math.Max(1, Math.Ceiling(bounds.Width * dpmm));
-            int h = (int)Math.Max(1, Math.Ceiling(bounds.Height * dpmm));
+            // Resolution for Rasterization (Pixels per mm)
+            // AppConfiguration.Instance.RasterLineInterval (mm/line). 
+            // If 0.1 mm, then 10 lines/mm.
+            float interval = AppConfiguration.Instance.RasterLineInterval;
+            if (interval <= 0) interval = 0.1f;
+            float dpmm = 1.0f / interval; 
             
-            using var bmp = new Bitmap(w, h);
-            using (var g = Graphics.FromImage(bmp))
+            // Limit resolution to avoid huge bitmaps
+            // Max 10000x10000?
+            int w = (int)Math.Ceiling(bounds.Width * dpmm);
+            int h = (int)Math.Ceiling(bounds.Height * dpmm);
+            
+            if (w > 0 && h > 0)
             {
-                g.Clear(Color.White); // White is "Off"
-                g.ScaleTransform(dpmm, dpmm);
-                
-                g.TranslateTransform(-bounds.X, -bounds.Y); 
-                text.Draw(g, 1.0f); 
+                bitmapToRasterize = new Bitmap(w, h);
+                disposeBitmap = true;
+                rasterPos = bounds.Location;
+                rasterSize = bounds.Size;
+
+                using (var g = Graphics.FromImage(bitmapToRasterize))
+                {
+                    g.Clear(Color.White); // Background White (No Burn)
+                    g.ScaleTransform(dpmm, dpmm);
+                    g.TranslateTransform(-bounds.X, -bounds.Y);
+                    
+                    using (var brush = new SolidBrush(Color.Black)) // Black = Burn
+                    {
+                        if (obj is LaserRectangle)
+                        {
+                            g.FillRectangle(brush, obj.Position.X, obj.Position.Y, obj.Size.Width, obj.Size.Height);
+                        }
+                        else if (obj is LaserPath lp)
+                        {
+                             if (lp.Points.Count > 2)
+                                 g.FillPolygon(brush, lp.Points.ToArray());
+                        }
+                        else if (obj is LaserText lt)
+                        {
+                             // Simple draw for now
+                             // Text Draw method does transform. We need to match.
+                             // Text.Draw uses Position. We normalized manually above?
+                             // No, we translated G so 0,0 is Bounds TopLeft.
+                             // Text Position is in World.
+                             // If we just call Draw, it should draw at world coords, which are shifted by TranslateTransform.
+                             // But Text Draw expects to handle Scale(1,-1) itself for upright?
+                             // Our bitmap is Top-Down.
+                             // Text Logic:
+                             // g.TranslateTransform(Position.X, Position.Y);
+                             // g.ScaleTransform(1, -1);
+                             
+                             // We don't want the Y-flip for the bitmap generation if we just want "Black pixels where text is".
+                             // But Rasterizer expects standard image logic?
+                             // Rasterizer iterates Y top to bottom.
+                             // So we should draw Text Normally (Upright).
+                             
+                             // We can use Graphics.DrawString directly here.
+                             using (var f = new Font(lt.FontName, lt.FontSize)) // Unit?
+                             {
+                                 // DrawString coordinates are local. 
+                                 // We established transform.
+                                 g.DrawString(lt.Text, f, brush, lt.Position.X, lt.Position.Y);
+                             }
+                        }
+                    }
+                }
             }
+        }
 
-            // Create a temp LaserImage
-            var tempImg = new LaserImage
-            {
-                Position = bounds.Location,
-                Size = bounds.Size,
-                Image = bmp,
-                Power = obj.Power,
-                Speed = obj.Speed
-            };
-
+        if (bitmapToRasterize != null)
+        {
             float interval = AppConfiguration.Instance.RasterLineInterval;
             float minSeg = AppConfiguration.Instance.MinRasterSegmentLength;
-            // Bicubic for text? Text bitmap is generated at high res (10 pixels/mm). 
-            // If we use bicubic, it might smooth edges if scaled. 
-            // But here we generated it at "native" resolution for raster?
-            // Actually, if interval is 0.1mm, we match 10 pixels/mm.
-            // If interval is 0.3mm, we are "downscaling" the rows.
-            // Bicubic might help if interval > 0.1mm.
             bool bicubic = AppConfiguration.Instance.EnableBicubicResampling;
             bool dither = AppConfiguration.Instance.Enable1BitDithering;
+
+            // Temp image wrapper
+            var tempImg = new LaserImage
+            {
+                Image = bitmapToRasterize,
+                Position = rasterPos,
+                Size = rasterSize,
+                Power = pwrPercent,
+                Speed = speedVal
+            };
 
             foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval, minSeg, bicubic, dither))
             {
                 yield return line;
             }
+
+            if (disposeBitmap) bitmapToRasterize.Dispose();
         }
     }
     public IEnumerable<string> GenerateFraming(IEnumerable<LaserObject> objects, float power, float speed)

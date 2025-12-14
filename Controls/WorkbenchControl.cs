@@ -37,12 +37,22 @@ public class WorkbenchControl : Control
         return new PointF(x, y);
     }
 
+    public float Zoom => _zoom;
+    public PointF PanOffset => _panOffset;
+
     public WorkbenchControl()
     {
         DoubleBuffered = true;
         ResizeRedraw = true;
         BackColor = Color.WhiteSmoke;
         
+        // Load View Settings
+        if (AppConfiguration.Instance.LastZoom > 0.01f) // Basic sanity check
+        {
+            _zoom = AppConfiguration.Instance.LastZoom;
+            _panOffset = new PointF(AppConfiguration.Instance.LastPanX, AppConfiguration.Instance.LastPanY);
+        }
+
         // Connect to data updates
         ProjectState.Instance.Objects.ListChanged += (s, e) => Invalidate();
     }

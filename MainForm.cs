@@ -15,7 +15,9 @@ public partial class MainForm : Form
     public static MainForm Instance => _instance ??= new MainForm();
 
     private WorkbenchControl _workbench = null!;
+    private TabControl _rightTabControl = null!;
     private DataGridView _objectList = null!;
+    private DataGridView _layerList = null!;
     private FlowLayoutPanel _layerPanel = null!;
     private FlowLayoutPanel _toolsPanel = null!;
     private GroupBox _controlPanel = null!;
@@ -27,6 +29,24 @@ public partial class MainForm : Form
     private NumericUpDown _numSizeW = null!;
     private NumericUpDown _numSizeH = null!;
     private bool _isUpdatingUI = false;
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        try
+        {
+             // Save View Settings
+             AppConfiguration.Instance.LastZoom = _workbench.Zoom;
+             AppConfiguration.Instance.LastPanX = _workbench.PanOffset.X;
+             AppConfiguration.Instance.LastPanY = _workbench.PanOffset.Y;
+             AppConfiguration.Instance.Save();
+        }
+        catch(Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error saving config: {ex.Message}");
+        }
+
+        base.OnFormClosing(e);
+    }
 
     public MainForm()
     {
@@ -113,12 +133,16 @@ public partial class MainForm : Form
         var rightSplit = new SplitContainer
         {
             Dock = DockStyle.Right,
-            Width = 250,
+            Width = 300,
             Orientation = Orientation.Horizontal,
-            SplitterDistance = 200
+            SplitterDistance = 100
         };
 
-        // Object List (Top of Right)
+        // Object List & Layers Tab Control
+        _rightTabControl = new TabControl { Dock = DockStyle.Fill };
+        
+        // Tab 1: Objects
+        var tabObjects = new TabPage("Objects");
         _objectList = new DataGridView
         {
             Dock = DockStyle.Fill,
@@ -126,15 +150,134 @@ public partial class MainForm : Form
             DataSource = ProjectState.Instance.Objects,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             RowHeadersVisible = false,
-            MultiSelect = true,
-            Height = 200
+            MultiSelect = true
         };
         _objectList.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = "IsEnabled", HeaderText = "On", Width = 30 });
         _objectList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Name", HeaderText = "Name", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-        _objectList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Power", HeaderText = "Pwr%", Width = 50 });
-        _objectList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Speed", HeaderText = "Spd", Width = 50 });
+        _objectList.Columns.Add(new DataGridViewTextBoxColumn { Name = "LayerName", HeaderText = "Layer", Width = 80, ReadOnly = true });
+        _objectList.Columns.Add(new DataGridViewTextBoxColumn { Name = "LayerPower", HeaderText = "Pwr%", Width = 40, ReadOnly = true });
+        _objectList.Columns.Add(new DataGridViewTextBoxColumn { Name = "LayerSpeed", HeaderText = "Spd", Width = 40, ReadOnly = true });
         
-        // Selection Sync
+        tabObjects.Controls.Add(_objectList);
+        _rightTabControl.TabPages.Add(tabObjects);
+
+        // Tab 2: Layers
+        var tabLayers = new TabPage("Layers");
+        _layerList = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            AutoGenerateColumns = false,
+            DataSource = ProjectState.Instance.Layers, // BindingList<Layer>
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            RowHeadersVisible = false,
+            MultiSelect = false
+        };
+        
+        _layerList.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = "IsVisible", HeaderText = "Vis", Width = 30 });
+        _layerList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Name", HeaderText = "Name", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+        
+        // Color Column (Owner Draw ideally, but simple button/text for now? Let's use ReadOnly text with BackColor)
+        var colColor = new DataGridViewTextBoxColumn { DataPropertyName = "Color", HeaderText = "Color", Width = 40, ReadOnly = true };
+        _layerList.Columns.Add(colColor);
+        
+        _layerList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Speed", HeaderText = "Spd", Width = 50 });
+        _layerList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Power", HeaderText = "Pwr%", Width = 50 });
+        
+        // Mode ComboBox
+        var colMode = new DataGridViewComboBoxColumn 
+        { 
+            DataPropertyName = "Mode", 
+            HeaderText = "Mode", 
+            Width = 60,
+            DataSource = Enum.GetValues(typeof(LayerMode))
+        };
+        _layerList.Columns.Add(colMode);
+
+        // Layer List Events
+        _layerList.CellDoubleClick += (s, e) => 
+        {
+            if (e.RowIndex < 0) return;
+            var layer = ProjectState.Instance.Layers[e.RowIndex];
+            
+            // Color Picking
+            if (e.ColumnIndex == _layerList.Columns[2].Index) // Color
+            {
+                using var cd = new ColorDialog { Color = layer.Color };
+                if (cd.ShowDialog() == DialogResult.OK)
+                {
+                    layer.Color = cd.Color;
+                    _layerList.Refresh();
+                    InitializeLayers(); // Update bottom panel
+                    _workbench.Invalidate();
+                }
+            }
+        };
+
+        _layerList.CellFormatting += (s, e) => 
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= ProjectState.Instance.Layers.Count) return;
+            var layer = ProjectState.Instance.Layers[e.RowIndex];
+             
+             // Color Column
+             if (e.ColumnIndex == _layerList.Columns[2].Index) // Color defined above
+             {
+                 e.CellStyle.BackColor = layer.Color;
+                 e.CellStyle.SelectionBackColor = layer.Color;
+                 e.Value = ""; 
+                 e.FormattingApplied = true;
+             }
+        };
+        
+        _layerList.CellValueChanged += (s, e) => 
+        {
+             // Trigger updates
+             _workbench.Invalidate();
+             InitializeLayers(); // Update bottom buttons
+             _objectList.Refresh(); // Update object list layer info
+             UpdateSelectedObjects();
+        };
+
+        // Suppress DataError for ComboBox binding issues if any
+        _layerList.DataError += (s, e) => { e.Cancel = false; };
+
+        tabLayers.Controls.Add(_layerList);
+        _rightTabControl.TabPages.Add(tabLayers);
+
+        // Add Tabs to Right Panel
+        rightSplit.Panel1.Controls.Add(_rightTabControl);
+        
+        // ... (Binding Logic for ObjectList) ...
+        _objectList.CellFormatting += (s, e) => 
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _objectList.Rows.Count) return;
+            var row = _objectList.Rows[e.RowIndex];
+            if (row.DataBoundItem is not LaserObject obj) return;
+
+            // Find Layer
+            var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId);
+            
+            // NOTE: We check column by NAME to be safe
+            if (_objectList.Columns[e.ColumnIndex].Name == "LayerName")
+            {
+                e.Value = layer?.Name ?? "None";
+                e.FormattingApplied = true;
+            }
+            else if (_objectList.Columns[e.ColumnIndex].Name == "LayerPower")
+            {
+                e.Value = layer?.Power.ToString("0") ?? "0";
+                e.FormattingApplied = true;
+            }
+            else if (_objectList.Columns[e.ColumnIndex].Name == "LayerSpeed")
+            {
+                e.Value = layer?.Speed.ToString("0") ?? "0";
+                e.FormattingApplied = true;
+            }
+        };
+
+        // Handle DataError
+        _objectList.DataError += (s, e) => { e.Cancel = false; };
+        
+        // Selection Logic (Keep existing)
         _objectList.SelectionChanged += (s, e) => 
         {
             if(_isUpdatingSelection) return;
@@ -149,13 +292,6 @@ public partial class MainForm : Form
                     }
                 }
                 
-                // Avoid infinite loop if ProjectState triggers this
-                // We need equality check? Or just set it.
-                // Setting SelectedObjects triggers PropertyChanged, which we listen to below.
-                // We must ensure we don't re-select in list if list initiated it.
-                // But typically it's fine if we handle re-entrancy or if checks pass.
-                
-                // Simple check: identify if list matches state
                 var current = ProjectState.Instance.SelectedObjects;
                 if (!new HashSet<LaserObject>(current).SetEquals(list))
                 {
@@ -177,11 +313,10 @@ public partial class MainForm : Form
         {
             if (e.PropertyName == nameof(ProjectState.SelectedObject) || e.PropertyName == nameof(ProjectState.SelectedObjects))
             {
+                 // Update visual selection in list
                  UpdateSelectedObjects();
             }
         };
-
-        rightSplit.Panel1.Controls.Add(_objectList);
 
         // Control Panel (Bottom of Right)
         _controlPanel = new GroupBox
@@ -279,6 +414,28 @@ public partial class MainForm : Form
 
     private void InitializeLayers()
     {
+        _layerPanel.Controls.Clear();
+        
+        // Add "New Layer" Button
+        var btnAdd = new Button
+        {
+            Text = "+",
+            Size = new Size(30, 30),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.White
+        };
+        btnAdd.Click += (s, e) => 
+        {
+             // Create new layer
+             // We need a random color
+             var rnd = new Random();
+             var color = Color.FromArgb(rnd.Next(256), rnd.Next(256), rnd.Next(256));
+             var newLayer = new Layer($"Layer {ProjectState.Instance.Layers.Count}", color);
+             ProjectState.Instance.Layers.Add(newLayer);
+             InitializeLayers(); // Refresh
+        };
+        _layerPanel.Controls.Add(btnAdd);
+
         foreach (var layer in ProjectState.Instance.Layers)
         {
             var btn = new Button
@@ -288,11 +445,48 @@ public partial class MainForm : Form
                 FlatStyle = FlatStyle.Flat,
                 Tag = layer
             };
-            btn.Click += (s, e) => 
+            
+            // Tooltip for Layer Info
+            var tt = new ToolTip();
+            tt.SetToolTip(btn, $"{layer.Name}\nS:{layer.Speed} P:{layer.Power}% ({layer.Mode})");
+
+            btn.MouseUp += (s, e) => 
             {
-                ProjectState.Instance.ActiveLayer = layer;
-                if (s is Button b) UpdateLayerButtons(b);
+                if (e.Button == MouseButtons.Left)
+                {
+                     // Assign to selected objects if any
+                     var sel = ProjectState.Instance.SelectedObjects;
+                     if (sel.Count > 0)
+                     {
+                         foreach(var obj in sel) obj.LayerId = layer.Id;
+                         _objectList.Refresh();
+                         _workbench.Invalidate();
+                         UpdateSelectedObjects(); // Update props panel
+                     }
+                     
+                     ProjectState.Instance.ActiveLayer = layer;
+                     if (s is Button b) UpdateLayerButtons(b);
+                }
             };
+            
+            btn.DoubleClick += (s, e) => 
+            {
+                 using var dlg = new LayerSettingsForm(layer);
+                 if (dlg.ShowDialog() == DialogResult.OK)
+                 {
+                     layer.Name = dlg.LayerName;
+                     layer.Color = dlg.LayerColor;
+                     layer.Speed = dlg.LayerSpeed;
+                     layer.Power = dlg.LayerPower;
+                     layer.Mode = dlg.LayerMode;
+                     
+                     btn.BackColor = layer.Color;
+                     tt.SetToolTip(btn, $"{layer.Name}\nS:{layer.Speed} P:{layer.Power}% ({layer.Mode})");
+                     _workbench.Invalidate();
+                     UpdateSelectedObjects();
+                 }
+            };
+
             _layerPanel.Controls.Add(btn);
 
             if (ProjectState.Instance.ActiveLayer == layer)
@@ -479,6 +673,12 @@ public partial class MainForm : Form
         pnlProps.Controls.Add(new Label { Text = "Height:", AutoSize = true }, 0, 3);
         _numSizeH = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 1000, Width = 80 };
         pnlProps.Controls.Add(_numSizeH, 1, 3);
+        
+        // Add Layer/Speed/Power Info in Properties
+        pnlProps.Controls.Add(new Label { Text = "Layer:", AutoSize = true }, 0, 4);
+        var lblLayerInfo = new Label { Text = "-", AutoSize = true };
+        lblLayerInfo.Name = "lblLayerInfo";
+        pnlProps.Controls.Add(lblLayerInfo, 1, 4);
         
         grpProps.Controls.Add(pnlProps);
         flow.Controls.Add(grpProps);
@@ -718,6 +918,27 @@ public partial class MainForm : Form
             _numPosY.Value = (decimal)obj.Position.Y;
             _numSizeW.Value = (decimal)obj.Size.Width;
             _numSizeH.Value = (decimal)obj.Size.Height;
+            
+            // Update Layer Info Label
+            var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId);
+            var lblInfo = _controlPanel.Controls.Find("lblLayerInfo", true).FirstOrDefault() as Label;
+            if (lblInfo != null)
+            {
+                if (layer != null)
+                {
+                    lblInfo.Text = $"{layer.Name}\nS: {layer.Speed}\nP: {layer.Power}%\n{layer.Mode}";
+                    // Add Mode info if asked
+                }
+                else
+                {
+                    lblInfo.Text = "No Layer";
+                }
+            }
+            
+            // Switch tab to "Objects" if needed? No, let user stay on Layers if they want.
+            
+            // Update selection in list?
+            // If Single selection
         }
         else
         {
@@ -730,25 +951,30 @@ public partial class MainForm : Form
             _numPosY.Value = 0;
             _numSizeW.Value = 0;
             _numSizeH.Value = 0;
+            
+            // Clear label
+            var lblInfo = _controlPanel.Controls.Find("lblLayerInfo", true).FirstOrDefault() as Label;
+            if (lblInfo != null) lblInfo.Text = "-";
         }
         _isUpdatingUI = false;
         
         // Update layer buttons based on selection?
         
         _isUpdatingSelection = true;
-        var current = new HashSet<LaserObject>(ProjectState.Instance.SelectedObjects);
+        var currentSet = new HashSet<LaserObject>(ProjectState.Instance.SelectedObjects);
         
+        // Update Object List Selection
         foreach (DataGridViewRow row in _objectList.Rows)
         {
             if (row.DataBoundItem is LaserObject obj)
             {
-                bool shouldSelect = current.Contains(obj);
+                bool shouldSelect = currentSet.Contains(obj);
                 if (row.Selected != shouldSelect)
                 {
                     row.Selected = shouldSelect;
                 }
             }
-        }        
+        }
         _isUpdatingSelection = false;
 
         return true;
