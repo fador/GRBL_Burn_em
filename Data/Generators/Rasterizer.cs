@@ -45,7 +45,12 @@ public static class Rasterizer
                     : InterpolationMode.NearestNeighbor;
                  
                  g.PixelOffsetMode = PixelOffsetMode.Half; // Better center alignment
-                 g.DrawImage(image.Image, 0, 0, targetW, targetH);
+                 
+                 using (var wrapMode = new System.Drawing.Imaging.ImageAttributes())
+                 {
+                     wrapMode.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+                     g.DrawImage(image.Image, new Rectangle(0, 0, targetW, targetH), 0, 0, image.Image.Width, image.Image.Height, GraphicsUnit.Pixel, wrapMode);
+                 }
              }
              disposeBmp = true;
         }
@@ -105,6 +110,9 @@ public static class Rasterizer
                     // Invert: 0 (Black) -> Max Power, 255 (White) -> 0 Power
                     intensity = (255f - gray) / 255f; // 0.0 to 1.0
                     intensity *= pixel.A / 255f; // Apply Alpha
+                    
+                    // Cleanup scaling artifacts (ringing/noise)
+                    if (intensity < 0.01f) intensity = 0;
                 }
 
                 // With dithering, intensity should be mostly 0 or 1.
