@@ -24,10 +24,7 @@ public partial class MainForm : Form
 
     private bool _isUpdatingSelection = false;
 
-    private NumericUpDown _numPosX = null!;
-    private NumericUpDown _numPosY = null!;
-    private NumericUpDown _numSizeW = null!;
-    private NumericUpDown _numSizeH = null!;
+
 
     private bool _isUpdatingUI = false;
 
@@ -579,11 +576,11 @@ public partial class MainForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Startup Error: {ex.Message}\n{ex.StackTrace}", "Critical Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show($"Startup Error: {ex.Message}\n{ex.StackTrace ?? "No Stack Trace"}", "Critical Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
-    private FlowLayoutPanel _topToolbarPanel; 
+    private FlowLayoutPanel _topToolbarPanel = null!; 
 
     private void InitializeTopToolbar()
     {
@@ -1011,7 +1008,7 @@ public partial class MainForm : Form
             {
                 var cmd = new CloneArrayCommand(sel, dlg.Rows, dlg.Cols, dlg.GapX, dlg.GapY);
                 CommandManager.Instance.Execute(cmd);
-                _workbench.Invalidate();
+                if (_workbench != null) _workbench.Invalidate();
             }
         };
         
@@ -1034,7 +1031,7 @@ public partial class MainForm : Form
         
         // Snapping Toggle
         var chkSnap = new CheckBox { Text = "Snap to Grid", AutoSize = true };
-        chkSnap.CheckedChanged += (s, e) => { _workbench.IsSnappingEnabled = chkSnap.Checked; };
+        chkSnap.CheckedChanged += (s, e) => { if (_workbench != null) _workbench.IsSnappingEnabled = chkSnap.Checked; };
         flow.Controls.Add(chkSnap);
 
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true });
@@ -1078,9 +1075,9 @@ public partial class MainForm : Form
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); 
         // lbHistory removed
         // CommandManager.Instance.StateChanged += ... // Removed from UI
-        _workbench.Invalidate();
+        if (_workbench != null) _workbench.Invalidate();
 
-        _controlPanel.Controls.Add(flow);
+        if (_controlPanel != null) _controlPanel.Controls.Add(flow);
     }
 
     private void ImportFile()
