@@ -248,6 +248,15 @@ public class SvgImporter
                         // Handle tspan or nested content simple concatenation
                         txt.Text = svgText.Content; // Svg library often puts content here
                     }
+
+                    // Pre-calculate Size ensuring correct initial rendering
+                    using (var tmpBmp = new Bitmap(1, 1))
+                    using (var g = Graphics.FromImage(tmpBmp))
+                    using (var f = new Font(txt.FontName, txt.FontSize))
+                    {
+                         // Use same measurement logic as LaserText.Draw
+                         txt.Size = g.MeasureString(txt.Text, f);
+                    }
                     
                     list.Add(txt);
                 }
