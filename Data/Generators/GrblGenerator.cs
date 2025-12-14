@@ -113,6 +113,7 @@ public class GrblGenerator : IGCodeGenerator
                         PointF[] points = path.PathPoints;
                         byte[] types = path.PathTypes;
                         PointF lastPos = new PointF(float.NaN, float.NaN);
+                        PointF subpathStart = new PointF(0,0);
 
                         for (int i = 0; i < points.Length; i++)
                         {
@@ -130,12 +131,19 @@ public class GrblGenerator : IGCodeGenerator
                                 {
                                     // It's a start point, but we are already there.
                                     // Treat as continuous cut (Line)
-                                    isStart = false;
+                                    isStart = false; 
+                                    // BUT: If checking for subpath closure, we need to know where this NEW subpath started.
+                                    // Even if stitched, it logically starts a new contour?
+                                    // Actually, if we stitch, we are continuing the previous cut? No, usually fonts are separate loops.
+                                    // If we share a point, it might be the same spot.
+                                    // Let's update subpathStart anyway.
+                                    subpathStart = p;
                                 }
                             }
                             
                             if (isStart) 
                             {
+                                subpathStart = p;
                                 yield return "G1 S0"; // Ensure off
                                 yield return $"G0 X{p.X:F3} Y{p.Y:F3}";
                                 yield return $"G1 F{fVal:F0}"; 
@@ -146,6 +154,17 @@ public class GrblGenerator : IGCodeGenerator
                             }
                             
                             lastPos = p;
+
+                            if ((type & 0x80) != 0) // CloseSubpath
+                            {
+                                // Ensure we close the loop to the subpath start
+                                float dist = Math.Abs(p.X - subpathStart.X) + Math.Abs(p.Y - subpathStart.Y);
+                                if (dist > 0.001f)
+                                {
+                                    yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} S{sVal:F0}";
+                                    lastPos = subpathStart;
+                                }
+                            }
                         }
                    }
                 }
