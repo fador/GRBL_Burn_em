@@ -1,32 +1,31 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using System.Windows.Forms;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Reflection;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+using laser_gui_test.Controls;
+using laser_gui_test.Data.OpenGL;
 
 namespace laser_gui_test.Forms
 {
     public class SplashForm : Form
     {
+        private SplashGLControl _glControl = null!;
+        private System.Windows.Forms.Timer _timer = null!;
+
+        // Simulation State
         private Bitmap? _sourceImage;
-        private Bitmap? _canvas;
-        private System.Windows.Forms.Timer _timer;
-        
-        // Scanning State
         private int _currentX = 0;
         private int _currentY = 0;
-        private int _scanSpeed = 150; // Pixels per tick (Horizontal speed)
-        private int _scanLineHeight = 20; // Number of rows processed per pass (Thicker beam for speed)
-        
+        private int _scanSpeed = 150; 
+        private int _scanLineHeight = 20; 
         private float _laserIntensity = 0f;
         
-        // Heat Map for "Cooling" effect (0.0 = Original Color, 1.0 = Grayscale/Hot)
-        private float[]? _rowHeat; 
+        // Heat Map (0.0 = Original Color, > 0.0 = Blend to Gray)
+        private float[] _rowHeat = Array.Empty<float>();
 
         // Sparks
         private struct Spark
@@ -44,75 +43,60 @@ namespace laser_gui_test.Forms
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.Black;
-            this.DoubleBuffered = true;
-            this.TopMost = true;
+            
+            LoadLogo();
 
-            // Load logo from Embedded Resource
-            // This searches for any resource ending in "logo.png" to allow for namespace flexibility
-            var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = assembly.GetManifestResourceNames()
-                                       .FirstOrDefault(r => r.EndsWith("logo.png"));
-
-            if (resourceName != null)
+            _glControl = new SplashGLControl(this)
             {
-                try
-                {
-                    using (Stream? stream = assembly.GetManifestResourceStream(resourceName))
-                    {
-                        if (stream != null)
-                        {
-                            using (var temp = new Bitmap(stream))
-                                _sourceImage = new Bitmap(temp);
-                            
-                            this.Size = _sourceImage.Size;
-                            _canvas = new Bitmap(this.Width, this.Height, PixelFormat.Format32bppPArgb);
-                            _rowHeat = new float[this.Height];
-                            
-                            using (var g = Graphics.FromImage(_canvas))
-                                g.Clear(Color.Black); // Start with black canvas
-                        }
-                        else
-                        {
-                             SetupFallback();
-                        }
-                    }
-                }
-                catch
-                {
-                    SetupFallback();
-                }
-            }
-            else
-            {
-                 SetupFallback();
-            }
+                Dock = DockStyle.Fill
+            };
+            this.Controls.Add(_glControl);
 
             _timer = new System.Windows.Forms.Timer();
-            _timer.Interval = 15; // High refresh rate for smooth scanning
+            _timer.Interval = 15;
             _timer.Tick += Timer_Tick;
             _timer.Start();
         }
 
-        private void SetupFallback()
+        private void LoadLogo()
         {
-            this.Size = new Size(500, 300);
-            _sourceImage = new Bitmap(500, 300);
-            using(var g = Graphics.FromImage(_sourceImage))
-            {
-                g.Clear(Color.Black);
-                g.DrawString("LASER CTRL", new Font("Arial", 40, FontStyle.Bold), Brushes.Black, 50, 100);
-            }
-            _canvas = new Bitmap(500, 300, PixelFormat.Format32bppPArgb);
-            _rowHeat = new float[300];
+             var assembly = Assembly.GetExecutingAssembly();
+             var resourceName = assembly.GetManifestResourceNames()
+                                        .FirstOrDefault(r => r.EndsWith("logo.png"));
+
+             if (resourceName != null)
+             {
+                 try
+                 {
+                     using (var stream = assembly.GetManifestResourceStream(resourceName))
+                     {
+                         if (stream != null)
+                             _sourceImage = new Bitmap(stream);
+                     }
+                 }
+                 catch { }
+             }
+
+             if (_sourceImage == null)
+             {
+                 _sourceImage = new Bitmap(500, 300);
+                 using (var g = Graphics.FromImage(_sourceImage))
+                 {
+                     g.Clear(Color.Black);
+                     g.DrawString("LASER CTRL", new Font("Arial", 40, FontStyle.Bold), Brushes.White, 50, 100);
+                 }
+             }
+
+             this.Size = _sourceImage.Size;
+             _rowHeat = new float[_sourceImage.Height];
         }
 
         private void Timer_Tick(object? sender, EventArgs e)
         {
-            if (_sourceImage == null || _canvas == null || _rowHeat == null)
-            {
-                EndSplash();
-                return;
-            }
+            if (_sourceImage == null) { EndSplash(); return; }
+
+            int width = _sourceImage.Width;
+            int height = _sourceImage.Height;
 
             // 1. Update Sparks
             for (int i = _sparks.Count - 1; i >= 0; i--)
@@ -126,138 +110,75 @@ namespace laser_gui_test.Forms
                 if (s.Life <= 0) _sparks.RemoveAt(i);
             }
 
-            // 2. Process Scanning
-            Rectangle rect = new Rectangle(0, 0, _canvas.Width, _canvas.Height);
-            BitmapData srcData = _sourceImage.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            BitmapData destData = _canvas.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
-
+            // 2. Scan Logic
+            int steps = 0;
             float currentTickMaxDarkness = 0f;
 
-            try
-            {
-                int bytes = Math.Abs(srcData.Stride) * _canvas.Height;
-                byte[] srcBuffer = new byte[bytes];
-                byte[] destBuffer = new byte[bytes];
-
-                Marshal.Copy(srcData.Scan0, srcBuffer, 0, bytes);
-                Marshal.Copy(destData.Scan0, destBuffer, 0, bytes);
-
-                int width = _canvas.Width;
-                int height = _canvas.Height;
-                int stride = srcData.Stride;
-                int bpp = 4;
-
-                // A. Laser Cutting (Scanning Left to Right)
-                int steps = 0;
-                while (steps < _scanSpeed && _currentY < height)
-                {
-                    // Process a vertical strip at _currentX (Height = _scanLineHeight)
-                    int yStart = _currentY;
-                    int yEnd = Math.Min(_currentY + _scanLineHeight, height);
-
-                    // Mark these rows as HOT (Reset fade delay)
-                    for (int h = yStart; h < yEnd; h++)
-                        _rowHeat[h] = 2.5f; 
-
-                    for (int y = yStart; y < yEnd; y++)
-                    {
-                        int idx = (y * stride) + (_currentX * bpp);
-                        
-                        byte b = srcBuffer[idx];
-                        byte g = srcBuffer[idx + 1];
-                        byte r = srcBuffer[idx + 2];
-                        byte a = srcBuffer[idx + 3];
-
-                        float brightness = (0.299f * r + 0.587f * g + 0.114f * b) / 255f;
-                        float visualIntensity = 1.0f - brightness;
-
-                        if (visualIntensity > currentTickMaxDarkness) 
-                            currentTickMaxDarkness = visualIntensity;
-
-                        // Initial Burn (Grayscale)
-                        byte gray = (byte)(brightness * 255);
-                        
-                        destBuffer[idx] = gray;     
-                        destBuffer[idx + 1] = gray; 
-                        destBuffer[idx + 2] = gray; 
-                        destBuffer[idx + 3] = a;    
-
-                        // Sparks
-                        if (visualIntensity > 0.2f && _rnd.NextDouble() < (visualIntensity * 0.05)) 
-                        {
-                            _sparks.Add(new Spark 
-                            { 
-                                X = _currentX, Y = y, 
-                                VX = (float)(_rnd.NextDouble() * 4 - 2), 
-                                VY = (float)(_rnd.NextDouble() * -5 - 2), 
-                                Life = 255,
-                                BaseColor = (gray < 80) ? Color.Gold : Color.OrangeRed 
-                            });
-                        }
-                    }
-
-                    // Move Horizontal
-                    _currentX++;
-                    
-                    // Wrap around (Carriage Return)
-                    if (_currentX >= width)
-                    {
-                        _currentX = 0;
-                        _currentY += _scanLineHeight;
-                        if (_currentY >= height) break;
-                    }
-                    steps++;
-                }
-
-                // B. Update Cooling Rows (Fade In)
-                int scanLimitY = Math.Min(_currentY, height);
-                
-                for (int y = 0; y < scanLimitY; y++)
-                {
-                    // Don't cool the lines currently being cut
-                    if (y >= _currentY && y < _currentY + _scanLineHeight) continue;
-
-                    if (_rowHeat[y] <= 0) continue; 
-
-                    _rowHeat[y] -= 0.05f; // Slower fade for better effect
-                    if (_rowHeat[y] < 0) _rowHeat[y] = 0;
-
-                    float heat = _rowHeat[y];
-                    if (heat > 1.0f) heat = 1.0f; 
-
-                    if (heat < 1.0f) 
-                    {
-                        int rowOffset = y * stride;
-                        for (int x = 0; x < width; x++)
-                        {
-                            int idx = rowOffset + (x * bpp);
-                            byte b_src = srcBuffer[idx];
-                            byte g_src = srcBuffer[idx + 1];
-                            byte r_src = srcBuffer[idx + 2];
-                            
-                            float lum = (0.299f * r_src + 0.587f * g_src + 0.114f * b_src);
-                            byte gray = (byte)lum;
-
-                            destBuffer[idx] = (byte)(b_src + (gray - b_src) * heat);
-                            destBuffer[idx + 1] = (byte)(g_src + (gray - g_src) * heat);
-                            destBuffer[idx + 2] = (byte)(r_src + (gray - r_src) * heat);
-                        }
-                    }
-                }
-
-                Marshal.Copy(destBuffer, 0, destData.Scan0, bytes);
-            }
-            finally
-            {
-                _sourceImage.UnlockBits(srcData);
-                _canvas.UnlockBits(destData);
-            }
+            // We need to sample darkness for sparks. 
+            // Optim: We can cache a "Darkness Map" or sample Bitmap directly (Bitmap.GetPixel is slow).
+            // Using LockBits ONCE per frame for sampling is better than GetPixel.
+            // But we only need it at _currentX, _currentY.
+            // For now, let's assume random sparks if we don't want to lock bits.
+            // Or just lock bits for the scan region.
             
-            // 3. Completion Check
-            if (_currentY >= _sourceImage.Height)
+            // Simpler: Just random sparks based on scan speed? 
+            // Original code: visualIntensity from pixel.
+            // We can skip pixel-perfect spark spawning to save CPU or LockBits just the small strip?
+            // Let's Skip pixel reading for performance. Sparks are visual candy anyway.
+
+            while (steps < _scanSpeed && _currentY < height)
+            {
+                int yStart = _currentY;
+                int yEnd = Math.Min(_currentY + _scanLineHeight, height);
+
+                // Keep Active Rows Hot
+                for (int h = yStart; h < yEnd; h++)
+                    _rowHeat[h] = 2.5f;
+
+                // Move X
+                _currentX++;
+                
+                // Spawn Sparks (Simplified: purely random, no pixel intensity check)
+                if (_rnd.NextDouble() < 0.05) 
+                {
+                    int sy = _rnd.Next(yStart, yEnd);
+                    _sparks.Add(new Spark 
+                    { 
+                        X = _currentX, Y = sy, 
+                        VX = (float)(_rnd.NextDouble() * 4 - 2), 
+                        VY = (float)(_rnd.NextDouble() * -5 - 2), 
+                        Life = 255,
+                        BaseColor = Color.OrangeRed 
+                    });
+                     currentTickMaxDarkness = 1.0f; // Fake intensity
+                }
+
+                if (_currentX >= width)
+                {
+                    _currentX = 0;
+                    _currentY += _scanLineHeight;
+                    if (_currentY >= height) break;
+                }
+                steps++;
+            }
+
+            // 3. Cool Down
+             int scanLimitY = Math.Min(_currentY, height);
+             for (int y = 0; y < scanLimitY; y++)
+             {
+                 if (y >= _currentY && y < _currentY + _scanLineHeight) continue;
+                 if (_rowHeat[y] > 0)
+                 {
+                     _rowHeat[y] -= 0.05f;
+                     if (_rowHeat[y] < 0) _rowHeat[y] = 0;
+                 }
+             }
+
+            // 4. Completion
+            if (_currentY >= height)
             {
                 bool allCooled = true;
-                for(int k=0; k<_sourceImage.Height; k+=10)
+                for (int k = 0; k < height; k += 10)
                     if (_rowHeat[k] > 0) { allCooled = false; break; }
 
                 if (_sparks.Count == 0 && allCooled)
@@ -268,7 +189,14 @@ namespace laser_gui_test.Forms
             }
 
             _laserIntensity += (currentTickMaxDarkness - _laserIntensity) * 0.3f;
-            this.Invalidate();
+            _glControl.Invalidate();
+        }
+
+        private void EndSplash()
+        {
+            _timer.Stop();
+            this.DialogResult = DialogResult.OK;
+            this.Close();
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -281,68 +209,262 @@ namespace laser_gui_test.Forms
             return base.ProcessCmdKey(ref msg, keyData);
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        // --- Inner OpenGL Control ---
+        private class SplashGLControl : OpenGLControl
         {
-            if (_canvas != null)
-                e.Graphics.DrawImage(_canvas, 0, 0);
+            private SplashForm _owner;
+            private uint _texColor = 0;
+            private uint _texGray = 0;
+            private bool _texturesLoaded = false;
 
-            // Draw Sparks
-            foreach (var s in _sparks)
+            public SplashGLControl(SplashForm owner)
             {
-                int a = s.Life; 
-                if (a > 255) a = 255; else if (a < 0) a = 0;
-
-                using (var brush = new SolidBrush(Color.FromArgb(a, s.BaseColor)))
-                {
-                    e.Graphics.FillRectangle(brush, s.X, s.Y, 2, 2);
-                }
+                _owner = owner;
             }
 
-            // Draw Focused Laser Beam
-            if (_currentY < Height)
+            protected override void OnHandleCreated(EventArgs e)
             {
-                int alpha = (int)(_laserIntensity * 255);
-                if (alpha > 255) alpha = 255;
-                if (alpha < 50) alpha = 50; // Always show faint beam
-
-                // Source: Top Right Corner
-                Point pSource = new Point(Width, 0);
-                
-                // Target: Current Cutting Head (Center of scanline block)
-                Point pTarget = new Point(_currentX, _currentY + (_scanLineHeight/2));
-                
-                // 1. Draw The Beam
-                using (var beamPen = new Pen(Color.FromArgb(alpha, 255, 50, 50), 2))
+                base.OnHandleCreated(e);
+                if (!_texturesLoaded && _owner._sourceImage != null)
                 {
-                    e.Graphics.DrawLine(beamPen, pSource, pTarget);
-                }
-
-                // 2. Beam Core (Brighter, thinner)
-                using (var corePen = new Pen(Color.FromArgb(alpha, 255, 200, 200), 1))
-                {
-                    e.Graphics.DrawLine(corePen, pSource, pTarget);
-                }
-
-                // 3. Contact Point Glow
-                int glowSize = 6 + (int)(_laserIntensity * 10);
-                using (var brush = new SolidBrush(Color.FromArgb((int)(alpha * 0.8), 255, 150, 50)))
-                {
-                    e.Graphics.FillEllipse(brush, pTarget.X - glowSize/2, pTarget.Y - glowSize/2, glowSize, glowSize);
-                }
-
-                // 4. White Hot Center
-                using (var brush = new SolidBrush(Color.FromArgb(255, 255, 255, 255)))
-                {
-                    e.Graphics.FillEllipse(brush, pTarget.X - 2, pTarget.Y - 2, 4, 4);
+                    EnsureContext();
+                    LoadTextures(_owner._sourceImage);
                 }
             }
-        }
+            
+            private void EnsureContext()
+            {
+                // OpenGLControl manages context, but we might need to be sure we are current
+            }
 
-        private void EndSplash()
-        {
-            _timer.Stop();
-            this.DialogResult = DialogResult.OK;
-            this.Close();
+            private void LoadTextures(Bitmap bmp)
+            {
+                // 1. Color Texture
+                uint[] textures = new uint[2];
+                GL.glGenTextures(2, textures);
+                _texColor = textures[0];
+                _texGray = textures[1];
+
+                BitmapData data = bmp.LockBits(
+                    new Rectangle(0, 0, bmp.Width, bmp.Height), 
+                    ImageLockMode.ReadOnly, 
+                    PixelFormat.Format32bppArgb);
+
+                // Use BGRA format for 32bppArgb
+                try
+                {
+                    GL.glBindTexture(GL.GL_TEXTURE_2D, _texColor);
+                    GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, (int)GL.GL_RGBA, 
+                        bmp.Width, bmp.Height, 0, 
+                        GL.GL_BGRA, GL.GL_UNSIGNED_BYTE, data.Scan0);
+                    
+                    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, (int)GL.GL_LINEAR);
+                    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, (int)GL.GL_LINEAR);
+
+                    // 2. Grayscale Texture
+                    // We must manually create grayscale bytes
+                    int bytes = Math.Abs(data.Stride) * bmp.Height;
+                    byte[] grayBuffer = new byte[bytes];
+                    Marshal.Copy(data.Scan0, grayBuffer, 0, bytes);
+
+                    for (int i = 0; i < bytes; i += 4)
+                    {
+                        byte b = grayBuffer[i];
+                        byte g = grayBuffer[i+1];
+                        byte r = grayBuffer[i+2];
+                        // a = i+3
+                        
+                        // Grayscale
+                        byte lum = (byte)(0.299 * r + 0.587 * g + 0.114 * b);
+                        grayBuffer[i] = lum;
+                        grayBuffer[i+1] = lum;
+                        grayBuffer[i+2] = lum;
+                    }
+                    
+                    GL.glBindTexture(GL.GL_TEXTURE_2D, _texGray);
+
+                    // Upload array
+                    GCHandle pinned = GCHandle.Alloc(grayBuffer, GCHandleType.Pinned);
+                    try
+                    {
+                        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, (int)GL.GL_RGBA, 
+                            bmp.Width, bmp.Height, 0, 
+                            GL.GL_BGRA, GL.GL_UNSIGNED_BYTE, pinned.AddrOfPinnedObject());
+                    }
+                    finally
+                    {
+                        pinned.Free();
+                    }
+
+                    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, (int)GL.GL_LINEAR);
+                    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, (int)GL.GL_LINEAR);
+                }
+                finally
+                {
+                    bmp.UnlockBits(data);
+                }
+                
+                _texturesLoaded = true;
+            }
+
+            public override void OnRender()
+            {
+                if (!_texturesLoaded) return;
+                
+                int w = this.Width;
+                int h = this.Height;
+                int imgW = _owner._sourceImage!.Width;
+                int imgH = _owner._sourceImage.Height;
+
+                GL.glViewport(0, 0, w, h);
+                GL.glMatrixMode(GL.GL_PROJECTION);
+                GL.glLoadIdentity();
+                // Screen: Top=0, Bottom=Height.
+                GL.glOrtho(0, w, h, 0, -1, 1); 
+                GL.glMatrixMode(GL.GL_MODELVIEW);
+                GL.glLoadIdentity();
+
+                GL.glClearColor(0,0,0,1);
+                GL.glClear(GL.GL_COLOR_BUFFER_BIT);
+                
+                GL.glEnable(GL.GL_TEXTURE_2D);
+                GL.glEnable(GL.GL_BLEND);
+                GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA);
+
+                // Render Completed Rows (Color + Heat)
+                int currentY = _owner._currentY;
+                int scanH = _owner._scanLineHeight;
+                
+                // 1. Color Layer (All revealed rows)
+                GL.glBindTexture(GL.GL_TEXTURE_2D, _texColor);
+                GL.glColor4f(1, 1, 1, 1);
+                
+                // Completed Area
+                DrawQuad(0, 0, w, currentY, 0, 0, 1, (float)currentY/imgH);
+                
+                // 2. Heat/Gray Overlay
+                GL.glBindTexture(GL.GL_TEXTURE_2D, _texGray);
+                
+                GL.glBegin(GL.GL_QUADS);
+                int limitY = Math.Min(currentY, _owner._rowHeat.Length);
+                for(int y=0; y < limitY; y++)
+                {
+                    float heat = _owner._rowHeat[y];
+                    if (heat <= 0.01f) continue;
+                    
+                    float alpha = heat;
+                    if (alpha > 1f) alpha = 1f;
+                    
+                    GL.glColor4f(1, 1, 1, alpha);
+                    
+                    float v0 = (float)y / imgH;
+                    float v1 = (float)(y + 1) / imgH;
+                    
+                    GL.glTexCoord2f(0, v0); GL.glVertex2f(0, y);
+                    GL.glTexCoord2f(1, v0); GL.glVertex2f(w, y);
+                    GL.glTexCoord2f(1, v1); GL.glVertex2f(w, y + 1);
+                    GL.glTexCoord2f(0, v1); GL.glVertex2f(0, y + 1);
+                }
+                GL.glEnd();
+
+                // 3. Active Strip (Behind the laser head)
+                // From (0, currentY) to (currentX, currentY + scanH)
+                // This area is FRESH CUT -> Full Heat -> Full Gray
+                // NOTE: We only draw up to currentX!
+                if (currentY < h)
+                {
+                    int stripH = Math.Min(scanH, h - currentY);
+                    
+                    // Since active area is heat > 1, we just draw Gray Texture fully opaque
+                    GL.glBindTexture(GL.GL_TEXTURE_2D, _texGray);
+                    GL.glColor4f(1, 1, 1, 1);
+                    
+                    if (_owner._currentX > 0)
+                    {
+                        float uEnd = (float)_owner._currentX / imgW;
+                        float v0 = (float)currentY / imgH;
+                        float v1 = (float)(currentY + stripH) / imgH;
+                        
+                        DrawQuad(0, currentY, _owner._currentX, stripH, 0, v0, uEnd, v1);
+                    }
+                }
+                
+                GL.glDisable(GL.GL_TEXTURE_2D);
+
+                // 4. Laser Beam & Sparks
+                DrawOverlayEffects();
+            }
+
+            private void DrawQuad(float x, float y, float w, float h, float u0, float v0, float u1, float v1)
+            {
+                GL.glBegin(GL.GL_QUADS);
+                GL.glTexCoord2f(u0, v0); GL.glVertex2f(x, y);
+                GL.glTexCoord2f(u1, v0); GL.glVertex2f(x + w, y);
+                GL.glTexCoord2f(u1, v1); GL.glVertex2f(x + w, y + h);
+                GL.glTexCoord2f(u0, v1); GL.glVertex2f(x, y + h);
+                GL.glEnd();
+            }
+
+            private void DrawOverlayEffects()
+            {
+                // Sparks
+                GL.glBegin(GL.GL_QUADS);
+                foreach(var s in _owner._sparks)
+                {
+                    float alpha = s.Life / 255f;
+                    Color c = s.BaseColor;
+                    GL.glColor4f(c.R/255f, c.G/255f, c.B/255f, alpha);
+                    
+                    float size = 2f;
+                    GL.glVertex2f(s.X, s.Y);
+                    GL.glVertex2f(s.X + size, s.Y);
+                    GL.glVertex2f(s.X + size, s.Y + size);
+                    GL.glVertex2f(s.X, s.Y + size);
+                }
+                GL.glEnd();
+                
+                // Laser Beam
+                if (_owner._currentY < _owner.Height)
+                {
+                    float intensity = _owner._laserIntensity;
+                    if (intensity < 0.2f) intensity = 0.2f;
+                    float alpha = intensity;
+                    
+                    float tx = _owner._currentX;
+                    float ty = _owner._currentY + (_owner._scanLineHeight / 2);
+                    float sx = _owner.Width;
+                    float sy = 0;
+                    
+                    GL.glLineWidth(2f);
+                    GL.glBegin(GL.GL_LINES);
+                    
+                    // Outer Beam
+                    GL.glColor4f(1f, 0.2f, 0.2f, alpha);
+                    GL.glVertex2f(sx, sy);
+                    GL.glVertex2f(tx, ty);
+                    
+                    GL.glEnd();
+                    
+                    // Core
+                    GL.glLineWidth(1f);
+                    GL.glBegin(GL.GL_LINES);
+                    GL.glColor4f(1f, 0.8f, 0.8f, alpha);
+                    GL.glVertex2f(sx, sy);
+                    GL.glVertex2f(tx, ty);
+                    GL.glEnd();
+                    
+                    // Dot
+                    // Draw simple diamond point
+                    GL.glBegin(GL.GL_QUADS);
+                    GL.glColor4f(1f, 0.6f, 0.2f, alpha);
+                    float d = 3f + (intensity * 4);
+                    GL.glVertex2f(tx, ty - d);
+                    GL.glVertex2f(tx + d, ty);
+                    GL.glVertex2f(tx, ty + d);
+                    GL.glVertex2f(tx - d, ty);
+                    GL.glEnd();
+                }
+            }
         }
     }
 }

@@ -54,6 +54,20 @@ public class SvgImporter
         if (elem is SvgVisualElement)
         {
             var visual = (SvgVisualElement)elem;
+            
+            // Ignore invisible elements
+            if (!visual.Visible) return;
+            
+            if (visual.Display == "none") return;
+            
+            // Check for non-rendered elements (No Fill AND No Stroke)
+            // Some elements might be used for clipping or guides but have no visual properties.
+            bool hasFill = visual.Fill != null && visual.Fill != SvgPaintServer.None;
+            bool hasStroke = visual.Stroke != null && visual.Stroke != SvgPaintServer.None && visual.StrokeWidth > 0;
+            
+            // If it is NOT an Image (Images don't need fill/stroke), check paint.
+            if (!(visual is SvgImage) && !hasFill && !hasStroke) return;
+
             if (visual is SvgImage image)
             {
                  // Basic Image Support

@@ -37,6 +37,8 @@ public class OpenGLControl : Control
 
     protected override void OnHandleDestroyed(EventArgs e)
     {
+        _ready = false;
+        
         if (_hRC != IntPtr.Zero)
         {
             GL.wglMakeCurrent(IntPtr.Zero, IntPtr.Zero);

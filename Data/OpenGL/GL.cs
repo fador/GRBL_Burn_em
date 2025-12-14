@@ -21,8 +21,15 @@ public static class GL
     public const uint GL_BLEND = 0x0BE2;
     public const uint GL_SRC_ALPHA = 0x0302;
     public const uint GL_ONE_MINUS_SRC_ALPHA = 0x0303;
-    
-    // Functions
+    public const uint GL_TEXTURE_2D = 0x0DE1;
+    public const uint GL_TEXTURE_MAG_FILTER = 0x2800;
+    public const uint GL_TEXTURE_MIN_FILTER = 0x2801;
+    public const uint GL_NEAREST = 0x2600;
+    public const uint GL_LINEAR = 0x2601;
+    public const uint GL_RGBA = 0x1908;
+    public const uint GL_UNSIGNED_BYTE = 0x1401;
+    public const uint GL_BGRA = 0x80E1;
+    public const uint GL_POINTS = 0x0000;
     [DllImport(LibName)] public static extern void glBegin(uint mode);
     [DllImport(LibName)] public static extern void glEnd();
     [DllImport(LibName)] public static extern void glVertex2f(float x, float y);
@@ -40,6 +47,15 @@ public static class GL
     [DllImport(LibName)] public static extern void glLineWidth(float width);
     [DllImport(LibName)] public static extern void glTranslate(double x, double y, double z);
     [DllImport(LibName)] public static extern void glScalef(float x, float y, float z);
+    [DllImport(LibName)] public static extern void glTexCoord2f(float s, float t);
+
+    // Textures
+    [DllImport(LibName)] public static extern void glGenTextures(int n, uint[] textures);
+    [DllImport(LibName)] public static extern void glBindTexture(uint target, uint texture);
+    [DllImport(LibName)] public static extern void glTexParameteri(uint target, uint pname, int param);
+    [DllImport(LibName)] public static extern void glTexImage2D(uint target, int level, int internalformat, int width, int height, int border, uint format, uint type, IntPtr pixels);
+    [DllImport(LibName)] public static extern void glDeleteTextures(int n, uint[] textures);
+    [DllImport(LibName)] public static extern void glFlush();
     
     // WGL / GDI
     [DllImport(LibName)] public static extern IntPtr wglCreateContext(IntPtr hdc);
