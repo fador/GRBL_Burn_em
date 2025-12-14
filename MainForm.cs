@@ -1196,9 +1196,8 @@ public partial class MainForm : Form
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
-    public bool UpdateSelectedObjects()
+    public bool UpdateSelectedObjects(bool updateListSelection = true)
     {
-        if (_workbench != null) _workbench.Invalidate();
         var sel = ProjectState.Instance.SelectedObjects;
         
         _isUpdatingUI = true;
@@ -1246,19 +1245,23 @@ public partial class MainForm : Form
         _isUpdatingUI = false;
         
         _isUpdatingSelection = true;
-        var currentSet = new HashSet<LaserObject>(ProjectState.Instance.SelectedObjects);
         
-        // Update Object List Selection
-        foreach (DataGridViewRow row in _objectList.Rows)
+        if (updateListSelection)
         {
-            if (row.DataBoundItem is LaserObject obj)
+            var currentSet = new HashSet<LaserObject>(ProjectState.Instance.SelectedObjects);
+            
+            // Update Object List Selection
+            foreach (DataGridViewRow row in _objectList.Rows)
             {
-                bool shouldSelect = currentSet.Contains(obj);
+                if (row.DataBoundItem is LaserObject obj)
+                {
+                    bool shouldSelect = currentSet.Contains(obj);
                 if (row.Selected != shouldSelect)
                 {
                     row.Selected = shouldSelect;
                 }
             }
+        }
         }
         _isUpdatingSelection = false;
 

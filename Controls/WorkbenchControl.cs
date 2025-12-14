@@ -503,6 +503,8 @@ public class WorkbenchControl : Control
     private bool _isMeasuring = false;
     private PointF _measureStart;
     private PointF _measureEnd;
+    
+    private long _lastUpdateTicks = 0;
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
@@ -528,8 +530,12 @@ public class WorkbenchControl : Control
             return;
         }
 
-        // Fire Mouse Position Event (Always)
-        MousePositionChanged?.Invoke(worldPos);
+        // Fire Mouse Position Event (Throttled)
+        long now = DateTime.Now.Ticks;
+        if (now - _lastUpdateTicks > 500000) // 50ms
+        {
+             MousePositionChanged?.Invoke(worldPos);
+        }
 
         // 2. Resizing
         if (_isResizing)
@@ -552,28 +558,6 @@ public class WorkbenchControl : Control
             // If I click at 10.5 and move to 11.5 (Snap=1.0). Snap(10.5)=11. Snap(11.5)=12. dx=1.
             // If I click at 10.1 and move to 10.9. Snap(10)=10. Snap(11)=11. dx=1. Correct.
             
-            foreach(var obj in ProjectState.Instance.SelectedObjects)
-            {
-                 // MoveObject accumulates? No, MoveObject is absolute or relative?
-                 // MoveObject implementation adds dx/dy to current. 
-                 // Wait, we emit MoveCOmmand with TOTAL delta.
-                 // But interactively we call MoveObject.
-                 // We need to RESET object position and re-apply total delta?
-                 // Or we apply incremental delta?
-                 // The current OnMouseMove logic:
-                 // float dx = worldPos.X - _dragStartPos.X;
-                 // Loop MoveObject(obj, dx, dy).
-                 // _dragStartPos = worldPos;
-                 // This is INCREMENTAL.
-                 
-                 // If we use Snapped values for incremental:
-                 // _dragStartPos must be updated to the Snapped value used for calculation?
-                 // Logic:
-                 // dx = effectivePos.X - _lastSnappedPos.X
-                 // MoveObject(dx)
-                 // _lastSnappedPos = effectivePos
-            }
-            
             float incDx = effectivePos.X - _dragStartPos.X; // _dragStartPos here acts as "Last Pos"
             float incDy = effectivePos.Y - _dragStartPos.Y;
             
@@ -587,7 +571,14 @@ public class WorkbenchControl : Control
             }
             
             Invalidate();
-            MainForm.Instance.UpdateSelectedObjects(); // Update UI
+            // Fire Mouse Position Event (Throttled)
+            long nowMove = DateTime.Now.Ticks;
+            if (nowMove - _lastUpdateTicks > 500000) // 50ms
+            {
+                 MainForm.Instance.UpdateSelectedObjects(false);
+                 _lastUpdateTicks = nowMove;
+            }
+
             return;
         }
 
@@ -771,6 +762,8 @@ public class WorkbenchControl : Control
 
                 var cmd = new MoveCommand(ProjectState.Instance.SelectedObjects, dx, dy);
                 CommandManager.Instance.Execute(cmd);
+                
+                MainForm.Instance.UpdateSelectedObjects(); // Final update
             }
             else
             {
@@ -805,6 +798,7 @@ public class WorkbenchControl : Control
             
             var cmd = new ResizeCommand(_initialStates, newStates);
             CommandManager.Instance.Execute(cmd);
+            MainForm.Instance.UpdateSelectedObjects(); // Final update
             
             _initialStates.Clear();
         }
@@ -1046,7 +1040,14 @@ public class WorkbenchControl : Control
             }
         }
         Invalidate();
-        MainForm.Instance.UpdateSelectedObjects(); // Immediate UI update
+        
+        // Throttled UI Update
+        long nowResize = DateTime.Now.Ticks;
+        if (nowResize - _lastUpdateTicks > 500000)
+        {
+            MainForm.Instance.UpdateSelectedObjects(false); 
+            _lastUpdateTicks = nowResize;
+        }
     }
     
     private void MoveObject(LaserObject obj, float dx, float dy)
