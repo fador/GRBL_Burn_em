@@ -30,6 +30,13 @@ public class AppConfiguration
     public float LastPanY { get; set; } = 0f;
     public float LastZoom { get; set; } = 1.0f;
 
+    // Window Settings
+    public int WindowX { get; set; } = -1;
+    public int WindowY { get; set; } = -1;
+    public int WindowWidth { get; set; } = 1200;
+    public int WindowHeight { get; set; } = 800;
+    public int WindowState { get; set; } = 0; // 0=Normal, 1=Min, 2=Max
+
     private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
 
     public void Save()

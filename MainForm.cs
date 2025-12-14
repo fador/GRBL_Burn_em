@@ -35,9 +35,30 @@ public partial class MainForm : Form
         try
         {
              // Save View Settings
-             AppConfiguration.Instance.LastZoom = _workbench.Zoom;
              AppConfiguration.Instance.LastPanX = _workbench.PanOffset.X;
              AppConfiguration.Instance.LastPanY = _workbench.PanOffset.Y;
+             
+             // Save Window State
+             if (WindowState == FormWindowState.Normal)
+             {
+                 AppConfiguration.Instance.WindowX = Location.X;
+                 AppConfiguration.Instance.WindowY = Location.Y;
+                 AppConfiguration.Instance.WindowWidth = Size.Width;
+                 AppConfiguration.Instance.WindowHeight = Size.Height;
+                 AppConfiguration.Instance.WindowState = (int)FormWindowState.Normal;
+             }
+             else
+             {
+                 AppConfiguration.Instance.WindowState = (int)WindowState;
+                 if (WindowState == FormWindowState.Maximized)
+                 {
+                     AppConfiguration.Instance.WindowX = RestoreBounds.X;
+                     AppConfiguration.Instance.WindowY = RestoreBounds.Y;
+                     AppConfiguration.Instance.WindowWidth = RestoreBounds.Width;
+                     AppConfiguration.Instance.WindowHeight = RestoreBounds.Height;
+                 }
+             }
+             
              AppConfiguration.Instance.Save();
         }
         catch(Exception ex)
@@ -57,7 +78,33 @@ public partial class MainForm : Form
     private void SetupCustomLayout()
     {
         this.Text = "Laser Control Software";
-        this.Size = new Size(1200, 800);
+        
+        // Restore Window Settings
+        var cfg = AppConfiguration.Instance;
+        if (cfg.WindowX != -1 && cfg.WindowWidth > 0 && cfg.WindowHeight > 0)
+        {
+            this.StartPosition = FormStartPosition.Manual;
+            this.Location = new Point(cfg.WindowX, cfg.WindowY);
+            this.Size = new Size(cfg.WindowWidth, cfg.WindowHeight);
+            
+            // Validate Screen - ensure at least some part is visible
+            bool visible = Screen.AllScreens.Any(s => s.Bounds.IntersectsWith(this.DesktopBounds));
+            if (!visible)
+            {
+                this.StartPosition = FormStartPosition.WindowsDefaultLocation;
+                this.Size = new Size(1200, 800);
+            }
+
+            if (cfg.WindowState == (int)FormWindowState.Maximized)
+            {
+                this.WindowState = FormWindowState.Maximized;
+            }
+        }
+        else
+        {
+            this.Size = new Size(1200, 800);
+            this.StartPosition = FormStartPosition.CenterScreen;
+        }
 
         // 1. Menu Strip
         var menuStrip = new MenuStrip();
