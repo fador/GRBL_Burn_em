@@ -654,9 +654,19 @@ public partial class MainForm : Form
         flow.Controls.Add(btnConnect);
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); // Spacer
         
-        var btnGenerate = new Button { Text = "Generate G-Code", Width = 200, BackColor = Color.LightBlue };
+        flow.Controls.Add(new Label { Text = "--------", AutoSize = true });
+        
+        var flowGen = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+        var btnGenerate = new Button { Text = "G-Code", Width = 90, BackColor = Color.LightBlue };
         btnGenerate.Click += (s, e) => GenerateGCode();
-        flow.Controls.Add(btnGenerate);
+        
+        var btnPreview = new Button { Text = "Preview", Width = 90, BackColor = Color.LightYellow };
+        btnPreview.Click += (s, e) => ShowPreview();
+        
+        flowGen.Controls.Add(btnGenerate);
+        flowGen.Controls.Add(btnPreview);
+        flow.Controls.Add(flowGen);
+        
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true });
 
         flow.Controls.Add(btnStart);
@@ -1052,6 +1062,34 @@ public partial class MainForm : Form
         catch (Exception ex)
         {
             MessageBox.Show($"Generation failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void ShowPreview()
+    {
+        string generatorName = AppConfiguration.Instance.GCodeGenerator;
+        IGCodeGenerator? generator = null;
+
+        if (generatorName == "Grbl") generator = new GrblGenerator();
+        // Add others here
+
+        if (generator == null)
+        {
+             // Default
+             generator = new GrblGenerator();
+        }
+
+        try
+        {
+            var lines = generator.Generate(ProjectState.Instance.Objects);
+            var gcode = string.Join(Environment.NewLine, lines);
+            
+            using var dlg = new PreviewForm(gcode);
+            dlg.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Preview generation failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 }
