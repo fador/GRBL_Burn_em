@@ -40,6 +40,7 @@ public class PreviewForm : Form
         public float PanX = 0f;
         public float PanY = 0f;
         public float RasterInterval = 0.1f;
+        public bool ShowTravelMoves = true;
 
         public override void OnRender()
         {
@@ -87,7 +88,16 @@ public class PreviewForm : Form
             // OPTIMIZATION: Use Vertex Arrays if this is too slow. Initialize loop is OK for <100k points in immediate mode for modern CPUs.
             
             // 1. Travel Moves (Future)
-            GL.glColor3f(0.8f, 0.8f, 1.0f); // Light Blue
+            // 1. Travel Moves (Future)
+            if (ShowTravelMoves)
+            {
+                GL.glColor3f(0.8f, 0.8f, 1.0f); // Light Blue
+            }
+            else
+            {
+                GL.glColor4f(0f, 0f, 0f, 0f); // Invisible
+            }
+
             GL.glBegin(GL.GL_LINES);
             for (int i = 0; i < Commands.Count; i++)
             {
@@ -121,7 +131,9 @@ public class PreviewForm : Form
                 var cmd = Commands[i];
                 if (cmd.Type == CommandType.Travel)
                 {
-                    GL.glColor3f(0f, 0f, 1f); // Blue
+                    if (ShowTravelMoves) GL.glColor3f(0f, 0f, 1f); // Blue
+                    else GL.glColor4f(0f,0f,0f,0f);
+                    
                     GL.glVertex2f(cmd.Start.X, cmd.Start.Y);
                     GL.glVertex2f(cmd.End.X, cmd.End.Y);
                 }
@@ -326,7 +338,16 @@ public class PreviewForm : Form
         _controlsPanel.Controls.Add(_btnStop);
         _controlsPanel.Controls.Add(_numSpeed);
         _controlsPanel.Controls.Add(lblSpeed);
+        _controlsPanel.Controls.Add(lblSpeed);
         _controlsPanel.Controls.Add(_timeline);
+        
+        var cbShowTravel = new CheckBox { Text = "Show Travel", Checked = true, Location = new Point(740, 10), AutoSize = true };
+        cbShowTravel.CheckedChanged += (s, e) => 
+        {
+            _renderArea.ShowTravelMoves = cbShowTravel.Checked;
+            _renderArea.Invalidate();
+        };
+        _controlsPanel.Controls.Add(cbShowTravel);
 
         rightPanel.Controls.Add(_renderArea);
         rightPanel.Controls.Add(_controlsPanel);
