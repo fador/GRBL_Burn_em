@@ -645,6 +645,7 @@ public partial class MainForm : Form
                      float dx = nx - obj.Position.X;
                      float dy = ny - obj.Position.Y;
                      CommandManager.Instance.Execute(new MoveCommand(sel, dx, dy));
+                     _workbench.Invalidate();
                 }
                 
                 // Size Change (Simplified: just update size directly for now to support "Live", logic for ScaleCommand is complex)
