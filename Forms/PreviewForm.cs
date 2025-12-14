@@ -10,21 +10,19 @@ namespace laser_gui_test.Forms;
 
 public class PreviewForm : Form
 {
-    private SplitContainer _split;
-    private DataGridView _grid;
-    private PictureBox _renderArea;
-    private Panel _controlsPanel;
-    private Button _btnPlay;
-    private Button _btnPause;
-    private Button _btnStop;
-    private TrackBar _timeline;
-    private NumericUpDown _numSpeed;
-    private Label _lblStatus;
+    private SplitContainer _split = null!;
+    private DataGridView _grid = null!;
+    private PictureBox _renderArea = null!;
+    private Panel _controlsPanel = null!;
+    private Button _btnPlay = null!;
+    private Button _btnPause = null!;
+    private Button _btnStop = null!;
+    private TrackBar _timeline = null!;
+    private NumericUpDown _numSpeed = null!;
 
     private List<GCodeCommand> _commands;
     private int _currentIndex = 0;
-    private System.Windows.Forms.Timer _playTimer;
-    private Bitmap _cacheBitmap;
+    private System.Windows.Forms.Timer _playTimer = null!;
 
     // View Transforms
     private float _scale = 10f; // Pixels per mm
@@ -214,6 +212,7 @@ public class PreviewForm : Form
         // 2. Draw "Past" lines in Dark Color/Red.
         // 3. Draw Laser Head.
         
+       
         // Simple implementation first: Iterate all loop. Optimization later.
         
         using var penTravel = new Pen(Color.LightBlue, 0) { DashStyle = DashStyle.Dot }; // 0 width = 1 pixel always
@@ -225,26 +224,6 @@ public class PreviewForm : Form
         using var penCut = new Pen(Color.FromArgb(50, 0, 0, 0), interval); // Future Cut (Faint)
         using var penExecuted = new Pen(Color.Red, interval); // Past Cut
         using var penTravelExecuted = new Pen(Color.Blue, 0) { DashStyle = DashStyle.Dot }; // Past Travel
-
-        // Draw entire path faint first (Optimize: Cache this)
-        // For 80k lines, this loop is too slow to do 60fps.
-        // We really need a "Background Cache" of the whole job, then draw over it?
-        // Or "Past" and "Future" caches.
-        
-        // Let's implement background caching on first load.
-        if (_cacheBitmap == null)
-        {
-             UpdateCache(); // Draws FULL preview
-        }
-        
-        if (_cacheBitmap != null)
-        {
-            // Draw FULL preview faded
-             // Coordinate system of Bitmap? 
-             // We can't easily use a Bitmap if we want indefinite zoom/pan without massive texture.
-             // But for GDI+, drawing 1000 lines is fine. 50k is not.
-             // We will skip optimization for "User Request 1" unless it lags.
-        }
 
         // naive render loop
         // Optimization: dynamic step?
@@ -285,10 +264,6 @@ public class PreviewForm : Form
         }
     }
 
-    private void UpdateCache()
-    {
-        // Placeholder for caching logic
-    }
     
     private void FitToScreen()
     {
