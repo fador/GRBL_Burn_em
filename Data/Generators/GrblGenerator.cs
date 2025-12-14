@@ -88,94 +88,64 @@ public class GrblGenerator : IGCodeGenerator
                     // Graphics.DrawString with Font(size) draws size in Points.
                     
                     // Conversion:
-                    // We need to know what "20" means in LaserText.
-                    // It seems it is treated as Points in Drawing.
-                    // So we must convert Points to Millimeters (World Units).
-                    float emSize = text.FontSize * 0.35277f; // Pt to mm
-                    // However, EmSize is not exactly Height. 
-                    // But for GCode generation, we want a rough match or exact match?
-                    // Let's try to match 72 DPI logic if GDI+ default.
-                    
-                    // Actually, let's look at LaserText.Draw again.
-                    // g.ScaleTransform(1, -1) was used.
-                    // Here we are generating raw coordinates.
-                    
-                    // Strategy:
-                    // 1. Generate path at O(0,0) with Y-Flip to match DrawString logic.
-                    // 2. Translate to Position.
+                    // LaserText.FontSize is in Points.
+                    // Graphics.DrawString uses PageUnit. If default (Display/Pixel), it scales Points by System DPI.
+                    // Usually 96 DPI on Windows.
+                    // We need `emSize` in World Units (which we treat as equivalent to Pixels in WorkbenchControl for scale purposes).
+                    // Size = Points * 96 / 72.
+                    float emSize = text.FontSize * 96f / 72f; 
                     
                     int style = (int)FontStyle.Regular;
                     path.AddString(text.Text, family, style, emSize, new PointF(0, 0), StringFormat.GenericDefault);
                     
                     // Now Transform:
-                    // Text Visual Logic:
-                    // Translate(Pos.X, Pos.Y + Height)
-                    // Scale(1, -1)
-                    
-                    // We need to verify what AddString does. It adds standard text.
-                    // If we just flip Y:
                     using (var matrix = new System.Drawing.Drawing2D.Matrix())
                     {
-                         // We used Translate(Pos.X, Pos.Y + Height) then Scale(1, -1) in Draw()
-                         // So we apply the same transform to the path.
-                         
-                         // BUT: We need to know 'Height' (text.Size.Height).
-                         // LaserText has .Size property which is updated on Draw. 
-                         // If it hasn't been drawn, it might be 0? 
-                         // Usually it serves as the bounds.
-                         
-                         // If Size is 0, we might have offset issues.
-                         // But typically user generates GCode after viewing (Draw).
-                         
                          matrix.Translate(text.Position.X, text.Position.Y + text.Size.Height);
                          matrix.Scale(1, -1);
                          path.Transform(matrix);
                     }
                     
-                    // Now Flatten to get line segments
-                    // Flatness: smaller = smoother curves, more segments.
-                    // 0.1mm error?
                     path.Flatten(null, 0.05f); // 0.05mm precision
                     
-                    // Iterate Logic
                    if (path.PointCount > 0)
                    {
-                        // PathPoints and PathTypes work together
                         PointF[] points = path.PathPoints;
                         byte[] types = path.PathTypes;
-                        
+                        PointF lastPos = new PointF(float.NaN, float.NaN);
+
                         for (int i = 0; i < points.Length; i++)
                         {
                             var p = points[i];
                             byte type = types[i];
-                            
-                            // 0 = Start (Move)
-                            // 1 = Line (Cut)
-                            // 3 = Bezier (Should be flattened to Line, so we shouldn't see 3)
-                            // Mask 0x7 to get type (remove closepath flag 0x80)
-                            
                             byte typeMasked = (byte)(type & 0x07);
                             
-                            if (typeMasked == 0) // Start
+                            bool isStart = (typeMasked == 0);
+                            
+                            // Check for coincident start (Stitching)
+                            if (isStart && !float.IsNaN(lastPos.X))
+                            {
+                                float dist = Math.Abs(p.X - lastPos.X) + Math.Abs(p.Y - lastPos.Y);
+                                if (dist < 0.001f)
+                                {
+                                    // It's a start point, but we are already there.
+                                    // Treat as continuous cut (Line)
+                                    isStart = false;
+                                }
+                            }
+                            
+                            if (isStart) 
                             {
                                 yield return "G1 S0"; // Ensure off
                                 yield return $"G0 X{p.X:F3} Y{p.Y:F3}";
-                                yield return $"G1 F{fVal:F0}"; // Prep Feed
+                                yield return $"G1 F{fVal:F0}"; 
                             }
-                            else // Line
+                            else 
                             {
                                 yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
                             }
                             
-                            if ((type & 0x80) != 0) // CloseSubpath
-                            {
-                                // If closed, it usually draws line to start?
-                                // Valid GCode flow will just follow points.
-                                // If CloseSubpath implies an extra segment not in points, we might miss it.
-                                // But Flatten usually adds explicit closing point if needed?
-                                // Let's check GDI+ docs: Flatten "converts all curves... and connects end points of closed paths". 
-                                // So we should be good.
-                            }
+                            lastPos = p;
                         }
                    }
                 }
