@@ -26,6 +26,7 @@ namespace laser_gui_test.Forms
         
         // Heat Map (0.0 = Original Color, > 0.0 = Blend to Gray)
         private float[] _rowHeat = Array.Empty<float>();
+        private byte[] _brightnessMap = Array.Empty<byte>();
 
         // Sparks
         private struct Spark
@@ -89,6 +90,36 @@ namespace laser_gui_test.Forms
 
              this.Size = _sourceImage.Size;
              _rowHeat = new float[_sourceImage.Height];
+
+             // Generate Brightness Map
+             int w = _sourceImage.Width;
+             int h = _sourceImage.Height;
+             _brightnessMap = new byte[w * h];
+             
+             BitmapData data = _sourceImage.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+             try
+             {
+                 int bytes = Math.Abs(data.Stride) * h;
+                 byte[] buffer = new byte[bytes];
+                 Marshal.Copy(data.Scan0, buffer, 0, bytes);
+                 
+                 for(int y=0; y<h; y++)
+                 {
+                     int rowOffset = y * data.Stride;
+                     for(int x=0; x<w; x++)
+                     {
+                         int idx = rowOffset + (x * 4);
+                         byte b = buffer[idx];
+                         byte g = buffer[idx+1];
+                         byte r = buffer[idx+2];
+                         _brightnessMap[y * w + x] = (byte)(0.299*r + 0.587*g + 0.114*b);
+                     }
+                 }
+             }
+             finally
+             {
+                 _sourceImage.UnlockBits(data);
+             }
         }
 
         private void Timer_Tick(object? sender, EventArgs e)
@@ -138,19 +169,32 @@ namespace laser_gui_test.Forms
                 // Move X
                 _currentX++;
                 
-                // Spawn Sparks (Simplified: purely random, no pixel intensity check)
-                if (_rnd.NextDouble() < 0.05) 
+                // Spawn Sparks based on Image Brightness
+                // Sample random point in the strip
+                int sampleY = _rnd.Next(yStart, yEnd);
+                int mapIdx = (sampleY * width) + _currentX;
+                byte brightness = 0;
+                if (mapIdx >= 0 && mapIdx < _brightnessMap.Length) 
+                    brightness = _brightnessMap[mapIdx];
+
+                // Probability: 0.01 at Black, 0.4 at White
+                double chance = 0.01 + (brightness / 255.0) * 0.5;
+
+                if (_rnd.NextDouble() < chance) 
                 {
-                    int sy = _rnd.Next(yStart, yEnd);
+                    // "Explosion" velocity
+                    float angle = (float)(_rnd.NextDouble() * Math.PI * 2);
+                    float speed = (float)(2.0 + _rnd.NextDouble() * 4.0);
+                    
                     _sparks.Add(new Spark 
                     { 
-                        X = _currentX, Y = sy, 
-                        VX = (float)(_rnd.NextDouble() * 4 - 2), 
-                        VY = (float)(_rnd.NextDouble() * -5 - 2), 
+                        X = _currentX, Y = sampleY, 
+                        VX = (float)Math.Cos(angle) * speed, 
+                        VY = (float)Math.Sin(angle) * speed,
                         Life = 255,
-                        BaseColor = Color.OrangeRed 
+                        BaseColor = Color.White // Start White
                     });
-                     currentTickMaxDarkness = 1.0f; // Fake intensity
+                     if (brightness > 100) currentTickMaxDarkness = 1.0f;
                 }
 
                 if (_currentX >= width)
@@ -411,11 +455,33 @@ namespace laser_gui_test.Forms
                 GL.glBegin(GL.GL_QUADS);
                 foreach(var s in _owner._sparks)
                 {
-                    float alpha = s.Life / 255f;
-                    Color c = s.BaseColor;
-                    GL.glColor4f(c.R/255f, c.G/255f, c.B/255f, alpha);
+                    float lifeRatio = s.Life / 255f;
+                    float r=1f, g=0f, b=0f;
+
+                    // Heat Gradient: White -> Yellow -> Red -> Fade
+                    if (lifeRatio > 0.8f) // Very Hot (White to Yellow)
+                    {
+                        r = 1f;
+                        g = 1f;
+                        b = (lifeRatio - 0.8f) * 5f; // 0.0 to 1.0
+                    }
+                    else if (lifeRatio > 0.4f) // Hot (Yellow to Orange)
+                    {
+                        r = 1f;
+                        g = (lifeRatio - 0.4f) * 2.5f; // 0.0 to 1.0 (Red to Yellow)
+                        b = 0f;
+                    }
+                    else // Cooling (Orange/Red to Dark)
+                    {
+                        r = lifeRatio * 2.5f; // Fade out red
+                        if (r > 1f) r = 1f;
+                        g = 0f;
+                        b = 0f;
+                    }
+
+                    GL.glColor4f(r, g, b, lifeRatio);
                     
-                    float size = 2f;
+                    float size = 1.5f + (lifeRatio * 1.5f); // Shrink as they cool
                     GL.glVertex2f(s.X, s.Y);
                     GL.glVertex2f(s.X + size, s.Y);
                     GL.glVertex2f(s.X + size, s.Y + size);
