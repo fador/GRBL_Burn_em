@@ -37,10 +37,10 @@ public partial class MainForm : Form
     
     // Top Toolbar Controls
     private ToolStripLabel _lblMousePos = null!;
-    private ToolStripTextBox _txtPosX = null!;
-    private ToolStripTextBox _txtPosY = null!;
-    private ToolStripTextBox _txtSizeW = null!;
-    private ToolStripTextBox _txtSizeH = null!;
+    private NumericUpDown _nudPosX = null!;
+    private NumericUpDown _nudPosY = null!;
+    private NumericUpDown _nudSizeW = null!;
+    private NumericUpDown _nudSizeH = null!;
     private ToolStripLabel _lblLayerInfo = null!;
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -601,20 +601,20 @@ public partial class MainForm : Form
         var tsRow2 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
         
         tsRow2.Items.Add(new ToolStripLabel("X:"));
-        _txtPosX = new ToolStripTextBox { Width = 50 };
-        tsRow2.Items.Add(_txtPosX);
+        _nudPosX = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -10000, Maximum = 10000, Increment = 10 };
+        tsRow2.Items.Add(new ToolStripControlHost(_nudPosX));
         
         tsRow2.Items.Add(new ToolStripLabel("Y:"));
-        _txtPosY = new ToolStripTextBox { Width = 50 };
-        tsRow2.Items.Add(_txtPosY);
+        _nudPosY = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -10000, Maximum = 10000, Increment = 10 };
+        tsRow2.Items.Add(new ToolStripControlHost(_nudPosY));
         
         tsRow2.Items.Add(new ToolStripLabel("W:"));
-        _txtSizeW = new ToolStripTextBox { Width = 50 };
-        tsRow2.Items.Add(_txtSizeW);
+        _nudSizeW = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = 0, Maximum = 10000, Increment = 10 };
+        tsRow2.Items.Add(new ToolStripControlHost(_nudSizeW));
         
         tsRow2.Items.Add(new ToolStripLabel("H:"));
-        _txtSizeH = new ToolStripTextBox { Width = 50 };
-        tsRow2.Items.Add(_txtSizeH);
+        _nudSizeH = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = 0, Maximum = 10000, Increment = 10 };
+        tsRow2.Items.Add(new ToolStripControlHost(_nudSizeH));
         
         tsRow2.Items.Add(new ToolStripSeparator());
         _lblLayerInfo = new ToolStripLabel("-");
@@ -625,7 +625,42 @@ public partial class MainForm : Form
         
         this.Controls.Add(_topToolbarPanel); 
         
-        // Logic will be wired in Initialize for Workbench
+        // Wire Properties Logic (Moved from Initialize to here for cleaner access)
+        EventHandler valChanged = (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1)
+            {
+                var obj = sel[0];
+                
+                float nx = (float)_nudPosX.Value;
+                float ny = (float)_nudPosY.Value;
+                float nw = (float)_nudSizeW.Value;
+                float nh = (float)_nudSizeH.Value;
+                
+                // Position Change
+                if(Math.Abs(obj.Position.X - nx) > 0.01 || Math.Abs(obj.Position.Y - ny) > 0.01)
+                {
+                     float dx = nx - obj.Position.X;
+                     float dy = ny - obj.Position.Y;
+                     CommandManager.Instance.Execute(new MoveCommand(sel, dx, dy));
+                }
+                
+                // Size Change (Simplified: just update size directly for now to support "Live", logic for ScaleCommand is complex)
+                if(Math.Abs(obj.Size.Width - nw) > 0.01 || Math.Abs(obj.Size.Height - nh) > 0.01)
+                {
+                    obj.Size = new SizeF(nw, nh);
+                    _workbench.Invalidate();
+                    // Note: No Undo for Size yet as per previous code comments
+                }
+            }
+        };
+        
+        _nudPosX.ValueChanged += valChanged;
+        _nudPosY.ValueChanged += valChanged;
+        _nudSizeW.ValueChanged += valChanged;
+        _nudSizeH.ValueChanged += valChanged;
     }
 
     private void InitializeLayers()
@@ -876,38 +911,13 @@ public partial class MainForm : Form
             };
         }
         
+        /* Moved Logic to InitializeTopToolbar to have access to NUDs
         // Wire Properties Logic
         EventHandler valChanged = (s, e) =>
         {
-            if (_isUpdatingUI) return;
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count == 1)
-            {
-                var obj = sel[0];
-                
-                float.TryParse(_txtPosX.Text, out float nx);
-                float.TryParse(_txtPosY.Text, out float ny);
-                float.TryParse(_txtSizeW.Text, out float nw);
-                float.TryParse(_txtSizeH.Text, out float nh);
-                
-                // Only create command if changed logic (simplified)
-                if(Math.Abs(obj.Position.X - nx) > 0.01 || Math.Abs(obj.Position.Y - ny) > 0.01)
-                {
-                     float dx = nx - obj.Position.X;
-                     float dy = ny - obj.Position.Y;
-                     CommandManager.Instance.Execute(new MoveCommand(sel, dx, dy));
-                }
-                
-                // Size update logic (placeholder/simplified as before)
-            }
+           ...
         };
-        
-        _txtPosX.Leave += valChanged;
-        _txtPosY.Leave += valChanged;
-        // Enter key?
-        KeyEventHandler enterCheck = (s, e) => { if(e.KeyCode == Keys.Enter) valChanged(s, EventArgs.Empty); };
-        _txtPosX.KeyDown += enterCheck;
-        _txtPosY.KeyDown += enterCheck;
+        */
 
         _jobRunner.ProgressChanged += (curr, total) => 
         {
@@ -1194,15 +1204,15 @@ public partial class MainForm : Form
         if (sel.Count == 1)
         {
             var obj = sel[0];
-            _txtPosX.Enabled = true;
-            _txtPosY.Enabled = true;
-            _txtSizeW.Enabled = true;
-            _txtSizeH.Enabled = true;
+            _nudPosX.Enabled = true;
+            _nudPosY.Enabled = true;
+            _nudSizeW.Enabled = true;
+            _nudSizeH.Enabled = true;
             
-            _txtPosX.Text = obj.Position.X.ToString("F2");
-            _txtPosY.Text = obj.Position.Y.ToString("F2");
-            _txtSizeW.Text = obj.Size.Width.ToString("F2");
-            _txtSizeH.Text = obj.Size.Height.ToString("F2");
+            _nudPosX.Value = (decimal)obj.Position.X;
+            _nudPosY.Value = (decimal)obj.Position.Y;
+            _nudSizeW.Value = (decimal)obj.Size.Width;
+            _nudSizeH.Value = (decimal)obj.Size.Height;
             
             // Update Layer Info Label
             var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId);
@@ -1217,15 +1227,18 @@ public partial class MainForm : Form
         }
         else
         {
-            _txtPosX.Enabled = false;
-            _txtPosY.Enabled = false;
-            _txtSizeW.Enabled = false;
-            _txtSizeH.Enabled = false;
+            _nudPosX.Enabled = false;
+            _nudPosY.Enabled = false;
+            _nudSizeW.Enabled = false;
+            _nudSizeH.Enabled = false;
             
-            _txtPosX.Text = "";
-            _txtPosY.Text = "";
-            _txtSizeW.Text = "";
-            _txtSizeH.Text = "";
+            // Clear or set to 0? NUDs don't support empty string.
+            // Just leaving enabled=false is visible enough.
+            // But value might be misleading.
+            _nudPosX.Value = 0;
+            _nudPosY.Value = 0;
+            _nudSizeW.Value = 0;
+            _nudSizeH.Value = 0;
             
             _lblLayerInfo.Text = "-";
         }
