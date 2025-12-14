@@ -37,6 +37,14 @@ public partial class MainForm : Form
     private ToolStripStatusLabel _lblStatusState = null!;
     private ToolStripStatusLabel _lblStatusPos = null!;
     private ToolStripProgressBar _progressBar = null!;
+    
+    // Top Toolbar Controls
+    private ToolStripLabel _lblMousePos = null!;
+    private ToolStripTextBox _txtPosX = null!;
+    private ToolStripTextBox _txtPosY = null!;
+    private ToolStripTextBox _txtSizeW = null!;
+    private ToolStripTextBox _txtSizeH = null!;
+    private ToolStripLabel _lblLayerInfo = null!;
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -85,13 +93,21 @@ public partial class MainForm : Form
 
     private void SetupCustomLayout()
     {
-        this.Text = "Laser Control Software";
-        
-        // Restore Window Settings
-        var cfg = AppConfiguration.Instance;
-        if (cfg.WindowX != -1 && cfg.WindowWidth > 0 && cfg.WindowHeight > 0)
+        try
         {
-            this.StartPosition = FormStartPosition.Manual;
+            this.Text = "Laser Control Software";
+            
+            // Initialize Workbench EARLY to prevent null references in event handlers
+            _workbench = new WorkbenchControl
+            {
+                Dock = DockStyle.Fill
+            };
+            
+            // Restore Window Settings
+            var cfg = AppConfiguration.Instance;
+            if (cfg.WindowX != -1 && cfg.WindowWidth > 0 && cfg.WindowHeight > 0)
+            {
+                this.StartPosition = FormStartPosition.Manual;
             this.Location = new Point(cfg.WindowX, cfg.WindowY);
             this.Size = new Size(cfg.WindowWidth, cfg.WindowHeight);
             
@@ -157,6 +173,9 @@ public partial class MainForm : Form
         this.MainMenuStrip = menuStrip;
         this.Controls.Add(menuStrip);
 
+        // 1.5 Top Toolbar (Two Rows)
+        InitializeTopToolbar();
+
         // 2. Main Container (Splits Left Tools and Rest)
         // Actually, let's use Docking properly.
         
@@ -200,7 +219,8 @@ public partial class MainForm : Form
             Dock = DockStyle.Right,
             Width = 300,
             Orientation = Orientation.Horizontal,
-            SplitterDistance = 100
+            SplitterDistance = 100,
+            //FixedPanel = FixedPanel.Panel2 // Keep Control Panel (Bottom) fixed size when resizing form
         };
 
         // Object List & Layers Tab Control
@@ -308,6 +328,150 @@ public partial class MainForm : Form
         tabLayers.Controls.Add(_layerList);
         _rightTabControl.TabPages.Add(tabLayers);
 
+        // Tab 3: Laser Control
+        var tabControl = new TabPage("Control");
+        var pnlControl = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, AutoScroll = true, Padding = new Padding(10) };
+        
+        // Jogging
+        var grpJog = new GroupBox { Text = "Jog", Width = 250, Height = 180 };
+        var gridJog = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3 };
+        // 0,0  0,1(Up) 0,2
+        // 1,0(L) 1,1   1,2(R)
+        // 2,0  2,1(Dn) 2,2
+        
+        var btnYPlus = new Button { Text = "Y+", Dock = DockStyle.Fill };
+        var btnYMinus = new Button { Text = "Y-", Dock = DockStyle.Fill };
+        var btnXPlus = new Button { Text = "X+", Dock = DockStyle.Fill };
+        var btnXMinus = new Button { Text = "X-", Dock = DockStyle.Fill };
+        var btnHome = new Button { Text = "H", Dock = DockStyle.Fill, BackColor = Color.LightBlue };
+        
+        gridJog.Controls.Add(btnYPlus, 1, 0);
+        gridJog.Controls.Add(btnXMinus, 0, 1);
+        gridJog.Controls.Add(btnHome, 1, 1);
+        gridJog.Controls.Add(btnXPlus, 2, 1);
+        gridJog.Controls.Add(btnYMinus, 1, 2);
+        
+        grpJog.Controls.Add(gridJog);
+        pnlControl.Controls.Add(grpJog);
+        
+        // Step Size
+        var pnlStep = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+        pnlStep.Controls.Add(new Label { Text = "Step (mm):", AutoSize = true, Padding = new Padding(0,5,0,0) });
+        var cmbStep = new ComboBox { Width = 60 };
+        cmbStep.Items.AddRange(new object[] { "0.1", "1", "10", "100" });
+        cmbStep.SelectedIndex = 2; // 10mm
+        pnlStep.Controls.Add(cmbStep);
+        pnlControl.Controls.Add(pnlStep);
+        
+        // Feed Rate
+        var pnlFeed = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+        pnlFeed.Controls.Add(new Label { Text = "Feed (mm/min):", AutoSize = true, Padding = new Padding(0,5,0,0) });
+        var numFeed = new NumericUpDown { Minimum = 100, Maximum = 10000, Value = 1000, Width = 60 };
+        pnlFeed.Controls.Add(numFeed);
+        pnlControl.Controls.Add(pnlFeed);
+
+        // Jog Logic
+        Action<string, string> sendJog = (axis, dir) => 
+        {
+             if (!SerialInterface.Instance.IsConnected) return;
+             if (!double.TryParse(cmbStep.Text, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double step)) step = 10;
+             double dist = (dir == "-") ? -step : step;
+             // $J=G91 X10 F1000
+             string cmd = $"$J=G91 {axis}{dist} F{numFeed.Value}";
+             SerialInterface.Instance.Write(cmd + "\n");
+        };
+        
+        btnYPlus.Click += (s, e) => sendJog("Y", "+");
+        btnYMinus.Click += (s, e) => sendJog("Y", "-");
+        btnXPlus.Click += (s, e) => sendJog("X", "+");
+        btnXMinus.Click += (s, e) => sendJog("X", "-");
+        btnHome.Click += (s, e) => SerialInterface.Instance.Write("$H\n");
+
+        // Fire Laser
+        var grpFire = new GroupBox { Text = "Testing", Width = 250, Height = 80 };
+        var btnFire = new Button { Text = "FIRE (Low Power)", Dock = DockStyle.Fill, BackColor = Color.Salmon };
+        bool isFiring = false;
+        btnFire.Click += (s, e) => 
+        {
+            if (!SerialInterface.Instance.IsConnected) return;
+            if (isFiring)
+            {
+                SerialInterface.Instance.Write("M5\n");
+                btnFire.Text = "FIRE (Low Power)";
+                btnFire.BackColor = Color.Salmon;
+                isFiring = false;
+            }
+            else
+            {
+                // M3 S1 (Low power)
+                SerialInterface.Instance.Write("M3 S10\n"); // S10 just to be sure it's visible but safe-ish
+                btnFire.Text = "STOP LASER";
+                btnFire.BackColor = Color.Red;
+                isFiring = true;
+            }
+        };
+        grpFire.Controls.Add(btnFire);
+        pnlControl.Controls.Add(grpFire);
+        
+        tabControl.Controls.Add(pnlControl);
+        _rightTabControl.TabPages.Add(tabControl);
+
+        // Tab 4: G-code / Console
+        var tabConsole = new TabPage("G-code");
+        var pnlConsole = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
+        pnlConsole.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        pnlConsole.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
+        
+        var txtLog = new RichTextBox { Dock = DockStyle.Fill, ReadOnly = true, BackColor = Color.Black, ForeColor = Color.Lime, Font = new Font("Consolas", 9) };
+        pnlConsole.Controls.Add(txtLog, 0, 0);
+        
+        var pnlInput = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
+        pnlInput.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        pnlInput.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 60));
+        
+        var txtInput = new TextBox { Dock = DockStyle.Fill };
+        var btnSend = new Button { Text = "Send", Dock = DockStyle.Fill };
+        
+        Action sendCommand = () => 
+        {
+             string cmd = txtInput.Text.Trim();
+             if (!string.IsNullOrEmpty(cmd))
+             {
+                 SerialInterface.Instance.Write(cmd + "\n");
+                 txtInput.Text = "";
+                 // Local echo done by LineReceived/DataReceived ideally, but we can echo here too
+                 if (txtLog.IsDisposed) return;
+                 txtLog.AppendText($"> {cmd}\n");
+                 txtLog.ScrollToCaret();
+             }
+        };
+        
+        btnSend.Click += (s, e) => sendCommand();
+        txtInput.KeyDown += (s, e) => { if(e.KeyCode == Keys.Enter) { sendCommand(); e.SuppressKeyPress=true; } };
+        
+        pnlInput.Controls.Add(txtInput, 0, 0);
+        pnlInput.Controls.Add(btnSend, 1, 0);
+        pnlConsole.Controls.Add(pnlInput, 0, 1);
+        
+        tabConsole.Controls.Add(pnlConsole);
+        _rightTabControl.TabPages.Add(tabConsole);
+        
+        // Wire up Logging
+        SerialInterface.Instance.LineReceived += (line) => 
+        {
+            if (txtLog.IsDisposed) return;
+            try {
+                txtLog.Invoke(() => 
+                {
+                    txtLog.AppendText($"< {line}\n");
+                    txtLog.ScrollToCaret();
+                });
+            } catch { } // Ignore invoke errors on closing
+        };
+        // Also log "Ok" etc if needed, but LineReceived filters status updates usually? 
+        // SerialInterface LineReceived handles non-status lines. 
+        // DataReceived gives raw. LineReceived is cleaner.
+
         // Add Tabs to Right Panel
         rightSplit.Panel1.Controls.Add(_rightTabControl);
         
@@ -394,117 +558,77 @@ public partial class MainForm : Form
 
         this.Controls.Add(rightSplit);
 
-        // Center: Workbench
-        _workbench = new WorkbenchControl
-        {
-            Dock = DockStyle.Fill
-        };
+        // Center: Workbench (Already initialized, just add)
         this.Controls.Add(_workbench);
         
-        // Z-Order correction (Docking happens in reverse add order usually, but let's be safe)
-        // Bring Menu to front usually needed if it was added first but docked Top? 
-        // WinForms docking needs Last Added -> First in Dock Order for Fill. 
-        // So Fill should be added first? No.
-        // Actually: Controls.Add adds to the beginning of the collection (index 0).
-        // Dock layout engine lays out children in REVERSE index order (last control in collection laid out first).
-        
-        // We added Menu (Top) -> Layers (Bottom) -> Tools (Left) -> RightSplit (Right) -> Workbench (Fill).
-        // If we assume Standard order:
-        // Workbench (Fill) should be "top" of z-order (Index 0) to fill remaining space?
-        // Let's just create them and trust the process, if it looks wrong we fix z-order.
-        // Controls.Add adds to index 0.
-        // So Workbench is Index 0.
-        // RightSplit is Index 1.
-        // Tools is Index 2.
-        // Layers is Index 3.
-        // Menu is Index 4.
-        
-        // Layout:
-        // Menu (Top) takes space.
-        // Layers (Bottom) takes space.
-        // Tools (Left) takes space.
-        // RightSplit (Right) takes space.
-        // Workbench (Fill) takes remaining.
-        
-        // This actually works perfectly with Controls.Add order if done in reverse order of dependency?
-        // Wait, standard WinForms:
-        // this.Controls.Add(fillControl);
-        // this.Controls.Add(dockLeftControl);
-        // ...
-        
-        // Let's force Z-order just in case.
-        _workbench.BringToFront(); // Fill last
-        rightSplit.BringToFront();
-        _toolsPanel.BringToFront();
-        _layerPanel.BringToFront();
-        menuStrip.BringToFront(); // Menu always top
-        
-        _workbench.SendToBack(); // Fill needs to be at the bottom of the z-order to be docked "last" in space calculation?
-        // Actually, the control at index 0 is docked FIRST.
-        // If I dock TOP, it takes top.
-        // If I dock FILL, it takes whatever is left.
-        // So FILL must be at the END of the list (Index Count-1) OR added FIRST?
-        // "The control with the lowest Z-order (highest index) is docked first." -> Microsoft docs usually say this but it's confusing.
-        // Correct rule: Controls are docked in the order of the Controls collection (0 to Count-1) or reverse?
-        // "The z-order of the controls determines the docking priority. The control at the top of the z-order (index 0) has the HIGHEST priority and gets docked FIRST."
-        // So:
-        // 1. Menu (Top)
-        // 2. Tools (Left)
-        // 3. Layers (Bottom)
-        // 4. Right Panel (Right)
-        // 5. Workbench (Fill)
-        
-        // So we need to add them in that order (last added becomes index 0) -> No, Add() inserts at 0.
-        // So we should add Workbench FIRST, then Right, then Layers, then Tools, then Menu.
-        // My code added Menu, then Layers, then Tools, then Right, then Workbench.
-        // So Workbench is at 0. Right is at 1...
-        // So Workbench (Fill) gets docked FIRST? That would cover everything.
-        // We need Workbench to be docked LAST (Lowest Priority).
-        // So Workbench needs to be at the BOTTOM of Z-Order (Highest Index).
-        
-        // So:
-        // menuStrip.BringToFront(); (Index 0)
-        // _toolsPanel.BringToFront();
-        // _layerPanel.BringToFront();
-        // rightSplit.BringToFront();
-        // _workbench.SendToBack();
-        
-        // Initial Setup (Added to Controls stack)
-        // Controls.Add adds to Index 0 (Front).
-        // Docking Priority: Back (Highest Index) -> Front (Lowest Index).
-        // Back = Outer-most. Front = Inner-most.
-        
-        // We want (Outer -> Inner):
-        // 1. MenuStrip (Top) / StatusStrip (Bottom)
-        // 2. Tools (Left) / RightSplit (Right) / LayerPanel (Bottom)
-        // 3. Workbench (Fill)
-        
-        // So Z-Order (Front to Back):
-        // 0. Workbench
-        // 1. Layers / Tools / Right
-        // 2. Menu / Status
-        
-        // BringToFront puts at Index 0.
-        // SendToBack puts at Index Count-1.
         
         // 1. Fill (Inner-most)
         _workbench.BringToFront();
         
         // 2. Side Panels
-        _layerPanel.BringToFront(); // Dock=Bottom (Inner relative to Status)
+        _layerPanel.BringToFront(); 
         _toolsPanel.BringToFront();
         rightSplit.BringToFront();
+
+        if (_controlPanel != null) _controlPanel.BringToFront(); // Inside Split, doesn't matter for Main Z
         
-        // 3. Outer Bars (Outer-most)
-        // Note: SendToBack pushes to the END of the list.
-        // If we SendToBack(Status), it is Last.
-        // If we then SendToBack(Menu), Menu is Last. Status is Second Last.
-        // So Menu is Outer-most. Status is Second Outer-most.
-        
-        _statusStrip.SendToBack(); 
+        // 3. Outer Bars
+        _statusStrip.SendToBack();
+        _topToolbarPanel.SendToBack(); 
         menuStrip.SendToBack();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Startup Error: {ex.Message}\n{ex.StackTrace}", "Critical Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private FlowLayoutPanel _topToolbarPanel; 
+
+    private void InitializeTopToolbar()
+    {
+        _topToolbarPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            FlowDirection = FlowDirection.TopDown,
+            BackColor = Color.FromName("Control")
+        };
         
-        // Check order
+        // Row 1: Mouse Position
+        var tsRow1 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
+        _lblMousePos = new ToolStripLabel("Mouse: 0.00, 0.00");
+        tsRow1.Items.Add(_lblMousePos);
+        
+        // Row 2: Properties
+        var tsRow2 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
+        
+        tsRow2.Items.Add(new ToolStripLabel("X:"));
+        _txtPosX = new ToolStripTextBox { Width = 50 };
+        tsRow2.Items.Add(_txtPosX);
+        
+        tsRow2.Items.Add(new ToolStripLabel("Y:"));
+        _txtPosY = new ToolStripTextBox { Width = 50 };
+        tsRow2.Items.Add(_txtPosY);
+        
+        tsRow2.Items.Add(new ToolStripLabel("W:"));
+        _txtSizeW = new ToolStripTextBox { Width = 50 };
+        tsRow2.Items.Add(_txtSizeW);
+        
+        tsRow2.Items.Add(new ToolStripLabel("H:"));
+        _txtSizeH = new ToolStripTextBox { Width = 50 };
+        tsRow2.Items.Add(_txtSizeH);
+        
+        tsRow2.Items.Add(new ToolStripSeparator());
+        _lblLayerInfo = new ToolStripLabel("-");
+        tsRow2.Items.Add(_lblLayerInfo);
+        
+        _topToolbarPanel.Controls.Add(tsRow1);
+        _topToolbarPanel.Controls.Add(tsRow2);
+        
+        this.Controls.Add(_topToolbarPanel); 
+        
+        // Logic will be wired in Initialize for Workbench
     }
 
     private void InitializeLayers()
@@ -744,6 +868,50 @@ public partial class MainForm : Form
             });
         };
 
+        // Wire Workbench Mouse Event
+        if (_workbench != null)
+        {
+            _workbench.MousePositionChanged += (pos) => 
+            {
+                 if (this.IsDisposed) return;
+                 // Optimize?
+                 this.Invoke(() => _lblMousePos.Text = $"Mouse: {pos.X:F2}, {pos.Y:F2}");
+            };
+        }
+        
+        // Wire Properties Logic
+        EventHandler valChanged = (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1)
+            {
+                var obj = sel[0];
+                
+                float.TryParse(_txtPosX.Text, out float nx);
+                float.TryParse(_txtPosY.Text, out float ny);
+                float.TryParse(_txtSizeW.Text, out float nw);
+                float.TryParse(_txtSizeH.Text, out float nh);
+                
+                // Only create command if changed logic (simplified)
+                if(Math.Abs(obj.Position.X - nx) > 0.01 || Math.Abs(obj.Position.Y - ny) > 0.01)
+                {
+                     float dx = nx - obj.Position.X;
+                     float dy = ny - obj.Position.Y;
+                     CommandManager.Instance.Execute(new MoveCommand(sel, dx, dy));
+                }
+                
+                // Size update logic (placeholder/simplified as before)
+            }
+        };
+        
+        _txtPosX.Leave += valChanged;
+        _txtPosY.Leave += valChanged;
+        // Enter key?
+        KeyEventHandler enterCheck = (s, e) => { if(e.KeyCode == Keys.Enter) valChanged(s, EventArgs.Empty); };
+        _txtPosX.KeyDown += enterCheck;
+        _txtPosY.KeyDown += enterCheck;
+
         _jobRunner.ProgressChanged += (curr, total) => 
         {
              if (_statusStrip.IsDisposed) return;
@@ -853,79 +1021,12 @@ public partial class MainForm : Form
         
         flow.Controls.Add(flowGroup);
         
-        // --- Transform / Properties ---
-        var grpProps = new GroupBox { Text = "Transform", Width = 200, Height = 140 };
-        var pnlProps = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4 };
+        // REMOVED HISTORY
+        // lbHistory.Items.Clear();
+        // CommandManager.Instance.StateChanged += ... 
         
-        pnlProps.Controls.Add(new Label { Text = "X (mm):", AutoSize = true }, 0, 0);
-        _numPosX = new NumericUpDown { DecimalPlaces = 2, Minimum = -1000, Maximum = 1000, Width = 80 };
-        pnlProps.Controls.Add(_numPosX, 1, 0);
+        _controlPanel.Controls.Add(flow);
 
-        pnlProps.Controls.Add(new Label { Text = "Y (mm):", AutoSize = true }, 0, 1);
-        _numPosY = new NumericUpDown { DecimalPlaces = 2, Minimum = -1000, Maximum = 1000, Width = 80 };
-        pnlProps.Controls.Add(_numPosY, 1, 1);
-
-        pnlProps.Controls.Add(new Label { Text = "Width:", AutoSize = true }, 0, 2);
-        _numSizeW = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 1000, Width = 80 };
-        pnlProps.Controls.Add(_numSizeW, 1, 2);
-
-        pnlProps.Controls.Add(new Label { Text = "Height:", AutoSize = true }, 0, 3);
-        _numSizeH = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 1000, Width = 80 };
-        pnlProps.Controls.Add(_numSizeH, 1, 3);
-        
-        // Add Layer/Speed/Power Info in Properties
-        pnlProps.Controls.Add(new Label { Text = "Layer:", AutoSize = true }, 0, 4);
-        var lblLayerInfo = new Label { Text = "-", AutoSize = true };
-        lblLayerInfo.Name = "lblLayerInfo";
-        pnlProps.Controls.Add(lblLayerInfo, 1, 4);
-        
-        grpProps.Controls.Add(pnlProps);
-        flow.Controls.Add(grpProps);
-        
-        // Logic for Properties
-        EventHandler valChanged = (s, e) =>
-        {
-            if (_isUpdatingUI) return;
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count == 1)
-            {
-                var obj = sel[0];
-                float nx = (float)_numPosX.Value;
-                float ny = (float)_numPosY.Value;
-                float nw = (float)_numSizeW.Value;
-                float nh = (float)_numSizeH.Value;
-                
-                // Only create command if changed
-                if(Math.Abs(obj.Position.X - nx) > 0.01 || Math.Abs(obj.Position.Y - ny) > 0.01)
-                {
-                     // Move Absolute? MoveCommand is Relative.
-                     float dx = nx - obj.Position.X;
-                     float dy = ny - obj.Position.Y;
-                     CommandManager.Instance.Execute(new MoveCommand(sel, dx, dy));
-                }
-                
-                if(Math.Abs(obj.Size.Width - nw) > 0.01 || Math.Abs(obj.Size.Height - nh) > 0.01)
-                {
-                     // Resize? ResizeCommand expects Dictionary of States.
-                     var oldState = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)>();
-                     var newState = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)>();
-                     
-                     oldState[obj] = (obj.Position, obj.Size, (obj as LaserPath)?.Points?.ToList());
-                     
-                     // We need to set the new size directly on a temp object or calculate expected state?
-                     // Actually ResizeCommand takes "New States".
-                     // So we construct what we WANT.
-                     var newSz = new SizeF(nw, nh);
-                     newState[obj] = (obj.Position, newSz, (obj as LaserPath)?.Points?.ToList()); // Points scaling is tricky here without UpdateResize logic.
-                     // For simple Width/Height update, we might need a dedicated command or careful scaling.
-                     // IMPORTANT: Setting Size directly might not scale points for Paths.
-                     // Checking LaserObject.cs...
-                }
-            }
-        };
-        
-        _numPosX.ValueChanged += valChanged;
-        _numPosY.ValueChanged += valChanged;
         // Size updates are tricky for Paths, limiting to Position for robust MVP or carefully implementing.
         // Let's allow Position editing fully. Size editing... maybe just disables for Paths?
         // Or we implement a "SetBounds" method that scales?
@@ -975,21 +1076,9 @@ public partial class MainForm : Form
         flow.Controls.Add(grpFraming);
         
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); 
-        flow.Controls.Add(new Label { Text = "History:", AutoSize = true });
-        
-        var lbHistory = new ListBox { Width = 200, Height = 200 };
-        flow.Controls.Add(lbHistory);
-        
-        CommandManager.Instance.StateChanged += (s, e) => 
-        {
-             lbHistory.Items.Clear();
-             foreach(var desc in CommandManager.Instance.GetHistory())
-             {
-                 lbHistory.Items.Add(desc);
-             }
-             // Add current stack indicator logic if needed, but simple list for now
-             _workbench.Invalidate();
-        };
+        // lbHistory removed
+        // CommandManager.Instance.StateChanged += ... // Removed from UI
+        _workbench.Invalidate();
 
         _controlPanel.Controls.Add(flow);
     }
@@ -1101,63 +1190,49 @@ public partial class MainForm : Form
 
     public bool UpdateSelectedObjects()
     {
-        _workbench.Invalidate();
+        if (_workbench != null) _workbench.Invalidate();
         var sel = ProjectState.Instance.SelectedObjects;
         
         _isUpdatingUI = true;
         if (sel.Count == 1)
         {
             var obj = sel[0];
-            _numPosX.Enabled = true;
-            _numPosY.Enabled = true;
-            _numSizeW.Enabled = true;
-            _numSizeH.Enabled = true;
+            _txtPosX.Enabled = true;
+            _txtPosY.Enabled = true;
+            _txtSizeW.Enabled = true;
+            _txtSizeH.Enabled = true;
             
-            _numPosX.Value = (decimal)obj.Position.X;
-            _numPosY.Value = (decimal)obj.Position.Y;
-            _numSizeW.Value = (decimal)obj.Size.Width;
-            _numSizeH.Value = (decimal)obj.Size.Height;
+            _txtPosX.Text = obj.Position.X.ToString("F2");
+            _txtPosY.Text = obj.Position.Y.ToString("F2");
+            _txtSizeW.Text = obj.Size.Width.ToString("F2");
+            _txtSizeH.Text = obj.Size.Height.ToString("F2");
             
             // Update Layer Info Label
             var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId);
-            var lblInfo = _controlPanel.Controls.Find("lblLayerInfo", true).FirstOrDefault() as Label;
-            if (lblInfo != null)
+            if (layer != null)
             {
-                if (layer != null)
-                {
-                    lblInfo.Text = $"{layer.Name}\nS: {layer.Speed}\nP: {layer.Power}%\n{layer.Mode}";
-                    // Add Mode info if asked
-                }
-                else
-                {
-                    lblInfo.Text = "No Layer";
-                }
+                _lblLayerInfo.Text = $"{layer.Name} (S: {layer.Speed})";
             }
-            
-            // Switch tab to "Objects" if needed? No, let user stay on Layers if they want.
-            
-            // Update selection in list?
-            // If Single selection
+            else
+            {
+                _lblLayerInfo.Text = "No Layer";
+            }
         }
         else
         {
-            _numPosX.Enabled = false;
-            _numPosY.Enabled = false;
-            _numSizeW.Enabled = false;
-            _numSizeH.Enabled = false;
+            _txtPosX.Enabled = false;
+            _txtPosY.Enabled = false;
+            _txtSizeW.Enabled = false;
+            _txtSizeH.Enabled = false;
             
-            _numPosX.Value = 0;
-            _numPosY.Value = 0;
-            _numSizeW.Value = 0;
-            _numSizeH.Value = 0;
+            _txtPosX.Text = "";
+            _txtPosY.Text = "";
+            _txtSizeW.Text = "";
+            _txtSizeH.Text = "";
             
-            // Clear label
-            var lblInfo = _controlPanel.Controls.Find("lblLayerInfo", true).FirstOrDefault() as Label;
-            if (lblInfo != null) lblInfo.Text = "-";
+            _lblLayerInfo.Text = "-";
         }
         _isUpdatingUI = false;
-        
-        // Update layer buttons based on selection?
         
         _isUpdatingSelection = true;
         var currentSet = new HashSet<LaserObject>(ProjectState.Instance.SelectedObjects);

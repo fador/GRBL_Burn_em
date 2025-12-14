@@ -53,6 +53,8 @@ public class WorkbenchControl : Control
     public float Zoom => _zoom;
     public PointF PanOffset => _panOffset;
 
+    public event Action<PointF>? MousePositionChanged;
+
     public WorkbenchControl()
     {
         DoubleBuffered = true;
@@ -512,7 +514,6 @@ public class WorkbenchControl : Control
                                        
         PointF effectivePos = Snap(worldPos);
 
-        // 1. Panning
         if (_isPanning)
         {
             float dx = e.X - _lastMousePos.X;
@@ -521,8 +522,14 @@ public class WorkbenchControl : Control
             _panOffset.Y += dy;
             _lastMousePos = e.Location;
             Invalidate();
+            // Fire event for raw mouse move too if needed?
+            // Usually we want World Coordinates.
+            MousePositionChanged?.Invoke(ScreenToWorld(e.Location));
             return;
         }
+
+        // Fire Mouse Position Event (Always)
+        MousePositionChanged?.Invoke(worldPos);
 
         // 2. Resizing
         if (_isResizing)
