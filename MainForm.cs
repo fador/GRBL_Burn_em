@@ -239,7 +239,86 @@ public partial class MainForm : Form
             DataSource = ProjectState.Instance.Objects,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             RowHeadersVisible = false,
-            MultiSelect = true
+            MultiSelect = true,
+            AllowDrop = true // Enable Drag/Drop
+        };
+        
+        // Wire Drag/Drop Events
+        Rectangle dragBoxFromMouseDown = Rectangle.Empty;
+        int rowIndexFromMouseDown = -1;
+        int rowIndexOfItemUnderMouseToDrop = -1;
+
+        _objectList.MouseMove += (s, e) => 
+        {
+            if ((e.Button & MouseButtons.Left) == MouseButtons.Left)
+            {
+                // If the mouse moves outside the rectangle, start the drag
+                if (dragBoxFromMouseDown != Rectangle.Empty && !dragBoxFromMouseDown.Contains(e.X, e.Y))
+                {
+                    // Proceed with the drag and drop, passing in the list item
+                    DragDropEffects dropEffect = _objectList.DoDragDrop(_objectList.Rows[rowIndexFromMouseDown], DragDropEffects.Move);
+                }
+            }
+        };
+
+        _objectList.MouseDown += (s, e) => 
+        {
+             // Get the index of the item the mouse is below
+             rowIndexFromMouseDown = _objectList.HitTest(e.X, e.Y).RowIndex;
+
+             if (rowIndexFromMouseDown != -1)
+             {
+                 // Remember the point where the mouse down occurred
+                 // The DragSize indicates the size that the mouse can move before a drag event should be started
+                 Size dragSize = SystemInformation.DragSize;
+
+                 // Create a rectangle using the DragSize, with the MousePosition as the center of the rectangle
+                 dragBoxFromMouseDown = new Rectangle(new Point(e.X - (dragSize.Width / 2), e.Y - (dragSize.Height / 2)), dragSize);
+             }
+             else
+             {
+                 // Reset the rectangle if the mouse is not over an item in the ListBox
+                 dragBoxFromMouseDown = Rectangle.Empty;
+             }
+        };
+        
+        _objectList.DragOver += (s, e) => 
+        {
+            e.Effect = DragDropEffects.Move;
+        };
+
+        _objectList.DragDrop += (s, e) => 
+        {
+             // The mouse locations are relative to the screen, so they must be converted to client coordinates
+             Point clientPoint = _objectList.PointToClient(new Point(e.X, e.Y));
+                 
+             // Get the row index of the item the mouse is below
+             rowIndexOfItemUnderMouseToDrop = _objectList.HitTest(clientPoint.X, clientPoint.Y).RowIndex;
+
+             // If the drag operation was a move then remove and insert the row
+             if (e.Effect == DragDropEffects.Move)
+             {
+                 if (rowIndexOfItemUnderMouseToDrop < 0) rowIndexOfItemUnderMouseToDrop = _objectList.Rows.Count - 1; // Drop at end if missed
+                 
+                 // Perform reorder on Data Source
+                 var objects = ProjectState.Instance.Objects;
+                 if (rowIndexFromMouseDown >= 0 && rowIndexFromMouseDown < objects.Count)
+                 {
+                     var item = objects[rowIndexFromMouseDown];
+                     
+                     // Direct swap or move
+                     // Remove and Insert
+                     if (rowIndexOfItemUnderMouseToDrop != rowIndexFromMouseDown)
+                     {
+                         objects.RemoveAt(rowIndexFromMouseDown);
+                         objects.Insert(rowIndexOfItemUnderMouseToDrop, item);
+                         
+                         // Select the dropped item
+                         _objectList.ClearSelection();
+                         _objectList.Rows[rowIndexOfItemUnderMouseToDrop].Selected = true;
+                     }
+                 }
+             }
         };
         _objectList.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = "IsEnabled", HeaderText = "On", Width = 30 });
         _objectList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Name", HeaderText = "Name", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
@@ -247,7 +326,71 @@ public partial class MainForm : Form
         _objectList.Columns.Add(new DataGridViewTextBoxColumn { Name = "LayerPower", HeaderText = "Pwr%", Width = 40, ReadOnly = true });
         _objectList.Columns.Add(new DataGridViewTextBoxColumn { Name = "LayerSpeed", HeaderText = "Spd", Width = 40, ReadOnly = true });
         
-        tabObjects.Controls.Add(_objectList);
+        // Order Buttons Toolbar
+        var tsOrder = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
+        var btnUp = new ToolStripButton("▲") { ToolTipText = "Move Up" };
+        var btnDown = new ToolStripButton("▼") { ToolTipText = "Move Down" };
+        
+        btnUp.Click += (s, e) => 
+        {
+            var sel = _objectList.SelectedRows;
+            if (sel.Count == 1)
+            {
+                int idx = sel[0].Index;
+                if (idx > 0)
+                {
+                    var objects = ProjectState.Instance.Objects;
+                    var item = objects[idx];
+                    objects.RemoveAt(idx);
+                    objects.Insert(idx - 1, item);
+                    _objectList.ClearSelection();
+                    _objectList.Rows[idx - 1].Selected = true;
+                }
+            }
+        };
+
+        btnDown.Click += (s, e) => 
+        {
+            var sel = _objectList.SelectedRows;
+            if (sel.Count == 1)
+            {
+                int idx = sel[0].Index;
+                var objects = ProjectState.Instance.Objects;
+                if (idx < objects.Count - 1)
+                {
+                    var item = objects[idx];
+                    objects.RemoveAt(idx);
+                    objects.Insert(idx + 1, item);
+                    _objectList.ClearSelection();
+                    _objectList.Rows[idx + 1].Selected = true;
+                }
+            }
+        };
+        
+        tsOrder.Items.Add(btnUp);
+        tsOrder.Items.Add(btnDown);
+
+        tabObjects.Controls.Add(_objectList); // Add list first (Fill)
+        tabObjects.Controls.Add(tsOrder); // Add toolbar (Top) - Docking order matters?
+        // In WinForms, Control added last is at top of Z-order?
+        // Docking precedence: The LAST added control with DockStyle.Top is at the TOP-MOST position? 
+        // No, typically if Fill is verified, we add Top first, then Fill.
+        // Or we add Fill first, but since it fills remaining, if Top is not there yet...
+        // Actually: "Controls are docked in reverse Z-order." (Last added is closest to edge?)
+        // Let's add ToolStrip FIRST if we want it at the top, or LAST?
+        // "The last control added to the Controls collection is the first one docked." 
+        // Wait, "The control at the beginning of the Controls collection is docked last." (Z-Order 0 is top).
+        // Controls.Add adds to the END of the collection.
+        // So `_objectList` is added. Then `tsOrder`.
+        // If we add `tsOrder` (Top) second, it will be added to the collection.
+        // If `tsOrder` is at generic Z-index 0 (top of stack).
+        // Docking: The control with Z-order 0 is docked FIRST?
+        // Let's rely on standard practice: Add Top controls, then Fill controls? No, Fill consumes remaining space.
+        // To be safe: Add tsOrder (Top), THEN _objectList (Fill).
+        
+        // So I will change the logic to clear and re-add or just use BringToFront on tsOrder.
+        // Actually, replacing content allows me to just add them in correct order.
+        
         _rightTabControl.TabPages.Add(tabObjects);
 
         // Tab 2: Layers
