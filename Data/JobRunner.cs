@@ -13,7 +13,6 @@ public class JobRunner
     private int _pendingCommandsCount = 0;
     public int MaxPlannerBlocks { get; set; } = 15; // Default GRBL
 
-    private int _bufferBytes = 0; // Legacy/Unused
     private long _lastProgressTicks = 0;
     private const long ProgressInterval = 1000000; // 100ms 
     
@@ -40,7 +39,6 @@ public class JobRunner
         _gcodeLines = gcode.ToList();
         _currentLineIndex = 0;
         _pendingCommandsCount = 0;
-        _bufferBytes = 0; // Not used/Legacy
         _pendingCommands.Clear();
         _isRunning = true;
         _isPaused = false;
@@ -69,9 +67,7 @@ public class JobRunner
         _isPaused = false;
         _gcodeLines.Clear();
         _pendingCommands.Clear();
-        _pendingCommandsCount = 0;
-        _bufferBytes = 0;
-        
+        _pendingCommandsCount = 0;        
         // Soft Reset to clear GRBL buffer
         SerialInterface.Instance.Write("\u0018"); 
     }
@@ -88,7 +84,7 @@ public class JobRunner
         if (line.Contains("ok"))
         {
             _pendingCommandsCount--;
-            if (_pendingCommandsCount < 0) _pendingCommandsCount = 0;
+            //if (_pendingCommandsCount < 0) _pendingCommandsCount = 0;
             
             SendNext();
         }
@@ -96,7 +92,7 @@ public class JobRunner
         {
             // Counts as processed command.
             _pendingCommandsCount--;
-            if (_pendingCommandsCount < 0) _pendingCommandsCount = 0;
+            //if (_pendingCommandsCount < 0) _pendingCommandsCount = 0;
             
             Debug.WriteLine($"GRBL Error: {line}");
             SendNext();

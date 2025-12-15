@@ -30,9 +30,11 @@ public class SerialInterface
         try
         {
             _serialPort = new SerialPort(portName, baudRate);
+            _serialPort.DtrEnable = true; // Essential for some controllers to reset or communicate
             _serialPort.DataReceived += _serialPort_DataReceived;
             _serialPort.Open();
             _serialPort.DiscardInBuffer(); // Clear any existing data
+            
             ConnectionStatusChanged?.Invoke(true);
             
             // Allow some time for the machine to reset and send welcome message
@@ -123,41 +125,46 @@ public class SerialInterface
 
     private void _serialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
     {
-        if (_serialPort == null) return;
-        try
-        {
-            string data = _serialPort.ReadExisting();
-            DataReceived?.Invoke(data);
-            
-            // Process Lines
-            foreach(char c in data)
-            {
-                if (c == '\n' || c == '\r')
-                {
-                    if (_rxBuffer.Length > 0)
-                    {
-                        string line = _rxBuffer.ToString().Trim();
-                        _rxBuffer.Clear();
-                        if (string.IsNullOrEmpty(line)) continue;
-                        
-                        // Parse
-                        if (line.StartsWith("<"))
-                        {
-                            ParseStatus(line);
-                        }
-                        else
-                        {
-                            LineReceived?.Invoke(line);
-                        }
-                    }
-                }
-                else
-                {
-                    _rxBuffer.Append(c);
-                }
-            }
-        }
-        catch { }
+         if (_serialPort == null || !_serialPort.IsOpen) return;
+         
+         try
+         {
+             string data = _serialPort.ReadExisting();
+             if (!string.IsNullOrEmpty(data))
+             {
+                 DataReceived?.Invoke(data);
+
+                 // Process Lines
+                 foreach(char c in data)
+                 {
+                     if (c == '\n' || c == '\r')
+                     {
+                         if (_rxBuffer.Length > 0)
+                         {
+                             //Debug.WriteLine($"Line Received: {_rxBuffer.ToString()}");
+                             string line = _rxBuffer.ToString().Trim();
+                             _rxBuffer.Clear();
+                             if (string.IsNullOrEmpty(line)) continue;
+                             
+                             // Parse
+                             if (line.StartsWith("<"))
+                             {
+                                 ParseStatus(line);
+                             }
+                             LineReceived?.Invoke(line);
+                         }
+                     }
+                     else
+                     {
+                         _rxBuffer.Append(c);
+                     }
+                 }
+             }
+         }
+         catch (Exception ex)
+         {
+             Debug.WriteLine($"Serial RX Error: {ex.Message}");
+         }
     }
 
     private void ParseStatus(string line)
