@@ -35,127 +35,155 @@ public class JobRunner
         SerialInterface.Instance.LineReceived += OnSerialLineReceived;
     }
 
+    private readonly object _runnerLock = new object();
+
     public void Start(IEnumerable<string> gcode)
     {
-        if (_isRunning) return;
-
-        _gcodeLines = gcode.ToList();
-        _currentLineIndex = 0;
-        _pendingCommandsCount = 0;
-        _pendingCommands.Clear();
-        
-        _currentBytes = 0;
-        _sentLineLengths.Clear();
-        
-        _isRunning = true;
-        _isPaused = false;
-        
-        SendNext();
-    }
-
-    public void Pause()
-    {
-        if (!_isRunning) return;
-        _isPaused = true;
-        SerialInterface.Instance.Write("!");
-    }
-
-    public void Resume()
-    {
-        if (!_isRunning || !_isPaused) return;
-        _isPaused = false;
-        SerialInterface.Instance.Write("~");
-        SendNext();
-    }
-
-    public void Stop()
-    {
-        _isRunning = false;
-        _isPaused = false;
-        _gcodeLines.Clear();
-        _pendingCommands.Clear();
-        _pendingCommandsCount = 0;   
-        _currentBytes = 0;
-        _sentLineLengths.Clear();
-        
-        // Soft Reset to clear GRBL buffer
-        SerialInterface.Instance.Write("\u0018"); 
-    }
-
-    private void OnSerialLineReceived(string line)
-    {
-        if (!_isRunning) return;
-
-        // GRBL sends 'ok' when a command is accepted into the planner buffer
-        // Or 'error'. In both cases, the command has left the RX buffer and entered the parser/executor.
-        
-        if (line.Contains("ok") || line.Contains("error"))
+        lock (_runnerLock)
         {
-            _pendingCommandsCount--;
-            // Update Byte Count
-            if (_sentLineLengths.Count > 0)
-            {
-                int len = _sentLineLengths.Dequeue();
-                _currentBytes -= len;
-                if (_currentBytes < 0) _currentBytes = 0; // Output safety
-            }
+            if (_isRunning) return;
+
+            _gcodeLines = gcode.ToList();
+            _currentLineIndex = 0;
+            _pendingCommandsCount = 0;
+            _pendingCommands.Clear();
             
-            if (line.Contains("error"))
-            {
-                Debug.WriteLine($"GRBL Error: {line}");
-            }
+            _currentBytes = 0;
+            _sentLineLengths.Clear();
+            
+            _isRunning = true;
+            _isPaused = false;
             
             SendNext();
         }
     }
 
-    private void SendNext()
+    public void Pause()
     {
-        if (_isPaused || !_isRunning) return;
-
-        // Flow Control:
-        // 1. Planner Buffer (Slots)
-        // 2. RX Byte Buffer (Size)
-        
-        while (_currentLineIndex < _gcodeLines.Count)
+        lock (_runnerLock)
         {
-            // 1. Check Planner Slots
-            if (_pendingCommandsCount >= MaxPlannerBlocks)
-            {
-               break; 
-            }
-
-            string line = _gcodeLines[_currentLineIndex];
-            string lineToSend = line + "\n";
-            int lineBytes = lineToSend.Length; // ASCII 1 byte per char
-
-            // 2. Check RX Buffer Size
-            if (_currentBytes + lineBytes > MaxBufferSize)
-            {
-                // Not enough room in RX buffer
-                break;
-            }
-
-            SerialInterface.Instance.Write(lineToSend);
-            
-            _pendingCommandsCount++;
-            _currentBytes += lineBytes;
-            _sentLineLengths.Enqueue(lineBytes);
-            
-            _currentLineIndex++;
-            
-            long now = DateTime.Now.Ticks;
-            if (now - _lastProgressTicks > ProgressInterval || _currentLineIndex == _gcodeLines.Count)
-            {
-                ProgressChanged?.Invoke(_currentLineIndex, _gcodeLines.Count);
-                _lastProgressTicks = now;
-            }
+            if (!_isRunning) return;
+            _isPaused = true;
+            SerialInterface.Instance.Write("!");
         }
+    }
 
-        if (_currentLineIndex >= _gcodeLines.Count && _pendingCommandsCount == 0)
+    public void Resume()
+    {
+        lock (_runnerLock)
+        {
+            if (!_isRunning || !_isPaused) return;
+            _isPaused = false;
+            SerialInterface.Instance.Write("~");
+            SendNext();
+        }
+    }
+
+    public void Stop()
+    {
+        lock (_runnerLock)
         {
             _isRunning = false;
-            JobCompleted?.Invoke();
+            _isPaused = false;
+            _gcodeLines.Clear();
+            _pendingCommands.Clear();
+            _pendingCommandsCount = 0;   
+            _currentBytes = 0;
+            _sentLineLengths.Clear();
+            
+            // Soft Reset to clear GRBL buffer
+            SerialInterface.Instance.Write("\u0018"); 
+        }
+    }
+
+    private void OnSerialLineReceived(string line)
+    {
+        // Note: We don't lock the entire method to avoid blocking the SerialInterface thread excessively,
+        // but we must protect the decision to SendNext and state updates.
+        // Actually, simple lock inside SendNext might be enough, but let's be safe with updates.
+        
+        bool shouldSend = false;
+
+        lock (_runnerLock)
+        {
+            if (!_isRunning) return;
+
+            // GRBL sends 'ok' when a command is accepted into the planner buffer
+            // Or 'error'. In both cases, the command has left the RX buffer and entered the parser/executor.
+            
+            if (line.Contains("ok") || line.Contains("error"))
+            {
+                _pendingCommandsCount--;
+                // Update Byte Count
+                if (_sentLineLengths.Count > 0)
+                {
+                    int len = _sentLineLengths.Dequeue();
+                    _currentBytes -= len;
+                    if (_currentBytes < 0) _currentBytes = 0; // Output safety
+                }
+                
+                if (line.Contains("error"))
+                {
+                    Debug.WriteLine($"GRBL Error: {line}");
+                }
+                
+                shouldSend = true;
+            }
+        }
+        
+        if (shouldSend) SendNext();
+    }
+
+    private void SendNext()
+    {
+        lock (_runnerLock)
+        {
+            if (_isPaused || !_isRunning) return;
+
+            // Flow Control:
+            // 1. Planner Buffer (Slots)
+            // 2. RX Byte Buffer (Size)
+            
+            while (_currentLineIndex < _gcodeLines.Count)
+            {
+                // 1. Check Planner Slots
+                if (_pendingCommandsCount >= MaxPlannerBlocks)
+                {
+                   break; 
+                }
+
+                string line = _gcodeLines[_currentLineIndex];
+                string lineToSend = line + "\n";
+                int lineBytes = lineToSend.Length; // ASCII 1 byte per char
+
+                // 2. Check RX Buffer Size
+                if (_currentBytes + lineBytes > MaxBufferSize)
+                {
+                    // Not enough room in RX buffer
+                    break;
+                }
+
+                SerialInterface.Instance.Write(lineToSend);
+                
+                _pendingCommandsCount++;
+                _currentBytes += lineBytes;
+                _sentLineLengths.Enqueue(lineBytes);
+                
+                _currentLineIndex++;
+                
+                long now = DateTime.Now.Ticks;
+                if (now - _lastProgressTicks > ProgressInterval || _currentLineIndex == _gcodeLines.Count)
+                {
+                    ProgressChanged?.Invoke(_currentLineIndex, _gcodeLines.Count);
+                    _lastProgressTicks = now;
+                }
+            }
+
+            if (_currentLineIndex >= _gcodeLines.Count && _pendingCommandsCount == 0)
+            {
+                _isRunning = false;
+                JobCompleted?.Invoke();
+            }
         }
     }
 }

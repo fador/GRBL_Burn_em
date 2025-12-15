@@ -30,6 +30,7 @@ public class SerialInterface
         try
         {
             _serialPort = new SerialPort(portName, baudRate);
+            _serialPort.WriteTimeout = 500; // Prevent UI freeze on blocked write
             _serialPort.DtrEnable = true; // Essential for some controllers to reset or communicate
             _serialPort.DataReceived += _serialPort_DataReceived;
             _serialPort.Open();
@@ -112,6 +113,10 @@ public class SerialInterface
                  }
                  if(data != "?") LineSent?.Invoke(data.Trim()); // Invoke event
             }
+            catch (TimeoutException)
+            {
+                Debug.WriteLine("Serial Write Timeout - Port Blocked?");
+            }
             catch (Exception ex) 
             { 
                 Debug.WriteLine($"Write Error: {ex.Message}"); 
@@ -155,8 +160,9 @@ public class SerialInterface
                              if (line.StartsWith("<"))
                              {
                                  ParseStatus(line);
+                             } else {
+                                LineReceived?.Invoke(line);
                              }
-                             LineReceived?.Invoke(line);
                          }
                      }
                      else

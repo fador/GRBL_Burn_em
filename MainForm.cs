@@ -460,7 +460,7 @@ public partial class MainForm : Form
         {
             if (txtLog.IsDisposed) return;
             // optimize: ignore 'ok' to prevent spam/lag
-            //if (line == "ok") return; 
+            if (line == "ok") return; 
 
             try {
                 txtLog.BeginInvoke(() => 
@@ -1140,6 +1140,9 @@ public partial class MainForm : Form
              var gen = new GrblGenerator();
              var objects = ProjectState.Instance.SelectedObjects.Any() ? ProjectState.Instance.SelectedObjects : ProjectState.Instance.Objects.ToList();
              var lines = gen.GenerateObjectOutlines(objects, AppConfiguration.Instance.FramingPower, AppConfiguration.Instance.FramingSpeed);
+             // Make debug window
+             //using var dlg = new DebugCodeForm(string.Join("\n", lines));
+             //dlg.ShowDialog();
              _jobRunner.Start(lines);
         };
 
