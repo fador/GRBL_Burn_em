@@ -760,7 +760,6 @@ public class WorkbenchControl : Control
                     _interactionObject != null)
                 {
                     ProjectState.Instance.SelectedObjects = new List<LaserObject> { _interactionObject };
-                    ProjectState.Instance.Objects.ResetBindings();
                     Invalidate();
                 }
             }
