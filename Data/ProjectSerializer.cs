@@ -27,6 +27,7 @@ public class ProjectDataDto
 [JsonDerivedType(typeof(LaserRectangleDto), typeDiscriminator: "Rectangle")]
 [JsonDerivedType(typeof(LaserImageDto), typeDiscriminator: "Image")]
 [JsonDerivedType(typeof(LaserTextDto), typeDiscriminator: "Text")]
+[JsonDerivedType(typeof(LaserCircleDto), typeDiscriminator: "Circle")]
 public abstract class LaserObjectDto
 {
     public Guid Id { get; set; }
@@ -40,6 +41,10 @@ public abstract class LaserObjectDto
     public SizeF Size { get; set; }
 }
 
+// ...
+
+public class LaserCircleDto : LaserObjectDto { }
+
 public class LaserPathDto : LaserObjectDto
 {
     public List<PointF> Points { get; set; } = new();
@@ -51,6 +56,7 @@ public class LaserImageDto : LaserObjectDto
 {
     public string ImagePath { get; set; } = "";
     public string Base64Data { get; set; } = "";
+    public Guid MaskId { get; set; }
 }
 
 public class LaserTextDto : LaserObjectDto
@@ -103,7 +109,8 @@ public static class ProjectSerializer
                 {
                     Id = i.Id, Name = i.Name, LayerId = i.LayerId, IsEnabled = i.IsEnabled,
                     Power = i.Power, Speed = i.Speed, Position = i.Position, Rotation = i.Rotation, Size = i.Size,
-                    ImagePath = i.ImagePath
+                    ImagePath = i.ImagePath,
+                    MaskId = i.MaskId
                 };
                 
                 if (AppConfiguration.Instance.EmbedImagesInProject)
@@ -137,6 +144,14 @@ public static class ProjectSerializer
                     Id = t.Id, Name = t.Name, LayerId = t.LayerId, IsEnabled = t.IsEnabled,
                     Power = t.Power, Speed = t.Speed, Position = t.Position, Rotation = t.Rotation, Size = t.Size,
                     Text = t.Text, FontName = t.FontName, FontSize = t.FontSize
+                });
+            }
+            else if (obj is LaserCircle c)
+            {
+                dto.Objects.Add(new LaserCircleDto
+                {
+                    Id = c.Id, Name = c.Name, LayerId = c.LayerId, IsEnabled = c.IsEnabled,
+                    Power = c.Power, Speed = c.Speed, Position = c.Position, Rotation = c.Rotation, Size = c.Size
                 });
             }
         }
@@ -193,7 +208,7 @@ public static class ProjectSerializer
             }
             else if (objDto is LaserImageDto i)
             {
-                var imgObj = new LaserImage { ImagePath = i.ImagePath };
+                var imgObj = new LaserImage { ImagePath = i.ImagePath, MaskId = i.MaskId };
                 
                 if (!string.IsNullOrEmpty(i.Base64Data))
                 {
@@ -230,6 +245,10 @@ public static class ProjectSerializer
                     FontName = t.FontName,
                     FontSize = t.FontSize
                 };
+            }
+            else if (objDto is LaserCircleDto)
+            {
+                obj = new LaserCircle();
             }
 
             if (obj != null)

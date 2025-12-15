@@ -171,6 +171,64 @@ public class GrblGenerator : IGCodeGenerator
                 yield return "G1 S0";
                 yield break;
             }
+            else if (obj is LaserCircle circle)
+            {
+                 // Linearize Ellipse/Circle
+                 using (var path = new GraphicsPath())
+                 {
+                     // AddEllipse takes x,y,w,h. Position is Bottom-Left in our World Logic?
+                     // No, Position is usually Top-Left of the Bounds in GDI+ logic?
+                     // LaserObject.Position:
+                     // LaserRectangle.Draw: DrawRectangle(pen, Position.X, Position.Y, ...) -> GDI+ draws from Top-Left (Coordinate system dependent).
+                     // In Workbench: Translate(CenterX, CenterY), Scale(Zoom, -Zoom).
+                     // So Y+ is Up.
+                     // If I draw Rectangle at (0,0) with size (10,10):
+                     // It draws from 0,0 to 10,10.
+                     // In Screen Coords (Y+ Down): 0,0 to 10,10 is Top-Left to Bottom-Right.
+                     // In World Coords (Y+ Up): 0,0 to 10,10 is Bottom-Left to Top-Right?
+                     // BUT `DrawRectangle` takes (x, y, w, h). 
+                     // If Y scale is negative:
+                     // Coordinate (0,0) maps to ScreenCenter.
+                     // Coordinate (0, 10). Scale(1, -1) -> (0, -10).
+                     // So (0, 10) is "Higher" on screen (smaller Y pixel value).
+                     // So yes, Y+ is Up.
+                     // `DrawRectangle(0, 0, 10, 10)`:
+                     // Starts at 0,0. Extends Width 10 (Right). Extends Height 10 (Down in GDI+ RAW).
+                     // But with Scale(1, -1):
+                     // The "Height" extension of +10 in Y becomes -10 in Screen Y (Up).
+                     // So result is box from 0,0 extending Right and Up.
+                     // So `Position` is Bottom-Left. Good.
+                     
+                     // GraphicsPath.AddEllipse(x, y, w, h).
+                     // Adds ellipse constrained by rect (x, y, w, h).
+                     // In transformed space (Y+ Up), this rect is Position (BL) extending Right and Up.
+                     // So the ellipse will be correct.
+                     
+                     path.AddEllipse(circle.Position.X, circle.Position.Y, circle.Size.Width, circle.Size.Height);
+                     
+                     // Flatten to polyline
+                     path.Flatten(null, 0.05f); // 0.05mm precision
+                     
+                     if (path.PointCount > 0)
+                     {
+                         var points = path.PathPoints;
+                         var p0 = points[0];
+                         
+                         yield return $"G0 X{p0.X:F3} Y{p0.Y:F3}";
+                         yield return $"G1 F{fVal:F0}";
+                         
+                         for (int i = 1; i < points.Length; i++)
+                         {
+                             var p = points[i];
+                             yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                         }
+                         // Close loop
+                         yield return $"G1 X{p0.X:F3} Y{p0.Y:F3} S{sVal:F0}";
+                     }
+                 }
+                 yield return "G1 S0";
+                 yield break;
+            }
             else if (obj is LaserPath path)
             {
                 if (path.Points.Count < 2) yield break;
@@ -216,7 +274,94 @@ public class GrblGenerator : IGCodeGenerator
 
         if (obj is LaserImage img)
         {
-             bitmapToRasterize = img.Image;
+             // Apply Mask if needed
+             if (img.MaskId != Guid.Empty)
+             {
+                 var maskObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == img.MaskId);
+                 if (maskObj != null && img.Image != null)
+                 {
+                     bitmapToRasterize = new Bitmap(img.Image.Width, img.Image.Height);
+                     disposeBitmap = true;
+                     using (var g = Graphics.FromImage(bitmapToRasterize))
+                     {
+                         // Maintain resolution/coordinates
+                         // We are drawing into a bitmap of precise PIXEL size of the original image.
+                         // But the MASK is defined in WORLD coordinates.
+                         // This is tricky.
+                         // The original image pixels map to World Rect (Position, Size).
+                         // The Mask is in World Rect.
+                         
+                         // Coordinate transform:
+                         // 0,0 of Bitmap -> Top-Left of Image in World?
+                         // Image.Draw draws (0,0,W,H) at Position.
+                         // So we need to map World Mask to Bitmap Coords.
+                         // Bitmap Width Bw maps to World Width Sw.
+                         // Scale = Bw / Sw.
+                         // Pos (Bitmap) = (Pos(World) - ImagePos(World)) * Scale.
+                         
+                         // Create GraphicsPath for mask
+                         GraphicsPath? clipPath = null;
+                         if (maskObj is LaserCircle c)
+                         {
+                             clipPath = new GraphicsPath();
+                             clipPath.AddEllipse(c.Position.X, c.Position.Y, c.Size.Width, c.Size.Height);
+                         }
+                         else if (maskObj is LaserRectangle r)
+                         {
+                             clipPath = new GraphicsPath();
+                             clipPath.AddRectangle(new RectangleF(r.Position, r.Size));
+                         }
+                         
+                         if (clipPath != null)
+                         {
+                             // Transform Path to Bitmap Coordinates
+                             using (var matrix = new Matrix())
+                             {
+                                 float scaleX = img.Image.Width / img.Size.Width;
+                                 float scaleY = img.Image.Height / img.Size.Height;
+                                 
+                                 // Translate World Point P to Image-Local P'
+                                 // P' = (P - ImagePos) * Scale
+                                 // Note: Y axis?
+                                 // Image Bitmap 0,0 is Top-Left.
+                                 // World Space Y+ is Up (Bottom-Left).
+                                 // Image.Draw does: Translate(Pos.X, Pos.Y+H), Scale(1,-1).
+                                 // So Image Top-Left is at World(Pos.X, Pos.Y+H).
+                                 // So P_Bitmap_X = (P_World_X - Pos.X) * scaleX.
+                                 // P_Bitmap_Y = (Pos.Y + H - P_World_Y) * scaleY.
+                                 
+                                 // Let's adjust Matrix:
+                                 // 1. Translate World Origin to Image Top-Left (which is Pos.X, Pos.Y+H)
+                                 matrix.Translate(-img.Position.X, -(img.Position.Y + img.Size.Height), MatrixOrder.Append);
+                                 
+                                 // 2. Flip Y (Because Bitmap Y+ is Down, World Y+ is Up)
+                                 matrix.Scale(1, -1, MatrixOrder.Append);
+                                 
+                                 // 3. Scale to Bitmap Pixels
+                                 matrix.Scale(scaleX, scaleY, MatrixOrder.Append);
+                                 
+                                 clipPath.Transform(matrix);
+                             }
+                             
+                             g.SetClip(clipPath);
+                             g.DrawImage(img.Image, 0, 0, img.Image.Width, img.Image.Height);
+                         }
+                         else
+                         {
+                             // Fallback
+                             g.DrawImage(img.Image, 0, 0, img.Image.Width, img.Image.Height);
+                         }
+                     }
+                 }
+                 else
+                 {
+                     bitmapToRasterize = img.Image;
+                 }
+             }
+             else
+             {
+                 bitmapToRasterize = img.Image;
+             }
         }
         else
         {

@@ -10,7 +10,8 @@ public enum LaserObjectType
     Image,
     Rectangle,
     Group,
-    Text
+    Text,
+    Circle
 }
 
 public abstract class LaserObject
@@ -36,6 +37,87 @@ public abstract class LaserObject
     }
 
     public abstract LaserObject Clone();
+}
+
+// ... (Existing classes: LaserPath, LaserRectangle, etc.) ...
+
+public class LaserCircle : LaserObject
+{
+    public LaserCircle()
+    {
+        Type = LaserObjectType.Circle;
+        Name = "Circle";
+        Size = new SizeF(50, 50); // Default size
+    }
+
+    public override void Draw(Graphics g, float scale)
+    {
+        var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
+                    ?? ProjectState.Instance.Layers.FirstOrDefault();
+        Color c = layer?.Color ?? Color.Black;
+
+        using var pen = new Pen(c, 1.0f / scale);
+        g.DrawEllipse(pen, Position.X, Position.Y, Size.Width, Size.Height);
+    }
+
+    public override bool HitTest(PointF point, float tolerance)
+    {
+        // Hit test for the outline of the ellipse
+        // Simplified: Check if point is close to the ellipse equation
+        
+        float h = Position.X + Size.Width / 2f;
+        float k = Position.Y + Size.Height / 2f;
+        float a = Size.Width / 2f;
+        float b = Size.Height / 2f;
+
+        if (a <= 0 || b <= 0) return false;
+
+        // Normalize point relative to center
+        float x = point.X - h;
+        float y = point.Y - k;
+
+        // Ellipse equation: (x/a)^2 + (y/b)^2 = 1
+        float val = (x * x) / (a * a) + (y * y) / (b * b);
+        
+        // We want to check if val is close to 1
+        // How close? tolerance related.
+        // It's non-linear.
+        // Better: Check if inside outer boundary (radius+tol) AND outside inner boundary (radius-tol)
+        
+        // Let's use GraphicsPath for robust checking? Expensive?
+        // Let's implement bounding box check first
+        if (!GetBounds().Contains(point)) return false; // Optimization
+
+        // Approximate with ring
+        // Transform point to unit circle space?
+        // x' = x/a, y' = y/b. dist = sqrt(x'^2 + y'^2). should be approx 1.
+        // But tolerance is in world units, not unit space.
+        
+        // Simple approximation: Closest point on ellipse is hard.
+        // Let's rely on loose check or "Contains" if filled? But it's hollow.
+        // Use GraphicsPath IsOutlineVisible
+        using var path = new GraphicsPath();
+        path.AddEllipse(Position.X, Position.Y, Size.Width, Size.Height);
+        using var pen = new Pen(Color.Black, tolerance);
+        return path.IsOutlineVisible(point, pen);
+    }
+
+    public override LaserObject Clone()
+    {
+         var clone = new LaserCircle
+        {
+            Id = Guid.NewGuid(),
+            Name = this.Name + " (Copy)",
+            LayerId = this.LayerId,
+            IsEnabled = this.IsEnabled,
+            Power = this.Power,
+            Speed = this.Speed,
+            Position = this.Position,
+            Rotation = this.Rotation,
+            Size = this.Size
+        };
+        return clone;
+    }
 }
 
 public class LaserPath : LaserObject
@@ -183,6 +265,7 @@ public class LaserImage : LaserObject
     // In a real app we'd store the path or byte array
     public Bitmap? Image { get; set; }
     public string ImagePath { get; set; } = "";
+    public Guid MaskId { get; set; } = Guid.Empty;
 
     public LaserImage()
     {
@@ -194,13 +277,37 @@ public class LaserImage : LaserObject
     {
         if (Image != null)
         {
-            
-            // We want to draw the image UPRIGHT with Position as Bottom-Left.
-            // Image (0,0) [Top] should be at Position.Y + Height.
-            // Image (0,H) [Bottom] should be at Position.Y.
-            
             GraphicsState state = g.Save();
-            
+
+            // Apply Mask if present
+            if (MaskId != Guid.Empty)
+            {
+                var maskObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == MaskId);
+                if (maskObj != null)
+                {
+                    GraphicsPath? clipPath = null;
+                    if (maskObj is LaserCircle c)
+                    {
+                        clipPath = new GraphicsPath();
+                        clipPath.AddEllipse(c.Position.X, c.Position.Y, c.Size.Width, c.Size.Height);
+                    }
+                    else if (maskObj is LaserRectangle r)
+                    {
+                        clipPath = new GraphicsPath();
+                        clipPath.AddRectangle(new RectangleF(r.Position, r.Size));
+                    }
+                    
+                    if (clipPath != null)
+                    {
+                        g.SetClip(clipPath); 
+                        // Note: clipPath needs disposal?
+                        // Yes. But we can't dispose it immediately if SetClip uses it?
+                        // SetClip clones it? documentation says "Sets the clipping region... to the property of the specified GraphicsPath".
+                        // Usually SetClip copies.
+                    }
+                }
+            }
+
             // Move to Top-Left of the target rect (which is Pos.Y + Height)
             // Flip Y axis so Y+ is Down (Standard Image drawing)
             g.TranslateTransform(Position.X, Position.Y + Size.Height);

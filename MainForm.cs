@@ -242,6 +242,55 @@ public partial class MainForm : Form
             MultiSelect = true,
             AllowDrop = true // Enable Drag/Drop
         };
+
+        // Context Menu
+        var ctxMenu = new ContextMenuStrip();
+        var itemMask = new ToolStripMenuItem("Mask Image with Shape");
+        itemMask.Click += (s, e) => 
+        {
+            var sel = _objectList.SelectedRows;
+            if (sel.Count != 2) return;
+            
+            var obj1 = ProjectState.Instance.Objects[sel[0].Index];
+            var obj2 = ProjectState.Instance.Objects[sel[1].Index];
+            
+            LaserImage? img = obj1 as LaserImage ?? obj2 as LaserImage;
+            LaserObject? shape = (obj1 is LaserCircle || obj1 is LaserRectangle) ? obj1 :
+                                 (obj2 is LaserCircle || obj2 is LaserRectangle) ? obj2 : null;
+                                 
+            if (img != null && shape != null && img != shape)
+            {
+                 // Check if shape is the one we want
+                 // If both are shapes/images? (Already handled by casting)
+                 
+                 // Toggle mask? Or just set?
+                 // If already masked by this obj, unmask?
+                 if (img.MaskId == shape.Id)
+                 {
+                     img.MaskId = Guid.Empty;
+                 }
+                 else
+                 {
+                     img.MaskId = shape.Id;
+                 }
+                 _workbench.Invalidate();
+            }
+        };
+        ctxMenu.Opening += (s, e) => 
+        {
+            var sel = _objectList.SelectedRows;
+            itemMask.Enabled = false;
+            if (sel.Count == 2)
+            {
+                var obj1 = ProjectState.Instance.Objects[sel[0].Index];
+                var obj2 = ProjectState.Instance.Objects[sel[1].Index];
+                bool hasImage = obj1 is LaserImage || obj2 is LaserImage;
+                bool hasShape = obj1 is LaserCircle || obj1 is LaserRectangle || obj2 is LaserCircle || obj2 is LaserRectangle;
+                if (hasImage && hasShape) itemMask.Enabled = true;
+            }
+        };
+        ctxMenu.Items.Add(itemMask);
+        _objectList.ContextMenuStrip = ctxMenu;
         
         // Wire Drag/Drop Events
         Rectangle dragBoxFromMouseDown = Rectangle.Empty;
@@ -1025,6 +1074,7 @@ public partial class MainForm : Form
             { "Select", ToolType.Select },
             { "Line", ToolType.DrawLine },
             { "Box", ToolType.DrawBox },
+            { "Circle", ToolType.DrawCircle },
             { "Text", ToolType.Text },
             { "Ruler", ToolType.Ruler }
         };

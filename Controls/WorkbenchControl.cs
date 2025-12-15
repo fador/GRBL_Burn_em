@@ -321,7 +321,15 @@ public class WorkbenchControl : Control
          _interactionObject = line;
          _isDragging = true;
          _dragStartPos = snappedPos;
-         _moveStartPos = snappedPos; // Track end of line
+         return;
+    }
+    else if (ToolType.DrawCircle == ToolManager.Instance.CurrentTool)
+    {
+         var circle = new LaserCircle { Name = "Circle", Position = snappedPos, Size = new SizeF(0, 0) };
+         ProjectState.Instance.AddObject(circle);
+         _interactionObject = circle;
+         _isDragging = true;
+         _dragStartPos = snappedPos;
          return;
     }
     else if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
@@ -575,7 +583,7 @@ public class WorkbenchControl : Control
             // Let's assume DragStartPos IS snapped if we handled it in MouseDown? 
             // Or we just map it here.
             
-            if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
+            if (ToolManager.Instance.CurrentTool == ToolType.DrawBox || ToolManager.Instance.CurrentTool == ToolType.DrawCircle)
             {
                 float x = Math.Min(start.X, effectivePos.X);
                 float y = Math.Min(start.Y, effectivePos.Y);
