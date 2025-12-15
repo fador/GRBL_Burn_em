@@ -38,7 +38,7 @@ public class SerialInterface
             ConnectionStatusChanged?.Invoke(true);
             
             // Allow some time for the machine to reset and send welcome message
-            Thread.Sleep(500); 
+            Thread.Sleep(200); 
 
             // Start Polling 
             StartPolling();
@@ -80,7 +80,7 @@ public class SerialInterface
     {
         if (_isPolling) return;
         _isPolling = true;
-        _pollTimer = new System.Threading.Timer(PollCallback, null, 200, 200);
+        _pollTimer = new System.Threading.Timer(PollCallback, null, 500, 500);
     }
 
     public void StopPolling()
@@ -98,13 +98,18 @@ public class SerialInterface
         }
     }
 
+    private readonly object _writeLock = new object();
+
     public void Write(string data)
     {
         if (IsConnected && _serialPort != null)
         {
             try 
             { 
-                 _serialPort.Write(data);
+                 lock (_writeLock)
+                 {
+                     _serialPort.Write(data);
+                 }
                  if(data != "?") LineSent?.Invoke(data.Trim()); // Invoke event
             }
             catch (Exception ex) 
@@ -204,7 +209,7 @@ public class SerialInterface
                          if (pParsed && rParsed)
                          {
                              // We fire an event with both limits
-                             BufferLimitsReceived?.Invoke(planner, rx);
+                             BufferLimitsReceived?.Invoke(planner-1, rx);
                          }
                      }
                 }
