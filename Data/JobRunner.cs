@@ -36,7 +36,7 @@ public class JobRunner
     }
     
     private readonly object _runnerLock = new object();
-
+/*
     private void OnBufferLimits(int availablePlanner, int availableRx)
     {
         // "Self-Healing" Flow Control
@@ -76,7 +76,7 @@ public class JobRunner
             SendNext();
         }
     }
-
+*/
 
     private System.Threading.Timer? _retryTimer;
 
@@ -181,6 +181,10 @@ public class JobRunner
                 }
                 
                 shouldSend = true;
+            } else if(line.Contains("ALARM"))
+            {
+                Stop();
+                MessageBox.Show(line, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
         
