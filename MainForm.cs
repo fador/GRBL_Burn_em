@@ -133,8 +133,45 @@ public partial class MainForm : Form
         }
 
         // 1. Menu Strip
+        // 1. Menu Strip
         var menuStrip = new MenuStrip();
         var fileMenu = new ToolStripMenuItem("File");
+
+        // Shared Actions
+        Action applyMask = () => 
+        {
+            var sel = _objectList.SelectedRows;
+            if (sel.Count != 2) 
+            {
+                MessageBox.Show("Please select exactly one Image and one Shape (Circle/Rectangle) to create a mask.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            
+            var obj1 = ProjectState.Instance.Objects[sel[0].Index];
+            var obj2 = ProjectState.Instance.Objects[sel[1].Index];
+            
+            LaserImage? img = obj1 as LaserImage ?? obj2 as LaserImage;
+            LaserObject? shape = (obj1 is LaserCircle || obj1 is LaserRectangle) ? obj1 :
+                                 (obj2 is LaserCircle || obj2 is LaserRectangle) ? obj2 : null;
+                                 
+            if (img != null && shape != null && img != shape)
+            {
+                 if (img.MaskId == shape.Id)
+                 {
+                     img.MaskId = Guid.Empty;
+                 }
+                 else
+                 {
+                     img.MaskId = shape.Id;
+                 }
+                 _workbench.Invalidate();
+            }
+            else
+            {
+                MessageBox.Show("Selection must include one Image and one Shape.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        };
+
         
         fileMenu.DropDownItems.Add("New", null, (s, e) => 
         {
@@ -174,6 +211,11 @@ public partial class MainForm : Form
             dlg.ShowDialog();
         });
         menuStrip.Items.Add(fileMenu);
+
+        var toolMenu = new ToolStripMenuItem("Tool");
+        toolMenu.DropDownItems.Add("Mask Image with Shape", null, (s, e) => applyMask());
+        menuStrip.Items.Add(toolMenu);
+
         this.MainMenuStrip = menuStrip;
         this.Controls.Add(menuStrip);
 
@@ -246,36 +288,7 @@ public partial class MainForm : Form
         // Context Menu
         var ctxMenu = new ContextMenuStrip();
         var itemMask = new ToolStripMenuItem("Mask Image with Shape");
-        itemMask.Click += (s, e) => 
-        {
-            var sel = _objectList.SelectedRows;
-            if (sel.Count != 2) return;
-            
-            var obj1 = ProjectState.Instance.Objects[sel[0].Index];
-            var obj2 = ProjectState.Instance.Objects[sel[1].Index];
-            
-            LaserImage? img = obj1 as LaserImage ?? obj2 as LaserImage;
-            LaserObject? shape = (obj1 is LaserCircle || obj1 is LaserRectangle) ? obj1 :
-                                 (obj2 is LaserCircle || obj2 is LaserRectangle) ? obj2 : null;
-                                 
-            if (img != null && shape != null && img != shape)
-            {
-                 // Check if shape is the one we want
-                 // If both are shapes/images? (Already handled by casting)
-                 
-                 // Toggle mask? Or just set?
-                 // If already masked by this obj, unmask?
-                 if (img.MaskId == shape.Id)
-                 {
-                     img.MaskId = Guid.Empty;
-                 }
-                 else
-                 {
-                     img.MaskId = shape.Id;
-                 }
-                 _workbench.Invalidate();
-            }
-        };
+        itemMask.Click += (s, e) => applyMask();
         ctxMenu.Opening += (s, e) => 
         {
             var sel = _objectList.SelectedRows;
