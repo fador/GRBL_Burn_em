@@ -371,6 +371,8 @@ public class LaserText : LaserObject
     public string Text { get; set; } = "Text";
     public string FontName { get; set; } = "Arial";
     public float FontSize { get; set; } = 20f; // Points
+    public Guid PathId { get; set; } = Guid.Empty;
+    public float PathOffset { get; set; } = 0f;
 
     public LaserText()
     {
@@ -399,8 +401,82 @@ public class LaserText : LaserObject
         // For simple MVP usage: DrawString uses Font Size.
         
         // Text drawing needs unflip
-        // Text drawing needs unflip
         var state = g.Save();
+        
+        if (PathId != Guid.Empty)
+        {
+            var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == PathId);
+            if (pathObj != null)
+            {
+                 // Create Text Path at 0,0 locally
+                 using (var gp = new GraphicsPath())
+                 {
+                     var family = new FontFamily(FontName);
+                     // Conversion: FontSize (Points) -> EmSize (World)
+                     // Assuming display is roughly 96 DPI for "Points" meaning...
+                     // 1 Pt = 1/72 inch.
+                     // EmSize in AddString is in World Coordinates.
+                     // If 1 World Unit = 1 mm.
+                     // 1 Pt = 0.35277 mm.
+                     float emSize = FontSize * 0.35277f;
+                     // But previously we used Graphics.DrawString which takes Points.
+                     // We need to match visual size.
+                     // Graphics.DrawString(..., 20pt) draws 20pt text.
+                     // If World Scale is 1mm.
+                     // We probably want to keep consistency.
+                     // Let's stick to the multiplier used in GrblGenerator if possible,
+                     // or derive it.
+                     // 20pt at 96dpi = 20 * 96/72 pixels = 26.6 pixels.
+                     // If 1 pixel = 1mm (unlikely, usually 1px = screen px).
+                     // But our View is Scalable.
+                     // Let's assume EmSize ~ FontSize for now, or tune it.
+                     // Actually, Font(Size) uses Points. AddString uses EmHeight in World Units.
+                     // We need conversion factor.
+                     // Let's use 1.0 for now, user can resize.
+                     
+                     // Use the same scale as GrblGenerator logic: 96/72?
+                     emSize = FontSize * 96f / 72f; 
+
+                     gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+                     
+                     // Fix Orientation: AddString is Top-Down. World is Y-Up.
+                     // We want Baseline to be on the curve (Y=0 locally).
+                     // AddString draws from Top (Y=0) downwards.
+                     // Calculate Ascent to find Baseline.
+                     float ascent = family.GetCellAscent((int)FontStyle.Regular) * emSize / family.GetEmHeight((int)FontStyle.Regular);
+                     
+                     using (var m = new System.Drawing.Drawing2D.Matrix())
+                     {
+                         // 1. Move Baseline to Y=0 (Downwards Y means Baseline is at +Ascent)
+                         m.Translate(0, -ascent);
+                         // 2. Flip Y so Up is Positive (Top at 0 becomes Top at +Ascent)
+                         m.Scale(1, -1);
+                         gp.Transform(m);
+                     }
+                     
+                     // Get backbone
+                     var backbone = PathWarp.FlattenPath(pathObj);
+                     if (backbone.Count > 1)
+                     {
+                         using (var warped = PathWarp.CreateWarpedPath(gp, backbone, PathOffset))
+                         {
+                             // Warped path is in World Coordinates (derived from backbone).
+                             // So we draw it directly.
+                             using (var p = new Pen(c, 1.0f / scale))
+                             {
+                                 // Fill?
+                                 if (scale > 0.5f) g.FillPath(brush, warped);
+                                 // And/Or Outline?
+                                // g.DrawPath(p, warped);
+                             }
+                         }
+                     }
+                 }
+                 g.Restore(state);
+                 return;
+            }
+        }
+
         // Position is Bottom-Left. We want to draw text starting there, but Graphics.DrawString draws Top-Down.
         // And we have Y-Up world coordinates.
         // We need to translate to Top-Left of the text box (Position.Y + Size.Height).
@@ -427,6 +503,8 @@ public class LaserText : LaserObject
     public override bool HitTest(PointF point, float tolerance)
     {
         // Simple bounding box hit test
+        // WARN: If warped, Position/Size might not be accurate!
+        // We should update Position/Size when attaching?
         return new RectangleF(Position, Size).Contains(point);
     }
 
@@ -445,7 +523,9 @@ public class LaserText : LaserObject
             Size = this.Size,
             Text = this.Text,
             FontName = this.FontName,
-            FontSize = this.FontSize
+            FontSize = this.FontSize,
+            PathId = this.PathId,
+            PathOffset = this.PathOffset
         };
         return clone;
     }

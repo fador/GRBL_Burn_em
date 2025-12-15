@@ -65,6 +65,8 @@ public class LaserTextDto : LaserObjectDto
     public string Text { get; set; } = "";
     public string FontName { get; set; } = "Arial";
     public float FontSize { get; set; }
+    public Guid PathId { get; set; }
+    public float PathOffset { get; set; }
 }
 
 public class LaserBezierDto : LaserObjectDto
@@ -150,7 +152,7 @@ public static class ProjectSerializer
                 {
                     Id = t.Id, Name = t.Name, LayerId = t.LayerId, IsEnabled = t.IsEnabled,
                     Power = t.Power, Speed = t.Speed, Position = t.Position, Rotation = t.Rotation, Size = t.Size,
-                    Text = t.Text, FontName = t.FontName, FontSize = t.FontSize
+                    Text = t.Text, FontName = t.FontName, FontSize = t.FontSize, PathId = t.PathId, PathOffset = t.PathOffset
                 });
             }
             else if (obj is LaserCircle c)
@@ -259,7 +261,9 @@ public static class ProjectSerializer
                 {
                     Text = t.Text,
                     FontName = t.FontName,
-                    FontSize = t.FontSize
+                    FontSize = t.FontSize,
+                    PathId = t.PathId,
+                    PathOffset = t.PathOffset
                 };
             }
             else if (objDto is LaserCircleDto)

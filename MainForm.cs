@@ -241,6 +241,34 @@ public partial class MainForm : Form
                 if (_workbench != null) _workbench.Invalidate();
             }
         });
+        
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
+        
+        toolMenu.DropDownItems.Add("Attach to Path", null, (s, e) =>
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 2)
+            {
+                var txt = sel.OfType<LaserText>().FirstOrDefault();
+                var path = sel.FirstOrDefault(o => o is LaserPath || o is LaserBezier || o is LaserCircle);
+                if (txt != null && path != null && txt != path)
+                {
+                    txt.PathId = path.Id;
+                    txt.PathOffset = 0; // Default
+                    _workbench.Invalidate();
+                }
+            }
+        });
+
+        toolMenu.DropDownItems.Add("Detach from Path", null, (s, e) =>
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            foreach (var txt in sel.OfType<LaserText>())
+            {
+                txt.PathId = Guid.Empty;
+            }
+            _workbench.Invalidate();
+        });
 
         menuStrip.Items.Add(toolMenu);
 
@@ -318,6 +346,8 @@ public partial class MainForm : Form
         var itemMask = new ToolStripMenuItem("Mask Image with Shape");
         var itemGroup = new ToolStripMenuItem("Group");
         var itemUngroup = new ToolStripMenuItem("Ungroup");
+        var itemAttach = new ToolStripMenuItem("Attach to Path");
+        var itemDetach = new ToolStripMenuItem("Detach from Path");
 
         itemMask.Click += (s, e) => applyMask();
         itemGroup.Click += (s, e) => 
@@ -330,8 +360,31 @@ public partial class MainForm : Form
             var sel = ProjectState.Instance.SelectedObjects;
             if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
         };
+        itemAttach.Click += (s, e) => 
+        {
+             var sel = ProjectState.Instance.SelectedObjects;
+             if (sel.Count == 2)
+             {
+                 var txt = sel.OfType<LaserText>().FirstOrDefault();
+                 var path = sel.FirstOrDefault(o => o is LaserPath || o is LaserBezier || o is LaserCircle);
+                 if (txt != null && path != null && txt != path)
+                 {
+                     txt.PathId = path.Id;
+                     _workbench.Invalidate();
+                 }
+             }
+        };
+        itemDetach.Click += (s, e) =>
+        {
+             var sel = ProjectState.Instance.SelectedObjects;
+             foreach (var txt in sel.OfType<LaserText>())
+             {
+                 txt.PathId = Guid.Empty;
+             }
+             _workbench.Invalidate();
+        };
 
-        ctxMenu.Items.AddRange(new ToolStripItem[] { itemMask, new ToolStripSeparator(), itemGroup, itemUngroup });
+        ctxMenu.Items.AddRange(new ToolStripItem[] { itemMask, new ToolStripSeparator(), itemGroup, itemUngroup, new ToolStripSeparator(), itemAttach, itemDetach });
 
         ctxMenu.Opening += (s, e) => 
         {

@@ -63,110 +63,114 @@ public class GrblGenerator : IGCodeGenerator
             if (obj is LaserText text)
             {
                 // Generate Vector Path for Text
-                using (var path = new GraphicsPath())
+                using (var gp = new GraphicsPath())
                 {
-                    // Add String expects a signature with origin.
-                    // We need to match the visual representation (Bottom-Left origin, Y-Up).
-                    // AddString uses Top-Down coordinates usually?
-                    // "The Position of the text in the path in world coordinates"
-                    // If we use AddString, we should be careful about coordinate systems.
-                    // Let's create path at 0,0 and translate?
-                    
                     var family = new FontFamily(text.FontName);
-                    // EmSize is height of the em square in world units.
-                    // LaserText.FontSize is in Points? Or World Units?
-                    // In LaserText.Draw we used new Font(..., FontSize). 
-                    // If FontSize is in Points (assuming 96dpi), 1 pt = 1.33 px? No.
-                    // Font(...) takes arguments based on Unit. Default is Point.
-                    // 1 Point = 1/72 inch.
-                    // 1 inch = 25.4 mm.
-                    // 1 Point = 0.35277 mm.
-                    // So if FontSize=20 (Points), height is ~7mm.
-                    
-                    // AddString EmSize argument is in "World Units" of the GraphicsPath.
-                    // We want it to match the visual size.
-                    // Graphics.DrawString with Font(size) draws size in Points.
-                    
-                    // Conversion:
-                    // LaserText.FontSize is in Points.
-                    // Graphics.DrawString uses PageUnit. If default (Display/Pixel), it scales Points by System DPI.
-                    // Usually 96 DPI on Windows.
-                    // We need `emSize` in World Units (which we treat as equivalent to Pixels in WorkbenchControl for scale purposes).
-                    // Size = Points * 96 / 72.
+                    // Use scale 96/72 to match screen
                     float emSize = text.FontSize * 96f / 72f; 
                     
                     int style = (int)FontStyle.Regular;
-                    path.AddString(text.Text, family, style, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+                    gp.AddString(text.Text, family, style, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+
+                    // Warp if needed
+                    GraphicsPath workPath = gp;
+                    GraphicsPath? warpedPath = null;
+                    bool checkWarp = false;
                     
-                    // Now Transform:
-                    using (var matrix = new System.Drawing.Drawing2D.Matrix())
+                    if (text.PathId != Guid.Empty)
                     {
-                         matrix.Translate(text.Position.X, text.Position.Y + text.Size.Height);
-                         matrix.Scale(1, -1);
-                         path.Transform(matrix);
-                    }
-                    
-                    path.Flatten(null, 0.05f); // 0.05mm precision
-                    
-                   if (path.PointCount > 0)
-                   {
-                        PointF[] points = path.PathPoints;
-                        byte[] types = path.PathTypes;
-                        PointF lastPos = new PointF(float.NaN, float.NaN);
-                        PointF subpathStart = new PointF(0,0);
-
-                        for (int i = 0; i < points.Length; i++)
+                        var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == text.PathId);
+                        if (pathObj != null)
                         {
-                            var p = points[i];
-                            byte type = types[i];
-                            byte typeMasked = (byte)(type & 0x07);
-                            
-                            bool isStart = (typeMasked == 0);
-                            
-                            // Check for coincident start (Stitching)
-                            if (isStart && !float.IsNaN(lastPos.X))
+                            var backbone = PathWarp.FlattenPath(pathObj);
+                            if (backbone.Count > 1)
                             {
-                                float dist = Math.Abs(p.X - lastPos.X) + Math.Abs(p.Y - lastPos.Y);
-                                if (dist < 0.001f)
+                                // Fix Orientation LOCALLY for warping
+                                // We need a clone to not mess up the original gp for fallback
+                                using (var warpInput = (GraphicsPath)gp.Clone())
                                 {
-                                    // It's a start point, but we are already there.
-                                    // Treat as continuous cut (Line)
-                                    isStart = false; 
-                                    // BUT: If checking for subpath closure, we need to know where this NEW subpath started.
-                                    // Even if stitched, it logically starts a new contour?
-                                    // Actually, if we stitch, we are continuing the previous cut? No, usually fonts are separate loops.
-                                    // If we share a point, it might be the same spot.
-                                    // Let's update subpathStart anyway.
-                                    subpathStart = p;
-                                }
-                            }
-                            
-                            if (isStart) 
-                            {
-                                subpathStart = p;
-                                yield return "G1 S0"; // Ensure off
-                                yield return $"G0 X{p.X:F3} Y{p.Y:F3}";
-                                yield return $"G1 F{fVal:F0}"; 
-                            }
-                            else 
-                            {
-                                yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
-                            }
-                            
-                            lastPos = p;
-
-                            if ((type & 0x80) != 0) // CloseSubpath
-                            {
-                                // Ensure we close the loop to the subpath start
-                                float dist = Math.Abs(p.X - subpathStart.X) + Math.Abs(p.Y - subpathStart.Y);
-                                if (dist > 0.001f)
-                                {
-                                    yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} S{sVal:F0}";
-                                    lastPos = subpathStart;
+                                     float ascent = family.GetCellAscent((FontStyle)style) * emSize / family.GetEmHeight((FontStyle)style);
+                                     using (var m = new System.Drawing.Drawing2D.Matrix())
+                                     {
+                                         m.Translate(0, -ascent);
+                                         m.Scale(1, -1);
+                                         warpInput.Transform(m);
+                                     }
+                                     
+                                     warpedPath = PathWarp.CreateWarpedPath(warpInput, backbone, text.PathOffset);
+                                     workPath = warpedPath;
+                                     checkWarp = true;
                                 }
                             }
                         }
-                   }
+                    }
+                    
+                    // Transform if NOT warped (Placement logic)
+                    // If warped, position is defined by the backbone + offest.
+                    if (!checkWarp)
+                    {
+                         using (var matrix = new System.Drawing.Drawing2D.Matrix())
+                         {
+                              matrix.Translate(text.Position.X, text.Position.Y + text.Size.Height);
+                              matrix.Scale(1, -1);
+                              workPath.Transform(matrix);
+                         }
+                    }
+                    
+                    workPath.Flatten(null, 0.05f); // 0.05mm precision
+                    
+                    if (workPath.PointCount > 0)
+                    {
+                         PointF[] points = workPath.PathPoints;
+                         byte[] types = workPath.PathTypes;
+                         PointF lastPos = new PointF(float.NaN, float.NaN);
+                         PointF subpathStart = new PointF(0,0);
+
+                         for (int i = 0; i < points.Length; i++)
+                         {
+                             var p = points[i];
+                             byte type = types[i];
+                             byte typeMasked = (byte)(type & 0x07);
+                             
+                             bool isStart = (typeMasked == 0);
+                             
+                             if (isStart && !float.IsNaN(lastPos.X))
+                             {
+                                 float dist = Math.Abs(p.X - lastPos.X) + Math.Abs(p.Y - lastPos.Y);
+                                 if (dist < 0.001f)
+                                 {
+                                     isStart = false; 
+                                     subpathStart = p;
+                                 }
+                             }
+                             
+                             if (isStart) 
+                             {
+                                 subpathStart = p;
+                                 yield return "G1 S0"; 
+                                 yield return $"G0 X{p.X:F3} Y{p.Y:F3}";
+                                 yield return $"G1 F{fVal:F0}"; 
+                             }
+                             else 
+                             {
+                                 yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                             }
+                             
+                             lastPos = p;
+
+                             if ((type & 0x80) != 0) // CloseSubpath
+                             {
+                                 float dist = Math.Abs(p.X - subpathStart.X) + Math.Abs(p.Y - subpathStart.Y);
+                                 if (dist > 0.001f)
+                                 {
+                                     yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} S{sVal:F0}";
+                                     lastPos = subpathStart;
+                                 }
+                             }
+                         }
+                    }
+                    
+                    warpedPath?.Dispose();
                 }
                 yield return "G1 S0";
                 yield break;
