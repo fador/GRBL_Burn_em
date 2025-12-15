@@ -42,6 +42,11 @@ public partial class MainForm : Form
     private NumericUpDown _nudSizeW = null!;
     private NumericUpDown _nudSizeH = null!;
     private ToolStripLabel _lblLayerInfo = null!;
+    
+    // Text Toolbar Controls
+    private ToolStripTextBox _txtContent = null!;
+    private ToolStripComboBox _cmbFont = null!;
+    private NumericUpDown _nudFontSize = null!;
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -678,9 +683,30 @@ public partial class MainForm : Form
         _topToolbarPanel.Controls.Add(tsRow1);
         _topToolbarPanel.Controls.Add(tsRow2);
         
+        // Row 3: Text Controls
+        var tsRow3 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
+        
+        tsRow3.Items.Add(new ToolStripLabel("Text:"));
+        _txtContent = new ToolStripTextBox { Width = 150 };
+        tsRow3.Items.Add(_txtContent);
+        
+        tsRow3.Items.Add(new ToolStripLabel("Font:"));
+        _cmbFont = new ToolStripComboBox { Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        foreach (var family in FontFamily.Families)
+        {
+            _cmbFont.Items.Add(family.Name);
+        }
+        tsRow3.Items.Add(_cmbFont);
+        
+        tsRow3.Items.Add(new ToolStripLabel("Size:"));
+        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 1, Maximum = 1000, DecimalPlaces = 1 };
+        tsRow3.Items.Add(new ToolStripControlHost(_nudFontSize));
+        
+        _topToolbarPanel.Controls.Add(tsRow3);
+        
         this.Controls.Add(_topToolbarPanel); 
         
-        // Wire Properties Logic (Moved from Initialize to here for cleaner access)
+        // Wire Properties Logic
         EventHandler valChanged = (s, e) =>
         {
             if (_isUpdatingUI) return;
@@ -703,12 +729,11 @@ public partial class MainForm : Form
                      _workbench.Invalidate();
                 }
                 
-                // Size Change (Simplified: just update size directly for now to support "Live", logic for ScaleCommand is complex)
+                // Size Change
                 if(Math.Abs(obj.Size.Width - nw) > 0.01 || Math.Abs(obj.Size.Height - nh) > 0.01)
                 {
                     obj.Size = new SizeF(nw, nh);
                     _workbench.Invalidate();
-                    // Note: No Undo for Size yet as per previous code comments
                 }
             }
         };
@@ -717,6 +742,33 @@ public partial class MainForm : Form
         _nudPosY.ValueChanged += valChanged;
         _nudSizeW.ValueChanged += valChanged;
         _nudSizeH.ValueChanged += valChanged;
+
+        // Wire Text Logic
+        EventHandler textChanged = (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.Text = _txtContent.Text;
+                if (_cmbFont.SelectedItem != null) txt.FontName = _cmbFont.SelectedItem?.ToString() ?? "Arial";
+                txt.FontSize = (float)_nudFontSize.Value;
+                
+                // Recalc Size
+                 using (var tmpBmp = new Bitmap(1, 1))
+                 using (var g = Graphics.FromImage(tmpBmp))
+                 using (var f = new Font(txt.FontName, txt.FontSize))
+                 {
+                      txt.Size = g.MeasureString(txt.Text, f);
+                 }
+                
+                _workbench.Invalidate();
+            }
+        };
+
+        _txtContent.TextChanged += textChanged;
+        _cmbFont.SelectedIndexChanged += textChanged;
+        _nudFontSize.ValueChanged += textChanged;
     }
 
     private void InitializeLayers()
@@ -1300,6 +1352,29 @@ public partial class MainForm : Form
             _nudSizeW.Value = (decimal)obj.Size.Width;
             _nudSizeH.Value = (decimal)obj.Size.Height;
             
+            // Text Toolbar
+            if (obj is LaserText txt)
+            {
+                _txtContent.Enabled = true;
+                _cmbFont.Enabled = true;
+                _nudFontSize.Enabled = true;
+                
+                _txtContent.Text = txt.Text;
+                if (_cmbFont.Items.Contains(txt.FontName))
+                    _cmbFont.SelectedItem = txt.FontName;
+                else if (_cmbFont.Items.Count > 0)
+                     _cmbFont.SelectedIndex = 0; 
+                    
+                _nudFontSize.Value = (decimal)txt.FontSize;
+            }
+            else
+            {
+                _txtContent.Enabled = false;
+                _cmbFont.Enabled = false;
+                _nudFontSize.Enabled = false;
+                _txtContent.Text = "";
+            }
+
             // Update Layer Info Label
             var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId);
             if (layer != null)
@@ -1318,6 +1393,10 @@ public partial class MainForm : Form
             _nudSizeW.Enabled = false;
             _nudSizeH.Enabled = false;
             
+            _txtContent.Enabled = false;
+            _cmbFont.Enabled = false;
+            _nudFontSize.Enabled = false;
+            
             // Clear or set to 0? NUDs don't support empty string.
             // Just leaving enabled=false is visible enough.
             // But value might be misleading.
@@ -1325,7 +1404,8 @@ public partial class MainForm : Form
             _nudPosY.Value = 0;
             _nudSizeW.Value = 0;
             _nudSizeH.Value = 0;
-            
+            _txtContent.Text = "";
+
             _lblLayerInfo.Text = "-";
         }
         _isUpdatingUI = false;
