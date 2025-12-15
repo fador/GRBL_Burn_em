@@ -78,7 +78,8 @@ public class JobRunner
     }
 */
 
-    private System.Threading.Timer? _retryTimer;
+    private Thread? _senderThread;
+    private CancellationTokenSource? _cts;
 
     public void Start(IEnumerable<string> gcode)
     {
@@ -95,10 +96,11 @@ public class JobRunner
             _isRunning = true;
             _isPaused = false;
             
-            // Start Retry Timer (Poller)            
-            //_retryTimer = new System.Threading.Timer((s) => SendNext(), null, 250, 250);
-
-            SendNext();
+            _cts = new CancellationTokenSource();
+            _senderThread = new Thread(SenderLoop);
+            _senderThread.IsBackground = true;
+            _senderThread.Name = "JobSender";
+            _senderThread.Start();
         }
     }
 
@@ -119,7 +121,6 @@ public class JobRunner
             if (!_isRunning || !_isPaused) return;
             _isPaused = false;
             SerialInterface.Instance.Write("~");
-            SendNext();
         }
     }
 
@@ -128,8 +129,9 @@ public class JobRunner
         _isRunning = false;
         _isPaused = false;
         
-        _retryTimer?.Dispose();
-        _retryTimer = null;
+        _cts?.Cancel();
+        // Option: Wait for thread? 
+        // _senderThread?.Join(500);
 
         _gcodeLines.Clear();
         PendingCommandsCount = 0;   
@@ -158,13 +160,8 @@ public class JobRunner
 
     private void OnSerialLineReceived(string line)
     {
-        // Note: We don't lock the entire method to avoid blocking the SerialInterface thread excessively,
-        // but we must protect the decision to SendNext and state updates.
-        // Actually, simple lock inside SendNext might be enough, but let's be safe with updates.
-        
-        bool shouldSend = false;
-
-        //lock (_runnerLock)
+        // lock (_runnerLock) - we only need to protect shared state updates
+        lock(_runnerLock)
         {
             if (!_isRunning) return;
 
@@ -180,88 +177,78 @@ public class JobRunner
                     Debug.WriteLine($"GRBL Error: {line}");
                 }
                 
-                shouldSend = true;
+                // No need to call SendNext, the loop will pick it up
             } else if(line.Contains("ALARM"))
             {
                 Stop();
                 MessageBox.Show(line, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
-        
-        if (shouldSend) SendNext();
     }
 
-    private void SendNext()
+    private void SenderLoop()
     {
-        bool done = false; 
-        bool lockTaken = false;
-        try 
+        try
         {
-             Monitor.TryEnter(_runnerLock, ref lockTaken);
-             if (!lockTaken) return;
-
-             if (_isPaused || !_isRunning) return;
-
-             // Flow Control:
-             // 1. Planner Buffer (Slots)
-             // 2. RX Byte Buffer (Size)
-             
-             while (_currentLineIndex < _gcodeLines.Count)
-             {
-                 // 1. Check Planner Slots
-                 /* 
-                if (PendingCommandsCount >= MaxPlannerBlocks)
-                 {
-                    break; 
-                 }
-                 */
-                 string line = _gcodeLines[_currentLineIndex];
-                 string lineToSend = line + "\n";
-                 int lineBytes = lineToSend.Length; // ASCII 1 byte per char
-
-                // 2. Check RX Buffer Size
-                /*if (_currentBytes + lineBytes > MaxBufferSize)
+            while (_isRunning && _cts != null && !_cts.IsCancellationRequested)
+            {
+                if (_isPaused)
                 {
-                    // Not enough room in RX buffer
-                    break;
-                }*/
-                if (SerialInterface.Instance.BytesToWrite() + lineBytes > MaxBufferSize) break;
+                    Thread.Sleep(50);
+                    continue;
+                }
 
-                SerialInterface.Instance.Write(lineToSend);
-                 
-                 PendingCommandsCount++;
-                 _currentBytes += lineBytes;
-                 _sentLineLengths.Enqueue(lineBytes);
-                 
-                 _currentLineIndex++;
-                 
-                 long now = DateTime.Now.Ticks;
-                 if (now - _lastProgressTicks > ProgressInterval || _currentLineIndex == _gcodeLines.Count)
-                 {
-                     ProgressChanged?.Invoke(_currentLineIndex, _gcodeLines.Count);
-                     _lastProgressTicks = now;
-                 }
-             }
- 
-             if (_currentLineIndex >= _gcodeLines.Count && PendingCommandsCount == 0)
-             {
-                 _isRunning = false;
-                 done = true;
-             }
+                bool sent = false;
+                lock (_runnerLock)
+                {
+                    // Check Completion
+                    if (_currentLineIndex >= _gcodeLines.Count && PendingCommandsCount == 0 && SerialInterface.Instance.BytesToWrite() == 0)
+                    {
+                        _isRunning = false;
+                        Task.Run(() => JobCompleted?.Invoke()); // Fire and forget on thread pool
+                        break;
+                    }
+
+                    if (_currentLineIndex < _gcodeLines.Count)
+                    {
+                        string line = _gcodeLines[_currentLineIndex];
+                        string lineToSend = line + "\n";
+                        int lineBytes = lineToSend.Length;
+
+                        // Check Output Buffer (User logic)
+                        if (SerialInterface.Instance.BytesToWrite() + lineBytes <= MaxBufferSize)
+                        {
+                            SerialInterface.Instance.Write(lineToSend);
+
+                            PendingCommandsCount++;
+                            _currentBytes += lineBytes;
+                            _sentLineLengths.Enqueue(lineBytes);
+
+                            _currentLineIndex++;
+                            sent = true;
+
+                            long now = DateTime.Now.Ticks;
+                            if (now - _lastProgressTicks > ProgressInterval)
+                            {
+                                int idx = _currentLineIndex;
+                                int count = _gcodeLines.Count;
+                                Task.Run(() => ProgressChanged?.Invoke(idx, count));
+                                _lastProgressTicks = now;
+                            }
+                        }
+                    }
+                }
+
+                if (!sent)
+                {
+                    Thread.Sleep(5); // Yield / Wait
+                }
+            }
         }
-        finally
+        catch (Exception ex)
         {
-             if (lockTaken) Monitor.Exit(_runnerLock);
-        }
-        
-        if(done)
-        {
-            _currentBytes = 0;
-            _sentLineLengths.Clear();
-            _retryTimer?.Dispose();
-            _retryTimer = null;
-            
-            JobCompleted?.Invoke();
+            Debug.WriteLine($"JobRunner Sender Thread Exception: {ex}");
+            _isRunning = false;
         }
     }
 
