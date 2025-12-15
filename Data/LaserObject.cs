@@ -453,10 +453,14 @@ public class LaserText : LaserObject
 
 public class LaserBezier : LaserObject
 {
-    public PointF Start { get; set; }
-    public PointF Control1 { get; set; }
-    public PointF Control2 { get; set; }
-    public PointF End { get; set; }
+    // Points structure:
+    // P0 (Start)
+    // P1 (Control 1.1)
+    // P2 (Control 1.2)
+    // P3 (End 1 / Start 2)
+    // P4 (Control 2.1) ...
+    // Count should be 3*N + 1
+    public List<PointF> Points { get; set; } = new List<PointF>();
 
     public LaserBezier()
     {
@@ -466,12 +470,18 @@ public class LaserBezier : LaserObject
 
     public void UpdateBounds()
     {
-        // Calculate Bounding Box
-        // Bezier bounds are not trivial, but simplified: Min/Max of all 4 points covers it (convex hull property)
-        float minX = Math.Min(Start.X, Math.Min(Control1.X, Math.Min(Control2.X, End.X)));
-        float maxX = Math.Max(Start.X, Math.Max(Control1.X, Math.Max(Control2.X, End.X)));
-        float minY = Math.Min(Start.Y, Math.Min(Control1.Y, Math.Min(Control2.Y, End.Y)));
-        float maxY = Math.Max(Start.Y, Math.Max(Control1.Y, Math.Max(Control2.Y, End.Y)));
+        if (Points.Count == 0) return;
+        
+        float minX = float.MaxValue, minY = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue;
+        
+        foreach (var p in Points)
+        {
+            if (p.X < minX) minX = p.X;
+            if (p.Y < minY) minY = p.Y;
+            if (p.X > maxX) maxX = p.X;
+            if (p.Y > maxY) maxY = p.Y;
+        }
         
         Position = new PointF(minX, minY);
         Size = new SizeF(maxX - minX, maxY - minY);
@@ -479,20 +489,29 @@ public class LaserBezier : LaserObject
 
     public override void Draw(Graphics g, float scale)
     {
+        if (Points.Count < 4) return;
+
         var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
                     ?? ProjectState.Instance.Layers.FirstOrDefault();
         Color c = layer?.Color ?? Color.Black;
 
         using var pen = new Pen(c, 1.0f / scale);
-        g.DrawBezier(pen, Start, Control1, Control2, End);
+        // Valid Bezier sequence: 4, 7, 10... points
+        // Graphics.DrawBeziers requires array of 3*k + 1 points
+        int count = Points.Count;
+        int validCount = count - (count - 1) % 3;
+        if (validCount < 4) return;
         
-        // Visualize Handles if selected? Handled by WorkbenchControl usually.
+        g.DrawBeziers(pen, Points.Take(validCount).ToArray());
     }
 
     public override bool HitTest(PointF point, float tolerance)
     {
+         if (Points.Count < 4) return false;
+         int count = Points.Count;
+         int validCount = count - (count - 1) % 3;
          using var path = new GraphicsPath();
-         path.AddBezier(Start, Control1, Control2, End);
+         path.AddBeziers(Points.Take(validCount).ToArray());
          using var pen = new Pen(Color.Black, tolerance);
          return path.IsOutlineVisible(point, pen);
     }
@@ -510,10 +529,7 @@ public class LaserBezier : LaserObject
             Position = this.Position,
             Rotation = this.Rotation,
             Size = this.Size,
-            Start = this.Start,
-            Control1 = this.Control1,
-            Control2 = this.Control2,
-            End = this.End
+            Points = new List<PointF>(this.Points)
         };
     }
 }

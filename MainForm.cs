@@ -214,6 +214,34 @@ public partial class MainForm : Form
 
         var toolMenu = new ToolStripMenuItem("Tool");
         toolMenu.DropDownItems.Add("Mask Image with Shape", null, (s, e) => applyMask());
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
+        
+        toolMenu.DropDownItems.Add("Group", null, (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
+        });
+        
+        toolMenu.DropDownItems.Add("Ungroup", null, (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
+        });
+
+        toolMenu.DropDownItems.Add("Array Modifier", null, (s, e) =>
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 0) return;
+            
+            using var dlg = new GridArrayForm();
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                var cmd = new CloneArrayCommand(sel, dlg.Rows, dlg.Cols, dlg.GapX, dlg.GapY);
+                CommandManager.Instance.Execute(cmd);
+                if (_workbench != null) _workbench.Invalidate();
+            }
+        });
+
         menuStrip.Items.Add(toolMenu);
 
         this.MainMenuStrip = menuStrip;
@@ -288,7 +316,23 @@ public partial class MainForm : Form
         // Context Menu
         var ctxMenu = new ContextMenuStrip();
         var itemMask = new ToolStripMenuItem("Mask Image with Shape");
+        var itemGroup = new ToolStripMenuItem("Group");
+        var itemUngroup = new ToolStripMenuItem("Ungroup");
+
         itemMask.Click += (s, e) => applyMask();
+        itemGroup.Click += (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
+        };
+        itemUngroup.Click += (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
+        };
+
+        ctxMenu.Items.AddRange(new ToolStripItem[] { itemMask, new ToolStripSeparator(), itemGroup, itemUngroup });
+
         ctxMenu.Opening += (s, e) => 
         {
             var sel = _objectList.SelectedRows;
@@ -1309,40 +1353,6 @@ public partial class MainForm : Form
         
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true });
         
-        var flowGroup = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
-        var btnGroup = new Button { Text = "Group", Width = 60 };
-        var btnUngroup = new Button { Text = "Ungroup", Width = 60 };
-        var btnArray = new Button { Text = "Array", Width = 60 };
-        
-        btnGroup.Click += (s, e) => 
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
-        };
-        btnUngroup.Click += (s, e) => 
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
-        };
-        btnArray.Click += (s, e) =>
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count == 0) return;
-            
-            using var dlg = new GridArrayForm();
-            if (dlg.ShowDialog() == DialogResult.OK)
-            {
-                var cmd = new CloneArrayCommand(sel, dlg.Rows, dlg.Cols, dlg.GapX, dlg.GapY);
-                CommandManager.Instance.Execute(cmd);
-                if (_workbench != null) _workbench.Invalidate();
-            }
-        };
-        
-        flowGroup.Controls.Add(btnGroup);
-        flowGroup.Controls.Add(btnUngroup);
-        flowGroup.Controls.Add(btnArray);
-        
-        flow.Controls.Add(flowGroup);
         
         // REMOVED HISTORY
         // lbHistory.Items.Clear();

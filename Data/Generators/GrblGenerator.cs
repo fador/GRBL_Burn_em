@@ -266,8 +266,18 @@ public class GrblGenerator : IGCodeGenerator
             {
                 using (var gPath = new GraphicsPath())
                 {
-                    gPath.AddBezier(bezier.Start, bezier.Control1, bezier.Control2, bezier.End);
-                    gPath.Flatten(null, 0.05f);
+                    if (bezier.Points.Count >= 4)
+                    {
+                        // Ensure we have N segments: 4, 7, 10...
+                        int count = bezier.Points.Count;
+                        int valid = count - (count - 1) % 3;
+                        gPath.AddBeziers(bezier.Points.Take(valid).ToArray());
+                        gPath.Flatten(null, 0.05f);
+                    }
+                    else
+                    {
+                        // Nothing to draw
+                    }
 
                     if (gPath.PointCount > 0)
                     {

@@ -69,10 +69,7 @@ public class LaserTextDto : LaserObjectDto
 
 public class LaserBezierDto : LaserObjectDto
 {
-    public PointF Start { get; set; }
-    public PointF Control1 { get; set; }
-    public PointF Control2 { get; set; }
-    public PointF End { get; set; }
+    public List<PointF> Points { get; set; } = new();
 }
 
 
@@ -170,7 +167,7 @@ public static class ProjectSerializer
                 {
                     Id = b.Id, Name = b.Name, LayerId = b.LayerId, IsEnabled = b.IsEnabled,
                     Power = b.Power, Speed = b.Speed, Position = b.Position, Rotation = b.Rotation, Size = b.Size,
-                    Start = b.Start, Control1 = b.Control1, Control2 = b.Control2, End = b.End
+                    Points = b.Points
                 });
             }
         }
@@ -273,10 +270,7 @@ public static class ProjectSerializer
             {
                 obj = new LaserBezier
                 {
-                    Start = bDto.Start,
-                    Control1 = bDto.Control1,
-                    Control2 = bDto.Control2,
-                    End = bDto.End
+                    Points = bDto.Points ?? new List<PointF>()
                 };
             }
 

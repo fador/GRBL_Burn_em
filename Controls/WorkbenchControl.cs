@@ -204,16 +204,33 @@ public class WorkbenchControl : Control
         }
         
         // Draw Resize Handles
-        if (ToolManager.Instance.CurrentTool == ToolType.Select && ProjectState.Instance.SelectedObjects.Count > 0)
+        if (ToolManager.Instance.CurrentTool == ToolType.Select && ProjectState.Instance.SelectedObjects.Count == 1)
         {
-            var bounds = GetSelectionBounds();
-            if (bounds != null)
-            {
-                using var boundaryPen = new Pen(Color.Cyan, 1.0f / _zoom);
-                boundaryPen.DashStyle = DashStyle.Solid;
-                g.DrawRectangle(boundaryPen, bounds.Value.X, bounds.Value.Y, bounds.Value.Width, bounds.Value.Height);
-                DrawResizeHandles(g, bounds.Value);
-            }
+             var obj = ProjectState.Instance.SelectedObjects[0];
+             if (obj is LaserBezier bezier)
+             {
+                 DrawNodeHandles(g, bezier);
+             }
+
+             var bounds = GetSelectionBounds();
+             if (bounds != null)
+             {
+                 using var boundaryPen = new Pen(Color.Cyan, 1.0f / _zoom);
+                 boundaryPen.DashStyle = DashStyle.Solid;
+                 g.DrawRectangle(boundaryPen, bounds.Value.X, bounds.Value.Y, bounds.Value.Width, bounds.Value.Height);
+                 DrawResizeHandles(g, bounds.Value);
+             }
+        }
+        else if (ProjectState.Instance.SelectedObjects.Count > 0)
+        {
+             var bounds = GetSelectionBounds();
+             if (bounds != null)
+             {
+                 using var boundaryPen = new Pen(Color.Cyan, 1.0f / _zoom);
+                 boundaryPen.DashStyle = DashStyle.Solid;
+                 g.DrawRectangle(boundaryPen, bounds.Value.X, bounds.Value.Y, bounds.Value.Width, bounds.Value.Height);
+                 DrawResizeHandles(g, bounds.Value);
+             }
         }
     }
 
@@ -302,6 +319,12 @@ public class WorkbenchControl : Control
         // 2. Panning (Right Click)
         if (e.Button == MouseButtons.Right)
         {
+            if (ToolManager.Instance.CurrentTool == ToolType.DrawBezier && _currentBezier != null)
+            {
+                FinalizeBezier();
+                return;
+            }
+            
             _isPanning = true;
             _lastMousePos = e.Location;
             Cursor = Cursors.SizeAll;
@@ -343,20 +366,26 @@ public class WorkbenchControl : Control
     }
     else if (ToolManager.Instance.CurrentTool == ToolType.DrawBezier)
     {
-         var bezier = new LaserBezier 
-         { 
-             Name = "Bezier", 
-             Position = snappedPos, 
-             Start = snappedPos, 
-             End = snappedPos, 
-             Control1 = snappedPos, 
-             Control2 = snappedPos,
-             Size = new SizeF(0,0)
-         };
-         ProjectState.Instance.AddObject(bezier);
-         _interactionObject = bezier;
-         _isDragging = true;
-         _dragStartPos = snappedPos;
+         if (_currentBezier == null)
+         {
+              _currentBezier = new LaserBezier { Name = "Bezier" };
+              _currentBezier.Points.Add(snappedPos);
+              ProjectState.Instance.AddObject(_currentBezier);
+         }
+         else
+         {
+              // Add new segment (C1, C2, End)
+              var last = _currentBezier.Points.Last();
+              float dx = snappedPos.X - last.X;
+              float dy = snappedPos.Y - last.Y;
+              // Auto-calculated smooth control points
+              _currentBezier.Points.Add(new PointF(last.X + dx * 0.33f, last.Y + dy * 0.33f)); // C1
+              _currentBezier.Points.Add(new PointF(last.X + dx * 0.66f, last.Y + dy * 0.66f)); // C2
+              _currentBezier.Points.Add(snappedPos); // End
+              
+              _currentBezier.UpdateBounds();
+              Invalidate();
+         }
          return;
     }
     else if (ToolManager.Instance.CurrentTool == ToolType.Text)
@@ -506,6 +535,24 @@ public class WorkbenchControl : Control
     }
 
     private LaserObject? _interactionObject;
+    private LaserBezier? _currentBezier; // For multi-step creation
+
+    private void FinalizeBezier()
+    {
+        if (_currentBezier != null)
+        {
+            if (_currentBezier.Points.Count < 4) // Minimum 1 segment
+            {
+                ProjectState.Instance.RemoveObject(_currentBezier);
+            }
+            else
+            {
+                 // Done
+            }
+            _currentBezier = null;
+            Invalidate();
+        }
+    }
     private bool _isDragging = false; // For creation
     private bool _isMoving = false; // For moving existing objects
     private PointF _dragStartPos; // Used as "Last Mouse Pos" for moving
@@ -620,19 +667,8 @@ public class WorkbenchControl : Control
             }
             else if (ToolManager.Instance.CurrentTool == ToolType.DrawBezier)
             {
-                if (_interactionObject is LaserBezier bezier)
-                {
-                    bezier.Start = start;
-                    bezier.End = effectivePos;
-                    // Auto-calculate Control Points (S-Curve or straight line)
-                    // Let's do 1/3 and 2/3 along the line
-                    float dx = effectivePos.X - start.X;
-                    float dy = effectivePos.Y - start.Y;
-                    bezier.Control1 = new PointF(start.X + dx * 0.33f, start.Y + dy * 0.33f);
-                    bezier.Control2 = new PointF(start.X + dx * 0.66f, start.Y + dy * 0.66f);
-                    
-                    bezier.UpdateBounds(); // Update Position/Size
-                }
+                 // No drag for new click-style bezier yet
+                 // Or we could preview the line to the mouse?
             }
             Invalidate();
             return;
@@ -933,6 +969,36 @@ public class WorkbenchControl : Control
             new(b.Left, b.Top + b.Height/2) // L
         };
     }
+
+    private void DrawNodeHandles(Graphics g, LaserBezier b)
+    {
+        float size = 6.0f / _zoom;
+        using var brushAnchor = new SolidBrush(Color.Blue);
+        using var brushControl = new SolidBrush(Color.LightBlue);
+        using var penLine = new Pen(Color.Gray, 1.0f / _zoom);
+        
+        for (int i = 0; i < b.Points.Count; i++)
+        {
+            var p = b.Points[i];
+            bool isAnchor = (i % 3 == 0);
+            
+            // Draw connection lines
+            if (!isAnchor)
+            {
+                // Connect to anchor
+                // if i%3 == 1, anchor is i-1
+                // if i%3 == 2, anchor is i+1
+                int anchorIdx = (i % 3 == 1) ? i - 1 : i + 1;
+                if (anchorIdx >= 0 && anchorIdx < b.Points.Count)
+                {
+                    g.DrawLine(penLine, p, b.Points[anchorIdx]);
+                }
+            }
+
+            var brush = isAnchor ? brushAnchor : brushControl;
+            g.FillEllipse(brush, p.X - size/2, p.Y - size/2, size, size);
+        }
+    }
     
     private int _dragHandleIndex = -1; // -1 none, 0-7 handles
     
@@ -947,13 +1013,29 @@ public class WorkbenchControl : Control
         {
             List<PointF>? pts = null;
             if (obj is LaserPath p) pts = new List<PointF>(p.Points);
-            else if (obj is LaserBezier b) pts = new List<PointF> { b.Start, b.Control1, b.Control2, b.End };
+            else if (obj is LaserBezier b) pts = new List<PointF>(b.Points);
             _initialStates[obj] = (obj.Position, obj.Size, pts);
         }
     }
 
     private void UpdateResize(PointF currentPos)
     {
+        // 1. Node Editing
+        if (_dragHandleIndex >= 100)
+        {
+             if (ProjectState.Instance.SelectedObjects.Count == 1 && ProjectState.Instance.SelectedObjects[0] is LaserBezier bezier)
+             {
+                 int idx = _dragHandleIndex - 100;
+                 if (idx >= 0 && idx < bezier.Points.Count)
+                 {
+                     bezier.Points[idx] = currentPos;
+                     bezier.UpdateBounds();
+                     Invalidate();
+                 }
+             }
+             return;
+        }
+
         if (_initialGroupBounds == null) return;
         var b = _initialGroupBounds.Value;
         float l = b.Left, t = b.Top, r = b.Right, bm = b.Bottom;
@@ -1021,7 +1103,6 @@ public class WorkbenchControl : Control
             float finalH = b.Height * scaleY;
             
             // Re-apply to L/T/R/B based on Anchor
-            // Handle 0 (TL): Right/Bottom fixed.
             if (_dragHandleIndex == 0) { newL = b.Right - finalW; newT = b.Bottom - finalH; }
             
             // Handle 1 (T): Bottom fixed. Center X.
@@ -1099,22 +1180,16 @@ public class WorkbenchControl : Control
                     p.Points[i] = new PointF(newL + px * scaleX, newT + py * scaleY);
                 }
             }
-            else if (obj is LaserBezier bez && init.Points != null && init.Points.Count == 4)
+            else if (obj is LaserBezier bez && init.Points != null)
             {
-                PointF[] newPts = new PointF[4];
-                for(int i=0; i<4; i++)
+                // Resize all points
+                for(int i=0; i<bez.Points.Count && i<init.Points.Count; i++)
                 {
                     float px = init.Points[i].X - b.Left;
                     float py = init.Points[i].Y - b.Top;
-                    newPts[i] = new PointF(newL + px * scaleX, newT + py * scaleY);
+                    bez.Points[i] = new PointF(newL + px * scaleX, newT + py * scaleY);
                 }
-                bez.Start = newPts[0];
-                bez.Control1 = newPts[1];
-                bez.Control2 = newPts[2];
-                bez.End = newPts[3];
-                // UpdateBounds called automatically? No, user handles bounds.
-                // But Position/Size set at 1055/1056 update the bounding box property.
-                // The points must match that bbox. logic above ensures they fit within newL/newT/newW/newH.
+                bez.UpdateBounds();
             }
         }
         Invalidate();
@@ -1140,11 +1215,15 @@ public class WorkbenchControl : Control
          }
          else if (obj is LaserBezier bezier)
          {
-             bezier.Start = new PointF(bezier.Start.X + dx, bezier.Start.Y + dy);
-             bezier.Control1 = new PointF(bezier.Control1.X + dx, bezier.Control1.Y + dy);
-             bezier.Control2 = new PointF(bezier.Control2.X + dx, bezier.Control2.Y + dy);
-             bezier.End = new PointF(bezier.End.X + dx, bezier.End.Y + dy);
-             bezier.UpdateBounds();
+             for(int i=0; i<bezier.Points.Count; i++)
+             {
+                 bezier.Points[i] = new PointF(bezier.Points[i].X + dx, bezier.Points[i].Y + dy);
+             }
+             // Ensure Position is also updated (usually Move logic expects Obj Position to be updated)
+             // But LaserBezier.Position is derived. 
+             // Wait, LaserObject.Position is a property.
+             // If we move points, Position (Bounds) should change.
+             bezier.Position = new PointF(bezier.Position.X + dx, bezier.Position.Y + dy);
          }
          else if (obj is LaserGroup group)
          {
@@ -1161,15 +1240,30 @@ public class WorkbenchControl : Control
 
     private int HitTestHandles(PointF pos)
     {
+         // 1. Node Handles (Index >= 100)
+         if (ProjectState.Instance.SelectedObjects.Count == 1 && ProjectState.Instance.SelectedObjects[0] is LaserBezier bezier)
+         {
+             float size = 8.0f / _zoom;
+             for(int i=0; i<bezier.Points.Count; i++)
+             {
+                 var p = bezier.Points[i];
+                 if (new RectangleF(p.X - size/2, p.Y - size/2, size, size).Contains(pos))
+                 {
+                     return 100 + i;
+                 }
+             }
+         }
+
+         // 2. Resize Handles
          var bounds = GetSelectionBounds();
          if (bounds == null) return -1;
          
          var handles = GetHandlePositions(bounds.Value);
-         float size = 8.0f / _zoom;
+         float handleSize = 8.0f / _zoom;
          
          for(int i=0; i<handles.Length; i++)
          {
-             var r = new RectangleF(handles[i].X - size/2, handles[i].Y - size/2, size, size);
+             var r = new RectangleF(handles[i].X - handleSize/2, handles[i].Y - handleSize/2, handleSize, handleSize);
              if (r.Contains(pos)) return i;
          }
          return -1;
