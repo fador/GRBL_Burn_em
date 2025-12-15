@@ -18,7 +18,7 @@
 
   <ItemGroup>
     <PackageReference Include="Svg" Version="3.4.7" />
-    <PackageReference Include="System.IO.Ports" Version="9.0.0" />
+    <PackageReference Include="RJCP.SerialPortStream" Version="3.0.4" />
   </ItemGroup>
 
 </Project>

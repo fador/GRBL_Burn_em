@@ -1,4 +1,4 @@
-using System.IO.Ports;
+using RJCP.IO.Ports;
 using System.Diagnostics;
 using System.Text;
 
@@ -9,7 +9,7 @@ public class SerialInterface
     private static SerialInterface? _instance;
     public static SerialInterface Instance => _instance ??= new SerialInterface();
 
-    private SerialPort? _serialPort;
+    private SerialPortStream? _serialPort;
     public bool IsConnected => _serialPort != null && _serialPort.IsOpen;
     
     public event Action<string>? DataReceived;
@@ -24,16 +24,27 @@ public class SerialInterface
     private System.Threading.Timer? _pollTimer;
     private bool _isPolling = false;
 
+    // Constructor
+    public SerialInterface()
+    {
+        _serialPort = new SerialPortStream();
+        DataReceivedEvent += _serialPort_DataReceived;
+    }
+
+    public int BytesToWrite()
+    {
+        return _serialPort != null ? _serialPort.BytesToWrite : 0;
+    }
     public void Connect(string portName, int baudRate)
     {
         Disconnect();
         try
         {
-            _serialPort = new SerialPort(portName, baudRate);
-            _serialPort.WriteTimeout = 500; // Prevent UI freeze on blocked write
-            _serialPort.DtrEnable = true; // Essential for some controllers to reset or communicate
-            _serialPort.DataReceived += _serialPort_DataReceived;
-            _serialPort.Handshake = Handshake.XOnXOff;
+            if(_serialPort == null) _serialPort = new SerialPortStream();
+            _serialPort.PortName = portName;
+            _serialPort.BaudRate = baudRate;
+            _serialPort.WriteTimeout = 10; // Prevent UI freeze on blocked write
+            _serialPort.DataReceived += DataReceivedEvent;
             _serialPort.Open();
             _serialPort.DiscardInBuffer(); // Clear any existing data
             
@@ -82,7 +93,7 @@ public class SerialInterface
     {
         if (_isPolling) return;
         _isPolling = true;
-        _pollTimer = new System.Threading.Timer(PollCallback, null, 500, 500);
+        _pollTimer = new System.Threading.Timer(PollCallback, null, 200, 200);
     }
 
     public void StopPolling()
@@ -106,6 +117,10 @@ public class SerialInterface
     {
         if (IsConnected && _serialPort != null)
         {
+            if(_serialPort.BytesToWrite + data.Length > 128)
+            {                
+                return false;
+            }
             try 
             { 
                  lock (_writeLock)
@@ -130,14 +145,16 @@ public class SerialInterface
 
     public string[] GetAvailablePorts()
     {
-        return SerialPort.GetPortNames();
+        return _serialPort?.GetPortNames() ?? Array.Empty<string>();
     }
 
     private StringBuilder _rxBuffer = new StringBuilder();
 
     public event Action<int, int>? BufferLimitsReceived; // Planner, Rx
 
-    private void _serialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
+    public event EventHandler<SerialDataReceivedEventArgs> DataReceivedEvent;
+
+    protected virtual void _serialPort_DataReceived(object? sender, SerialDataReceivedEventArgs args)
     {
          if (_serialPort == null || !_serialPort.IsOpen) return;
          

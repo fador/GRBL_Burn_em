@@ -48,7 +48,7 @@ public static class GrblErrors
     {
         if (int.TryParse(errorCodeStr, out int code))
         {
-            if (ErrorMap.TryGetValue(code, out string msg))
+            if (ErrorMap.TryGetValue(code, out string? msg))
             {
                 return msg;
             }
