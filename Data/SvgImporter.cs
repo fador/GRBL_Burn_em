@@ -256,7 +256,12 @@ public class SvgImporter
                     
                     if (svgText.FontSize != SvgUnit.None)
                         txt.FontSize = svgText.FontSize.ToDeviceValue(null, UnitRenderingType.Other, svgText);
-                        
+
+                    if (!string.IsNullOrEmpty(svgText.FontFamily))
+                    {
+                        txt.FontName = svgText.FontFamily;
+                    }
+
                     if(string.IsNullOrEmpty(txt.Text) && svgText.Children.Count > 0)
                     {
                         // Handle tspan or nested content simple concatenation

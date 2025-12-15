@@ -335,46 +335,31 @@ public class WorkbenchControl : Control
     }
     else if (ToolManager.Instance.CurrentTool == ToolType.Text)
     {
-        // Prompt for text
+        // Use TextEditorForm
         string val = "Text";
-        // Simple Input Dialog using Form
-        using (var form = new Form())
-        using (var txt = new TextBox())
-        using (var btn = new Button())
+        string fontName = "Arial";
+        float fontSize = 20f;
+
+        using (var form = new TextEditorForm(val, fontName, fontSize))
         {
-            form.Text = "Enter Text";
-            form.Size = new Size(300, 150);
-            form.StartPosition = FormStartPosition.CenterParent;
-            form.FormBorderStyle = FormBorderStyle.FixedDialog;
-            form.MaximizeBox = false;
-            form.MinimizeBox = false;
-            
-            txt.Text = "Text";
-            txt.Location = new Point(10, 10);
-            txt.Width = 260;
-            
-            btn.Text = "OK";
-            btn.DialogResult = DialogResult.OK;
-            btn.Location = new Point(190, 50);
-            
-            form.Controls.Add(txt);
-            form.Controls.Add(btn);
-            form.AcceptButton = btn;
-            
-            if (form.ShowDialog() == DialogResult.OK)
-            {
-                val = txt.Text;
-            }
-            else
-            {
-                return; // Cancelled
-            }
+             if (form.ShowDialog() == DialogResult.OK)
+             {
+                 val = form.TextValue;
+                 fontName = form.FontName;
+                 fontSize = form.FontSize;
+             }
+             else
+             {
+                 return; // Cancelled
+             }
         }
 
         if (string.IsNullOrWhiteSpace(val)) return;
 
         var t = new LaserText();
         t.Text = val;
+        t.FontName = fontName;
+        t.FontSize = fontSize;
         t.Position = snappedPos;
         // Size will be calculated on Draw or we set a default?
         // Let's force a measure? Or let Draw handle it.
@@ -805,6 +790,40 @@ public class WorkbenchControl : Control
         
         // Final safety reset
         ResetInteractionState();
+    }
+
+    protected override void OnMouseDoubleClick(MouseEventArgs e)
+    {
+        base.OnMouseDoubleClick(e);
+
+        if (ToolManager.Instance.CurrentTool != ToolType.Select) return;
+
+        PointF worldPos = ScreenToWorld(e.Location);
+        float hitTolerance = 8.0f / _zoom;
+
+        var hitObj = ProjectState.Instance.Objects.Reverse().FirstOrDefault(o => o.HitTest(worldPos, hitTolerance));
+
+        if (hitObj is LaserText textObj)
+        {
+            using (var form = new TextEditorForm(textObj.Text, textObj.FontName, textObj.FontSize))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    textObj.Text = form.TextValue;
+                    textObj.FontName = form.FontName;
+                    textObj.FontSize = form.FontSize;
+
+                    using (var tmpBmp = new Bitmap(1, 1))
+                    using (var g = Graphics.FromImage(tmpBmp))
+                    using (var f = new Font(textObj.FontName, textObj.FontSize))
+                    {
+                         textObj.Size = g.MeasureString(textObj.Text, f);
+                    }
+
+                    Invalidate();
+                }
+            }
+        }
     }
 
     private void ResetInteractionState()
