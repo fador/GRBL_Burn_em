@@ -145,6 +145,8 @@ public partial class MainForm : Form
             {
                  ProjectSerializer.Load(ofd.FileName);
                  CommandManager.Instance.Clear();
+                 InitializeLayers(); 
+                 _layerList.Refresh();
                  _workbench.Invalidate();
             }
         });

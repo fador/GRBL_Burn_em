@@ -92,6 +92,7 @@ public static class ProjectSerializer
         }
 
         var options = new JsonSerializerOptions { WriteIndented = true };
+        options.Converters.Add(new ColorJsonConverter());
         var json = JsonSerializer.Serialize(dto, options);
         File.WriteAllText(path, json);
     }
@@ -100,7 +101,9 @@ public static class ProjectSerializer
     {
         if (!File.Exists(path)) return;
         var json = File.ReadAllText(path);
-        var dto = JsonSerializer.Deserialize<ProjectDataDto>(json);
+        var options = new JsonSerializerOptions();
+        options.Converters.Add(new ColorJsonConverter());
+        var dto = JsonSerializer.Deserialize<ProjectDataDto>(json, options);
         
         if (dto == null) return;
 
@@ -157,5 +160,60 @@ public static class ProjectSerializer
                 ProjectState.Instance.AddObject(obj);
             }
         }
+    }
+}
+
+public class ColorJsonConverter : JsonConverter<System.Drawing.Color>
+{
+    public override System.Drawing.Color Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        // Simple int ARGB or string name support?
+        // Let's assume we write as specific struct
+        
+        if (reader.TokenType == JsonTokenType.StartObject)
+        {
+            int a = 255, r = 0, g = 0, b = 0;
+            string? name = null;
+            
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndObject) break;
+                
+                if (reader.TokenType == JsonTokenType.PropertyName)
+                {
+                    string? prop = reader.GetString();
+                    reader.Read();
+                    
+                    switch(prop)
+                    {
+                        case "A": a = reader.GetInt32(); break;
+                        case "R": r = reader.GetInt32(); break;
+                        case "G": g = reader.GetInt32(); break;
+                        case "B": b = reader.GetInt32(); break;
+                        case "Name": name = reader.GetString(); break;
+                    }
+                }
+            }
+            
+            if (!string.IsNullOrEmpty(name) && name != "0") // "0" is default for unnamed?
+            {
+                // Try known color
+                var k = Color.FromName(name);
+                if (k.IsKnownColor) return k;
+            }
+            return Color.FromArgb(a, r, g, b);
+        }
+        return Color.Black;
+    }
+
+    public override void Write(Utf8JsonWriter writer, System.Drawing.Color value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber("A", value.A);
+        writer.WriteNumber("R", value.R);
+        writer.WriteNumber("G", value.G);
+        writer.WriteNumber("B", value.B);
+        if (value.IsKnownColor) writer.WriteString("Name", value.Name);
+        writer.WriteEndObject();
     }
 }
