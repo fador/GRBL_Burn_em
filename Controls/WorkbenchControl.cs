@@ -375,6 +375,19 @@ public class WorkbenchControl : Control
          else
          {
               // Add new segment (C1, C2, End)
+              
+              // Snap to Start if close (Closing the loop)
+              if (_currentBezier.Points.Count > 0)
+              {
+                  var start = _currentBezier.Points[0];
+                  float distSq = (snappedPos.X - start.X) * (snappedPos.X - start.X) + (snappedPos.Y - start.Y) * (snappedPos.Y - start.Y);
+                  float snapThresh = 15.0f / _zoom; 
+                  if (distSq < snapThresh * snapThresh)
+                  {
+                      snappedPos = start;
+                  }
+              }
+
               var last = _currentBezier.Points.Last();
               float dx = snappedPos.X - last.X;
               float dy = snappedPos.Y - last.Y;
@@ -650,10 +663,20 @@ public class WorkbenchControl : Control
             
             if (ToolManager.Instance.CurrentTool == ToolType.DrawBox || ToolManager.Instance.CurrentTool == ToolType.DrawCircle)
             {
-                float x = Math.Min(start.X, effectivePos.X);
-                float y = Math.Min(start.Y, effectivePos.Y);
                 float w = Math.Abs(effectivePos.X - start.X);
                 float h = Math.Abs(effectivePos.Y - start.Y);
+
+                if (Control.ModifierKeys == Keys.Control)
+                {
+                    float max = Math.Max(w, h);
+                    w = max;
+                    h = max;
+                }
+
+                // Determine Top-Left based on drag direction
+                float x = (effectivePos.X < start.X) ? start.X - w : start.X;
+                float y = (effectivePos.Y < start.Y) ? start.Y - h : start.Y;
+
                 _interactionObject.Position = new PointF(x, y);
                 _interactionObject.Size = new SizeF(w, h);
             }
@@ -1028,6 +1051,19 @@ public class WorkbenchControl : Control
                  int idx = _dragHandleIndex - 100;
                  if (idx >= 0 && idx < bezier.Points.Count)
                  {
+                     // Snap Ends together
+                     if (idx == 0 || idx == bezier.Points.Count - 1)
+                     {
+                         int otherIdx = (idx == 0) ? bezier.Points.Count - 1 : 0;
+                         var other = bezier.Points[otherIdx];
+                         float distSq = (currentPos.X - other.X) * (currentPos.X - other.X) + (currentPos.Y - other.Y) * (currentPos.Y - other.Y);
+                         float snapThresh = 15.0f / _zoom;
+                         if (distSq < snapThresh * snapThresh)
+                         {
+                             currentPos = other;
+                         }
+                     }
+                     
                      bezier.Points[idx] = currentPos;
                      bezier.UpdateBounds();
                      Invalidate();
