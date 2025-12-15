@@ -14,6 +14,7 @@ public class SerialInterface
     
     public event Action<string>? DataReceived;
     public event Action<string>? LineReceived;
+    public event Action<string>? LineSent; // Added LineSent event
     public event Action<bool>? ConnectionStatusChanged;
     public event Action<string, PointF>? StatusReceived; // State, Pos
 
@@ -31,8 +32,12 @@ public class SerialInterface
             _serialPort = new SerialPort(portName, baudRate);
             _serialPort.DataReceived += _serialPort_DataReceived;
             _serialPort.Open();
+            _serialPort.DiscardInBuffer(); // Clear any existing data
             ConnectionStatusChanged?.Invoke(true);
             
+            // Allow some time for the machine to reset and send welcome message
+            Thread.Sleep(500); 
+
             // Start Polling 
             StartPolling();
             
@@ -96,7 +101,8 @@ public class SerialInterface
         {
             try 
             { 
-                 _serialPort.Write(data); 
+                 _serialPort.Write(data);
+                 if(data != "?") LineSent?.Invoke(data.Trim()); // Invoke event
             }
             catch (Exception ex) 
             { 

@@ -459,13 +459,33 @@ public partial class MainForm : Form
         SerialInterface.Instance.LineReceived += (line) => 
         {
             if (txtLog.IsDisposed) return;
+            // optimize: ignore 'ok' to prevent spam/lag
+            if (line == "ok") return; 
+
             try {
-                txtLog.Invoke(() => 
+                txtLog.BeginInvoke(() => 
                 {
                     txtLog.AppendText($"< {line}\n");
                     txtLog.ScrollToCaret();
                 });
-            } catch { } // Ignore invoke errors on closing
+            } catch { } 
+        };
+
+        // Log Outgoing Data
+        SerialInterface.Instance.LineSent += (line) =>
+        {
+            if (txtLog.IsDisposed) return;
+             try {
+                txtLog.BeginInvoke(() => 
+                {
+                    txtLog.SelectionStart = txtLog.TextLength;
+                    txtLog.SelectionLength = 0;
+                    txtLog.SelectionColor = Color.Yellow; 
+                    txtLog.AppendText($">> {line}\n");
+                    txtLog.SelectionColor = txtLog.ForeColor;
+                    txtLog.ScrollToCaret();
+                });
+             } catch {}
         };
         // Also log "Ok" etc if needed, but LineReceived filters status updates usually? 
         // SerialInterface LineReceived handles non-status lines. 
@@ -893,7 +913,7 @@ public partial class MainForm : Form
         SerialInterface.Instance.StatusReceived += (state, pos) => 
         {
             if (_statusStrip.IsDisposed) return;
-            _statusStrip.Invoke(() => 
+            _statusStrip.BeginInvoke(() => 
             {
                 _lblStatusState.Text = $"State: {state}";
                 _lblStatusPos.Text = $"Pos: {pos.X:F3}, {pos.Y:F3}";
@@ -925,7 +945,8 @@ public partial class MainForm : Form
         _jobRunner.ProgressChanged += (curr, total) => 
         {
              if (_statusStrip.IsDisposed) return;
-             _statusStrip.Invoke(() => 
+             // Throttle? Or just BeginInvoke
+             _statusStrip.BeginInvoke(() => 
              {
                  _progressBar.Visible = true;
                  _progressBar.Maximum = total;

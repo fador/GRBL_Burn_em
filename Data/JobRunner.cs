@@ -11,7 +11,9 @@ public class JobRunner
     private List<string> _gcodeLines = new List<string>();
     private int _currentLineIndex = 0;
     private int _bufferBytes = 0;
-    private const int MaxBufferSize = 127; 
+    public int MaxBufferSize { get; set; } = 127; 
+    private long _lastProgressTicks = 0;
+    private const long ProgressInterval = 1000000; // 100ms 
     
     private bool _isRunning = false;
     private bool _isPaused = false;
@@ -122,7 +124,12 @@ public class JobRunner
                 _pendingCommands.Enqueue(len);
                 _currentLineIndex++;
                 
-                ProgressChanged?.Invoke(_currentLineIndex, _gcodeLines.Count);
+                long now = DateTime.Now.Ticks;
+                if (now - _lastProgressTicks > ProgressInterval || _currentLineIndex == _gcodeLines.Count)
+                {
+                    ProgressChanged?.Invoke(_currentLineIndex, _gcodeLines.Count);
+                    _lastProgressTicks = now;
+                }
             }
             else
             {
