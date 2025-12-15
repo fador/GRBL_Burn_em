@@ -347,9 +347,70 @@ public class GrblGenerator : IGCodeGenerator
         yield return $"G1 X{maxX:F3} Y{minY:F3} S{sVal:F0}";
         yield return $"G1 X{maxX:F3} Y{maxY:F3} S{sVal:F0}";
         yield return $"G1 X{minX:F3} Y{maxY:F3} S{sVal:F0}";
-        yield return $"G1 X{minX:F3} Y{minY:F3} S{sVal:F0}";
-        
-        yield return "G1 S0";
+        yield return "M5";
+        yield return "G0 X0 Y0";
+    }
+
+    public IEnumerable<string> GenerateObjectOutlines(IEnumerable<LaserObject> objects, float power, float speed)
+    {
+        var enabled = objects.Where(o => o.IsEnabled).ToList();
+        if (enabled.Count == 0) yield break;
+
+        yield return "G21";
+        yield return "G90";
+        yield return "M4 S0"; 
+
+        float sVal = power * 10f; 
+
+        foreach (var obj in enabled)
+        {
+            var b = obj.GetBounds();
+            // Move to Start
+            yield return $"M4 S0";
+            yield return $"G0 X{b.Left:F3} Y{b.Top:F3}";
+            
+            // Cut Box
+            yield return $"G1 F{speed:F0}";
+            yield return $"G1 X{b.Right:F3} Y{b.Top:F3} S{sVal:F0}";
+            yield return $"G1 X{b.Right:F3} Y{b.Bottom:F3} S{sVal:F0}";
+            yield return $"G1 X{b.Left:F3} Y{b.Bottom:F3} S{sVal:F0}";
+            yield return $"G1 X{b.Left:F3} Y{b.Top:F3} S{sVal:F0}";
+        }
+
+        yield return "M5";
+        yield return "G0 X0 Y0";
+    }
+
+    public IEnumerable<string> GenerateCenterMarks(IEnumerable<LaserObject> objects, float power, float speed)
+    {
+        var enabled = objects.Where(o => o.IsEnabled).ToList();
+        if (enabled.Count == 0) yield break;
+
+        yield return "G21";
+        yield return "G90";
+        yield return "M4 S0"; 
+
+        float sVal = power * 10f; 
+        float size = 5.0f; // 10mm total width
+
+        foreach (var obj in enabled)
+        {
+            var b = obj.GetBounds();
+            float cx = b.X + b.Width / 2f;
+            float cy = b.Y + b.Height / 2f;
+
+            // Mark 1: TL to BR
+            yield return $"M4 S0";
+            yield return $"G0 X{cx - size:F3} Y{cy - size:F3}";
+            yield return $"G1 F{speed:F0}";
+            yield return $"G1 X{cx + size:F3} Y{cy + size:F3} S{sVal:F0}";
+
+            // Mark 2: BL to TR
+            yield return $"M4 S0";
+            yield return $"G0 X{cx - size:F3} Y{cy + size:F3}";
+            yield return $"G1 X{cx + size:F3} Y{cy - size:F3} S{sVal:F0}";
+        }
+
         yield return "M5";
         yield return "G0 X0 Y0";
     }

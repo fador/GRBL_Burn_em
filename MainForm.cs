@@ -1052,7 +1052,8 @@ public partial class MainForm : Form
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true }); 
 
         // Drawing Framing
-        var grpFraming = new GroupBox { Text = "Framing", Width = 200, Height = 140 };
+        // Drawing Framing
+        var grpFraming = new GroupBox { Text = "Alignment / Marking", Width = 200, Height = 220 };
         var flowFraming = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown };
         
         var lblPwr = new Label { Text = "Power (%):", AutoSize = true };
@@ -1061,7 +1062,9 @@ public partial class MainForm : Form
         var lblSpd = new Label { Text = "Speed:", AutoSize = true };
         var numFrameSpeed = new NumericUpDown { Minimum = 100, Maximum = 10000, Value = (decimal)AppConfiguration.Instance.FramingSpeed, Increment = 100 };
 
-        var btnFrame = new Button { Text = "Frame Bounds", Width = 180, BackColor = Color.LightYellow };
+        var btnFrame = new Button { Text = "Frame All Bound", Width = 180, BackColor = Color.LightYellow };
+        var btnOutline = new Button { Text = "Outline Objects", Width = 180, BackColor = Color.LightCyan };
+        var btnMark = new Button { Text = "Mark Centers (X)", Width = 180, BackColor = Color.LightCyan };
         
         btnFrame.Click += (s, e) => 
         {
@@ -1072,9 +1075,31 @@ public partial class MainForm : Form
             var gen = new GrblGenerator();
             var lines = gen.GenerateFraming(ProjectState.Instance.Objects, AppConfiguration.Instance.FramingPower, AppConfiguration.Instance.FramingSpeed);
             
-            var gcode = string.Join(Environment.NewLine, lines);
-            using var dlg = new DebugCodeForm(gcode);
-            dlg.ShowDialog();
+            _jobRunner.Start(lines);
+        };
+        
+        btnOutline.Click += (s, e) => 
+        {
+             AppConfiguration.Instance.FramingPower = (float)numFramePower.Value;
+             AppConfiguration.Instance.FramingSpeed = (float)numFrameSpeed.Value;
+             AppConfiguration.Instance.Save();
+
+             var gen = new GrblGenerator();
+             var objects = ProjectState.Instance.SelectedObjects.Any() ? ProjectState.Instance.SelectedObjects : ProjectState.Instance.Objects.ToList();
+             var lines = gen.GenerateObjectOutlines(objects, AppConfiguration.Instance.FramingPower, AppConfiguration.Instance.FramingSpeed);
+             _jobRunner.Start(lines);
+        };
+
+        btnMark.Click += (s, e) => 
+        {
+             AppConfiguration.Instance.FramingPower = (float)numFramePower.Value;
+             AppConfiguration.Instance.FramingSpeed = (float)numFrameSpeed.Value;
+             AppConfiguration.Instance.Save();
+
+             var gen = new GrblGenerator();
+             var objects = ProjectState.Instance.SelectedObjects.Any() ? ProjectState.Instance.SelectedObjects : ProjectState.Instance.Objects.ToList();
+             var lines = gen.GenerateCenterMarks(objects, AppConfiguration.Instance.FramingPower, AppConfiguration.Instance.FramingSpeed);
+             _jobRunner.Start(lines);
         };
 
         flowFraming.Controls.Add(lblPwr);
@@ -1082,6 +1107,8 @@ public partial class MainForm : Form
         flowFraming.Controls.Add(lblSpd);
         flowFraming.Controls.Add(numFrameSpeed);
         flowFraming.Controls.Add(btnFrame);
+        flowFraming.Controls.Add(btnOutline);
+        flowFraming.Controls.Add(btnMark);
         grpFraming.Controls.Add(flowFraming);
         flow.Controls.Add(grpFraming);
         
