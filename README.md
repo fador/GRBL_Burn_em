@@ -15,6 +15,7 @@ A Windows Forms application designed for controlling laser cutters, built with .
 - **Creation Tools**: Draw Lines and Rectangles directly on the canvas.
 - **Ruler Tool**: Measure distances on the workbench for precise alignment.
 - **Snap-to-Grid**: Toggleable alignment aid with configurable grid size.
+- **Object Reordering**: Drag and Drop or use Up/Down arrows in the Object List to change processing order (Top = First).
 
 ### Import & Processing
 - **SVG Import**: Vector import with configurable curve smoothness (flatness control) for circles and ellipses.
