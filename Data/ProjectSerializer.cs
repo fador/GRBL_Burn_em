@@ -28,6 +28,7 @@ public class ProjectDataDto
 [JsonDerivedType(typeof(LaserImageDto), typeDiscriminator: "Image")]
 [JsonDerivedType(typeof(LaserTextDto), typeDiscriminator: "Text")]
 [JsonDerivedType(typeof(LaserCircleDto), typeDiscriminator: "Circle")]
+[JsonDerivedType(typeof(LaserBezierDto), typeDiscriminator: "Bezier")]
 public abstract class LaserObjectDto
 {
     public Guid Id { get; set; }
@@ -65,6 +66,15 @@ public class LaserTextDto : LaserObjectDto
     public string FontName { get; set; } = "Arial";
     public float FontSize { get; set; }
 }
+
+public class LaserBezierDto : LaserObjectDto
+{
+    public PointF Start { get; set; }
+    public PointF Control1 { get; set; }
+    public PointF Control2 { get; set; }
+    public PointF End { get; set; }
+}
+
 
 public static class ProjectSerializer
 {
@@ -152,6 +162,15 @@ public static class ProjectSerializer
                 {
                     Id = c.Id, Name = c.Name, LayerId = c.LayerId, IsEnabled = c.IsEnabled,
                     Power = c.Power, Speed = c.Speed, Position = c.Position, Rotation = c.Rotation, Size = c.Size
+                });
+            }
+            else if (obj is LaserBezier b)
+            {
+                dto.Objects.Add(new LaserBezierDto
+                {
+                    Id = b.Id, Name = b.Name, LayerId = b.LayerId, IsEnabled = b.IsEnabled,
+                    Power = b.Power, Speed = b.Speed, Position = b.Position, Rotation = b.Rotation, Size = b.Size,
+                    Start = b.Start, Control1 = b.Control1, Control2 = b.Control2, End = b.End
                 });
             }
         }
@@ -249,6 +268,16 @@ public static class ProjectSerializer
             else if (objDto is LaserCircleDto)
             {
                 obj = new LaserCircle();
+            }
+            else if (objDto is LaserBezierDto bDto)
+            {
+                obj = new LaserBezier
+                {
+                    Start = bDto.Start,
+                    Control1 = bDto.Control1,
+                    Control2 = bDto.Control2,
+                    End = bDto.End
+                };
             }
 
             if (obj != null)

@@ -262,6 +262,31 @@ public class GrblGenerator : IGCodeGenerator
                 yield return "G1 S0";
                 yield break;
             }
+            else if (obj is LaserBezier bezier)
+            {
+                using (var gPath = new GraphicsPath())
+                {
+                    gPath.AddBezier(bezier.Start, bezier.Control1, bezier.Control2, bezier.End);
+                    gPath.Flatten(null, 0.05f);
+
+                    if (gPath.PointCount > 0)
+                    {
+                         var points = gPath.PathPoints;
+                         var p0 = points[0];
+                         
+                         yield return $"G0 X{p0.X:F3} Y{p0.Y:F3}";
+                         yield return $"G1 F{fVal:F0}";
+                         
+                         for (int i = 1; i < points.Length; i++)
+                         {
+                             var p = points[i];
+                             yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                         }
+                    }
+                }
+                yield return "G1 S0";
+                yield break;
+            }
         }
 
         // If we are here, it is either FILL Mode OR it is an Image

@@ -1088,6 +1088,7 @@ public partial class MainForm : Form
             { "Line", ToolType.DrawLine },
             { "Box", ToolType.DrawBox },
             { "Circle", ToolType.DrawCircle },
+            { "Bezier", ToolType.DrawBezier },
             { "Text", ToolType.Text },
             { "Ruler", ToolType.Ruler }
         };

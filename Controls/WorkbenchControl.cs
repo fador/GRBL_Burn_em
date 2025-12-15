@@ -341,6 +341,24 @@ public class WorkbenchControl : Control
          _dragStartPos = snappedPos;
          return;
     }
+    else if (ToolManager.Instance.CurrentTool == ToolType.DrawBezier)
+    {
+         var bezier = new LaserBezier 
+         { 
+             Name = "Bezier", 
+             Position = snappedPos, 
+             Start = snappedPos, 
+             End = snappedPos, 
+             Control1 = snappedPos, 
+             Control2 = snappedPos,
+             Size = new SizeF(0,0)
+         };
+         ProjectState.Instance.AddObject(bezier);
+         _interactionObject = bezier;
+         _isDragging = true;
+         _dragStartPos = snappedPos;
+         return;
+    }
     else if (ToolManager.Instance.CurrentTool == ToolType.Text)
     {
         // Use TextEditorForm
@@ -598,6 +616,22 @@ public class WorkbenchControl : Control
                 {
                     path.Points[0] = start; // Ensure start point is snapped too if we want
                     path.Points[1] = effectivePos;
+                }
+            }
+            else if (ToolManager.Instance.CurrentTool == ToolType.DrawBezier)
+            {
+                if (_interactionObject is LaserBezier bezier)
+                {
+                    bezier.Start = start;
+                    bezier.End = effectivePos;
+                    // Auto-calculate Control Points (S-Curve or straight line)
+                    // Let's do 1/3 and 2/3 along the line
+                    float dx = effectivePos.X - start.X;
+                    float dy = effectivePos.Y - start.Y;
+                    bezier.Control1 = new PointF(start.X + dx * 0.33f, start.Y + dy * 0.33f);
+                    bezier.Control2 = new PointF(start.X + dx * 0.66f, start.Y + dy * 0.66f);
+                    
+                    bezier.UpdateBounds(); // Update Position/Size
                 }
             }
             Invalidate();
@@ -913,6 +947,7 @@ public class WorkbenchControl : Control
         {
             List<PointF>? pts = null;
             if (obj is LaserPath p) pts = new List<PointF>(p.Points);
+            else if (obj is LaserBezier b) pts = new List<PointF> { b.Start, b.Control1, b.Control2, b.End };
             _initialStates[obj] = (obj.Position, obj.Size, pts);
         }
     }
@@ -1064,6 +1099,23 @@ public class WorkbenchControl : Control
                     p.Points[i] = new PointF(newL + px * scaleX, newT + py * scaleY);
                 }
             }
+            else if (obj is LaserBezier bez && init.Points != null && init.Points.Count == 4)
+            {
+                PointF[] newPts = new PointF[4];
+                for(int i=0; i<4; i++)
+                {
+                    float px = init.Points[i].X - b.Left;
+                    float py = init.Points[i].Y - b.Top;
+                    newPts[i] = new PointF(newL + px * scaleX, newT + py * scaleY);
+                }
+                bez.Start = newPts[0];
+                bez.Control1 = newPts[1];
+                bez.Control2 = newPts[2];
+                bez.End = newPts[3];
+                // UpdateBounds called automatically? No, user handles bounds.
+                // But Position/Size set at 1055/1056 update the bounding box property.
+                // The points must match that bbox. logic above ensures they fit within newL/newT/newW/newH.
+            }
         }
         Invalidate();
         
@@ -1085,6 +1137,14 @@ public class WorkbenchControl : Control
                  path.Points[i] = new PointF(path.Points[i].X + dx, path.Points[i].Y + dy);
              }
              path.Position = new PointF(path.Position.X + dx, path.Position.Y + dy);
+         }
+         else if (obj is LaserBezier bezier)
+         {
+             bezier.Start = new PointF(bezier.Start.X + dx, bezier.Start.Y + dy);
+             bezier.Control1 = new PointF(bezier.Control1.X + dx, bezier.Control1.Y + dy);
+             bezier.Control2 = new PointF(bezier.Control2.X + dx, bezier.Control2.Y + dy);
+             bezier.End = new PointF(bezier.End.X + dx, bezier.End.Y + dy);
+             bezier.UpdateBounds();
          }
          else if (obj is LaserGroup group)
          {

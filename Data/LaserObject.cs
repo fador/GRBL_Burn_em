@@ -11,7 +11,8 @@ public enum LaserObjectType
     Rectangle,
     Group,
     Text,
-    Circle
+    Circle,
+    Bezier
 }
 
 public abstract class LaserObject
@@ -447,5 +448,72 @@ public class LaserText : LaserObject
             FontSize = this.FontSize
         };
         return clone;
+    }
+}
+
+public class LaserBezier : LaserObject
+{
+    public PointF Start { get; set; }
+    public PointF Control1 { get; set; }
+    public PointF Control2 { get; set; }
+    public PointF End { get; set; }
+
+    public LaserBezier()
+    {
+        Type = LaserObjectType.Bezier;
+        Name = "Bezier";
+    }
+
+    public void UpdateBounds()
+    {
+        // Calculate Bounding Box
+        // Bezier bounds are not trivial, but simplified: Min/Max of all 4 points covers it (convex hull property)
+        float minX = Math.Min(Start.X, Math.Min(Control1.X, Math.Min(Control2.X, End.X)));
+        float maxX = Math.Max(Start.X, Math.Max(Control1.X, Math.Max(Control2.X, End.X)));
+        float minY = Math.Min(Start.Y, Math.Min(Control1.Y, Math.Min(Control2.Y, End.Y)));
+        float maxY = Math.Max(Start.Y, Math.Max(Control1.Y, Math.Max(Control2.Y, End.Y)));
+        
+        Position = new PointF(minX, minY);
+        Size = new SizeF(maxX - minX, maxY - minY);
+    }
+
+    public override void Draw(Graphics g, float scale)
+    {
+        var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
+                    ?? ProjectState.Instance.Layers.FirstOrDefault();
+        Color c = layer?.Color ?? Color.Black;
+
+        using var pen = new Pen(c, 1.0f / scale);
+        g.DrawBezier(pen, Start, Control1, Control2, End);
+        
+        // Visualize Handles if selected? Handled by WorkbenchControl usually.
+    }
+
+    public override bool HitTest(PointF point, float tolerance)
+    {
+         using var path = new GraphicsPath();
+         path.AddBezier(Start, Control1, Control2, End);
+         using var pen = new Pen(Color.Black, tolerance);
+         return path.IsOutlineVisible(point, pen);
+    }
+
+    public override LaserObject Clone()
+    {
+        return new LaserBezier
+        {
+            Id = Guid.NewGuid(),
+            Name = this.Name + " (Copy)",
+            LayerId = this.LayerId,
+            IsEnabled = this.IsEnabled,
+            Power = this.Power,
+            Speed = this.Speed,
+            Position = this.Position,
+            Rotation = this.Rotation,
+            Size = this.Size,
+            Start = this.Start,
+            Control1 = this.Control1,
+            Control2 = this.Control2,
+            End = this.End
+        };
     }
 }
