@@ -57,7 +57,7 @@ public class ProjectState : INotifyPropertyChanged
 
     public Guid AddObject(LaserObject obj)
     {
-        if(ActiveLayer != null)
+        if(ActiveLayer != null && obj.LayerId == Guid.Empty)
         {
             obj.LayerId = ActiveLayer.Id;
         }

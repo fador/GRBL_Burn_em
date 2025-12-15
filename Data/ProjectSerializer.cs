@@ -5,10 +5,22 @@ using System.IO;
 
 namespace laser_gui_test.Data;
 
+public class LayerDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = "Layer";
+    public System.Drawing.Color Color { get; set; } = System.Drawing.Color.Black;
+    public bool IsVisible { get; set; } = true;
+    public bool IsLocked { get; set; } = false;
+    public float Power { get; set; }
+    public float Speed { get; set; }
+    public LayerMode Mode { get; set; }
+}
+
 public class ProjectDataDto
 {
     public List<LaserObjectDto> Objects { get; set; } = new();
-    public List<Layer> Layers { get; set; } = new();
+    public List<LayerDto> Layers { get; set; } = new();
 }
 
 [JsonDerivedType(typeof(LaserPathDto), typeDiscriminator: "Path")]
@@ -53,7 +65,18 @@ public static class ProjectSerializer
     public static void Save(string path)
     {
         var dto = new ProjectDataDto();
-        dto.Layers = ProjectState.Instance.Layers.ToList();
+        // Convert Layers to DTOs
+        dto.Layers = ProjectState.Instance.Layers.Select(l => new LayerDto 
+        {
+            Id = l.Id,
+            Name = l.Name,
+            Color = l.Color,
+            IsVisible = l.IsVisible,
+            IsLocked = l.IsLocked,
+            Power = l.Power,
+            Speed = l.Speed,
+            Mode = l.Mode
+        }).ToList();
         
         foreach (var obj in ProjectState.Instance.Objects)
         {
@@ -128,16 +151,30 @@ public static class ProjectSerializer
     {
         if (!File.Exists(path)) return;
         var json = File.ReadAllText(path);
-        var options = new JsonSerializerOptions();
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         options.Converters.Add(new ColorJsonConverter());
         var dto = JsonSerializer.Deserialize<ProjectDataDto>(json, options);
         
         if (dto == null) return;
-
+        
         ProjectState.Instance.Objects.Clear();
         ProjectState.Instance.Layers.Clear();
 
-        foreach (var l in dto.Layers) ProjectState.Instance.Layers.Add(l);
+        // Load Layers from DTOs
+        foreach (var lDto in dto.Layers) 
+        {
+            var l = new Layer(lDto.Name, lDto.Color)
+            {
+                Id = lDto.Id,
+                IsVisible = lDto.IsVisible,
+                IsLocked = lDto.IsLocked,
+                Power = lDto.Power,
+                Speed = lDto.Speed,
+                Mode = lDto.Mode
+            };
+            ProjectState.Instance.Layers.Add(l);
+        }
+        
         if (ProjectState.Instance.Layers.Count == 0) ProjectState.Instance.Layers.Add(new Layer("Default", Color.Black));
         ProjectState.Instance.ActiveLayer = ProjectState.Instance.Layers[0];
 
@@ -164,8 +201,7 @@ public static class ProjectSerializer
                     {
                         var bytes = Convert.FromBase64String(i.Base64Data);
                         using var ms = new MemoryStream(bytes);
-                        imgObj.Image = new Bitmap(ms); // Stream must be kept open? Bitmap(Stream) requires stream.
-                        // Actually, creating a new Bitmap(Bitmap) copies it.
+                        imgObj.Image = new Bitmap(ms); 
                         var temp = new Bitmap(ms);
                         imgObj.Image = new Bitmap(temp);
                     }
@@ -234,14 +270,11 @@ public class ColorJsonConverter : JsonConverter<System.Drawing.Color>
                     string? prop = reader.GetString();
                     reader.Read();
                     
-                    switch(prop)
-                    {
-                        case "A": a = reader.GetInt32(); break;
-                        case "R": r = reader.GetInt32(); break;
-                        case "G": g = reader.GetInt32(); break;
-                        case "B": b = reader.GetInt32(); break;
-                        case "Name": name = reader.GetString(); break;
-                    }
+                    if (string.Equals(prop, "A", StringComparison.OrdinalIgnoreCase)) a = reader.GetInt32();
+                    else if (string.Equals(prop, "R", StringComparison.OrdinalIgnoreCase)) r = reader.GetInt32();
+                    else if (string.Equals(prop, "G", StringComparison.OrdinalIgnoreCase)) g = reader.GetInt32();
+                    else if (string.Equals(prop, "B", StringComparison.OrdinalIgnoreCase)) b = reader.GetInt32();
+                    else if (string.Equals(prop, "Name", StringComparison.OrdinalIgnoreCase)) name = reader.GetString();
                 }
             }
             

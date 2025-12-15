@@ -1,7 +1,9 @@
 using System.Drawing;
+using System.Text.Json.Serialization;
 
 namespace laser_gui_test.Data;
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum LayerMode
 {
     Cut, // Vector following
@@ -20,6 +22,12 @@ public class Layer
     public float Power { get; set; } = 80.0f; // %
     public float Speed { get; set; } = 1000.0f; // mm/min
     public LayerMode Mode { get; set; } = LayerMode.Cut;
+
+    public Layer() 
+    {
+        Name = "New Layer";
+        Color = Color.Red;
+    }
 
     public Layer(string name, Color color)
     {
