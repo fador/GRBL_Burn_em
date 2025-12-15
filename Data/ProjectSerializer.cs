@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Drawing;
+using System.IO;
 
 namespace laser_gui_test.Data;
 
@@ -36,6 +38,7 @@ public class LaserRectangleDto : LaserObjectDto { }
 public class LaserImageDto : LaserObjectDto
 {
     public string ImagePath { get; set; } = "";
+    public string Base64Data { get; set; } = "";
 }
 
 public class LaserTextDto : LaserObjectDto
@@ -73,12 +76,36 @@ public static class ProjectSerializer
             }
             else if (obj is LaserImage i)
             {
-                dto.Objects.Add(new LaserImageDto
+                var imgDto = new LaserImageDto
                 {
                     Id = i.Id, Name = i.Name, LayerId = i.LayerId, IsEnabled = i.IsEnabled,
                     Power = i.Power, Speed = i.Speed, Position = i.Position, Rotation = i.Rotation, Size = i.Size,
                     ImagePath = i.ImagePath
-                });
+                };
+                
+                if (AppConfiguration.Instance.EmbedImagesInProject)
+                {
+                    try
+                    {
+                        if (File.Exists(i.ImagePath))
+                        {
+                            var bytes = File.ReadAllBytes(i.ImagePath);
+                            imgDto.Base64Data = Convert.ToBase64String(bytes);
+                        }
+                        else if (i.Image != null)
+                        {
+                            using var ms = new MemoryStream();
+                            i.Image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                            imgDto.Base64Data = Convert.ToBase64String(ms.ToArray());
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to embed image: {ex.Message}");
+                    }
+                }
+                
+                dto.Objects.Add(imgDto);
             }
             else if (obj is LaserText t)
             {
@@ -130,9 +157,32 @@ public static class ProjectSerializer
             else if (objDto is LaserImageDto i)
             {
                 var imgObj = new LaserImage { ImagePath = i.ImagePath };
-                if (File.Exists(i.ImagePath))
+                
+                if (!string.IsNullOrEmpty(i.Base64Data))
                 {
-                    try { imgObj.Image = new Bitmap(i.ImagePath); } catch {}
+                    try
+                    {
+                        var bytes = Convert.FromBase64String(i.Base64Data);
+                        using var ms = new MemoryStream(bytes);
+                        imgObj.Image = new Bitmap(ms); // Stream must be kept open? Bitmap(Stream) requires stream.
+                        // Actually, creating a new Bitmap(Bitmap) copies it.
+                        var temp = new Bitmap(ms);
+                        imgObj.Image = new Bitmap(temp);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to load embedded image: {ex.Message}");
+                    }
+                }
+                
+                if (imgObj.Image == null && File.Exists(i.ImagePath))
+                {
+                    try 
+                    { 
+                        using var fs = new FileStream(i.ImagePath, FileMode.Open, FileAccess.Read);
+                        var temp = new Bitmap(fs); 
+                        imgObj.Image = new Bitmap(temp);
+                    } catch {}
                 }
                 obj = imgObj;
             }

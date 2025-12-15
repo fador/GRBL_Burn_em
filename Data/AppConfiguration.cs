@@ -24,6 +24,7 @@ public class AppConfiguration
     public float SvgCurveQuality { get; set; } = 0.002f; // Lower is better quality (more points)
 
     public bool Enable1BitDithering { get; set; } = false;
+    public bool EmbedImagesInProject { get; set; } = false;
 
     // View Settings
     public float LastPanX { get; set; } = 0f;
