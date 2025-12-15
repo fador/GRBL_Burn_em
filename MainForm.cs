@@ -465,7 +465,21 @@ public partial class MainForm : Form
             try {
                 txtLog.BeginInvoke(() => 
                 {
-                    txtLog.AppendText($"< {line}\n");
+                    if (line.Trim().StartsWith("error:"))
+                    {
+                         string errCode = line.Trim().Substring(6);
+                         string msg = GrblErrors.GetMessage(errCode);
+                         
+                         txtLog.SelectionStart = txtLog.TextLength;
+                         txtLog.SelectionLength = 0;
+                         txtLog.SelectionColor = Color.Red;
+                         txtLog.AppendText($"< {line} ({msg})\n");
+                         txtLog.SelectionColor = txtLog.ForeColor;
+                    }
+                    else
+                    {
+                        txtLog.AppendText($"< {line}\n");
+                    }
                     txtLog.ScrollToCaret();
                 });
             } catch { } 
@@ -487,9 +501,25 @@ public partial class MainForm : Form
                 });
              } catch {}
         };
-        // Also log "Ok" etc if needed, but LineReceived filters status updates usually? 
-        // SerialInterface LineReceived handles non-status lines. 
-        // DataReceived gives raw. LineReceived is cleaner.
+
+        // Handle dynamically detected buffer size
+        SerialInterface.Instance.RxBufferSizeReceived += (size) =>
+        {
+             // If we are Idle, we assume the reported buffer is the max available
+             // But we only set it if it's different/larger?
+             // Actually, the user wants us to "configure the serial buffer based on the data".
+             // If we receive a specialized update, we use it.
+             // We'll update the job runner.
+             // Note: _jobRunner is not thread safe but property assignment is atomic enough forint
+             if (_jobRunner.MaxBufferSize != size)
+             {
+                 _jobRunner.MaxBufferSize = size;
+                 if (!txtLog.IsDisposed)
+                 {
+                      txtLog.BeginInvoke(() => txtLog.AppendText($"[INFO] Buffer Size adjusted to {size}\n"));
+                 }
+             }
+        };
 
         // Add Tabs to Right Panel
         rightSplit.Panel1.Controls.Add(_rightTabControl);
