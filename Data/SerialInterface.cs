@@ -119,9 +119,7 @@ public class SerialInterface
 
     private StringBuilder _rxBuffer = new StringBuilder();
 
-    public event Action<int>? RxBufferSizeReceived;
-
-    public int RxBufferSize { get; private set; } = 127;
+    public event Action<int, int>? BufferLimitsReceived; // Planner, Rx
 
     private void _serialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
     {
@@ -193,40 +191,13 @@ public class SerialInterface
                      var vals = part.Substring(3).Split(',');
                      if (vals.Length >= 2)
                      {
-                         if (int.TryParse(vals[1], out int rx))
+                         bool pParsed = int.TryParse(vals[0], out int planner);
+                         bool rParsed = int.TryParse(vals[1], out int rx);
+
+                         if (pParsed && rParsed)
                          {
-                             // Only update if changed or specifically needed?
-                             // We assume the max is what we see when idle.
-                             // But we just emit it.
-                             if (rx > RxBufferSize) // If we see a larger buffer reported, assume that's the max? 
-                             {
-                                 // Actually, Bf reports AVAILABLE bytes. 
-                                 // So the maximum value we ever see is the buffer size.
-                                 // But initially we might want to capture it.
-                                 // Let's just event it out.
-                                 if (RxBufferSize != rx)
-                                 {
-                                     RxBufferSize = rx; // This logic acts as a "max peak" detector if we start low?
-                                     // Actually no, Bf fluctuates. We want the Init value.
-                                     // User said "read the machine data WHEN CONNECTING".
-                                     // So we assume the connection is Idle and buffer is empty.
-                                     RxBufferSizeReceived?.Invoke(rx);
-                                 }
-                             }
-                             // Or should we just fire it? 
-                             // Let's fire it if it's likely the full buffer (e.g. at startup)
-                             // Simple approach: Always fire, let consumer decide? 
-                             // Consumer might reset MaxBufferSize on every update? No that's bad if buffer fills.
-                             // Wait, successful parsing of 'Bf' means we know the CURRENT available. 
-                             // The question is "configuring the serial buffer". 
-                             // If we are Idle and just connected, the Available = Max.
-                             if (MachineState == "Idle") 
-                             {
-                                  // We can optimistically assume current available is Max if we just connected
-                                  // But let's just expose the value.
-                                  // We will implement logic in MainForm to capture the FIRST one or Max one.
-                                  RxBufferSizeReceived?.Invoke(rx);
-                             }
+                             // We fire an event with both limits
+                             BufferLimitsReceived?.Invoke(planner, rx);
                          }
                      }
                 }

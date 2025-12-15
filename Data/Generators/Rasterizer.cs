@@ -153,7 +153,16 @@ public static class Rasterizer
                         }
                         else
                         {
-                            filteredSegments.Add((seg.intensity, len));
+                            // Check if same intensity as previous
+                            if (Math.Abs(last.intensity - seg.intensity) < 0.01f)
+                            {
+                                // Coalesce
+                                filteredSegments[filteredSegments.Count - 1] = (last.intensity, last.length + len);
+                            }
+                            else
+                            {
+                                filteredSegments.Add((seg.intensity, len));
+                            }
                         }
                     }
                     else

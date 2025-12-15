@@ -503,20 +503,22 @@ public partial class MainForm : Form
         };
 
         // Handle dynamically detected buffer size
-        SerialInterface.Instance.RxBufferSizeReceived += (size) =>
+        SerialInterface.Instance.BufferLimitsReceived += (planner, rx) =>
         {
-             // If we are Idle, we assume the reported buffer is the max available
-             // But we only set it if it's different/larger?
-             // Actually, the user wants us to "configure the serial buffer based on the data".
-             // If we receive a specialized update, we use it.
-             // We'll update the job runner.
-             // Note: _jobRunner is not thread safe but property assignment is atomic enough forint
-             if (_jobRunner.MaxBufferSize != size)
+             // planner = Available planner blocks
+             // rx = Available RX bytes.
+             // User requested to use Planner Block count for flow control.
+             
+             // Only update the capacity when the machine is IDLE (buffer is empty).
+             // Updating during a job would treat "Available" as "Max", causing throttling/deadlock.
+             if (SerialInterface.Instance.MachineState != "Idle") return;
+
+             if (_jobRunner.MaxPlannerBlocks != planner)
              {
-                 _jobRunner.MaxBufferSize = size;
+                 _jobRunner.MaxPlannerBlocks = planner;
                  if (!txtLog.IsDisposed)
                  {
-                      txtLog.BeginInvoke(() => txtLog.AppendText($"[INFO] Buffer Size adjusted to {size}\n"));
+                      txtLog.BeginInvoke(() => txtLog.AppendText($"[INFO] Flow Control: Planner Blocks = {planner}, Rx Bytes = {rx}\n"));
                  }
              }
         };
