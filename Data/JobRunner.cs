@@ -10,7 +10,7 @@ public class JobRunner
 {
     private List<string> _gcodeLines = new List<string>();
     private int _currentLineIndex = 0;
-    private int _pendingCommandsCount = 0;
+    public int PendingCommandsCount { get; set; } = 0;
     public int MaxPlannerBlocks { get; set; } = 15; // Default GRBL
     public int MaxBufferSize { get; set; } = 128; // Standard GRBL Rx Buffer
     private int _currentBytes = 0;
@@ -37,6 +37,8 @@ public class JobRunner
 
     private readonly object _runnerLock = new object();
 
+    private System.Threading.Timer? _retryTimer;
+
     public void Start(IEnumerable<string> gcode)
     {
         lock (_runnerLock)
@@ -45,7 +47,7 @@ public class JobRunner
 
             _gcodeLines = gcode.ToList();
             _currentLineIndex = 0;
-            _pendingCommandsCount = 0;
+            PendingCommandsCount = 0;
             _pendingCommands.Clear();
             
             _currentBytes = 0;
@@ -54,6 +56,9 @@ public class JobRunner
             _isRunning = true;
             _isPaused = false;
             
+            // Start Retry Timer (Poller)
+            _retryTimer = new System.Threading.Timer((s) => SendNext(), null, 250, 250);
+
             SendNext();
         }
     }
@@ -81,19 +86,36 @@ public class JobRunner
 
     public void Stop()
     {
-        lock (_runnerLock)
-        {
-            _isRunning = false;
-            _isPaused = false;
-            _gcodeLines.Clear();
-            _pendingCommands.Clear();
-            _pendingCommandsCount = 0;   
-            _currentBytes = 0;
-            _sentLineLengths.Clear();
-            
-            // Soft Reset to clear GRBL buffer
-            SerialInterface.Instance.Write("\u0018"); 
+        _isRunning = false;
+        _isPaused = false;
+        
+        _retryTimer?.Dispose();
+        _retryTimer = null;
+
+        _gcodeLines.Clear();
+        _pendingCommands.Clear();
+        PendingCommandsCount = 0;   
+        _currentBytes = 0;
+        _sentLineLengths.Clear();
+        
+        // Soft Reset to clear GRBL buffer
+        SerialInterface.Instance.Write("\u0018"); 
+    }
+
+    public bool DequeueCommand() {
+
+        PendingCommandsCount--;
+        if(PendingCommandsCount < 0) PendingCommandsCount = 0;
+        
+        // Update Byte Count
+        if (_sentLineLengths.Count > 0)
+        {            
+            int len = _sentLineLengths.Dequeue();
+            _currentBytes -= len;
+            if (_currentBytes < 0) _currentBytes = 0; // Output safety
+            return true;
         }
+        return false;
     }
 
     private void OnSerialLineReceived(string line)
@@ -113,14 +135,7 @@ public class JobRunner
             
             if (line.Contains("ok") || line.Contains("error"))
             {
-                _pendingCommandsCount--;
-                // Update Byte Count
-                if (_sentLineLengths.Count > 0)
-                {
-                    int len = _sentLineLengths.Dequeue();
-                    _currentBytes -= len;
-                    if (_currentBytes < 0) _currentBytes = 0; // Output safety
-                }
+                DequeueCommand();
                 
                 if (line.Contains("error"))
                 {
@@ -136,6 +151,7 @@ public class JobRunner
 
     private void SendNext()
     {
+        bool done = false;
         lock (_runnerLock)
         {
             if (_isPaused || !_isRunning) return;
@@ -147,7 +163,7 @@ public class JobRunner
             while (_currentLineIndex < _gcodeLines.Count)
             {
                 // 1. Check Planner Slots
-                if (_pendingCommandsCount >= MaxPlannerBlocks)
+                if (PendingCommandsCount >= MaxPlannerBlocks)
                 {
                    break; 
                 }
@@ -163,9 +179,13 @@ public class JobRunner
                     break;
                 }
 
-                SerialInterface.Instance.Write(lineToSend);
+                if(!SerialInterface.Instance.Write(lineToSend))
+                {
+                    // Port blocked
+                    break;
+                }
                 
-                _pendingCommandsCount++;
+                PendingCommandsCount++;
                 _currentBytes += lineBytes;
                 _sentLineLengths.Enqueue(lineBytes);
                 
@@ -179,11 +199,17 @@ public class JobRunner
                 }
             }
 
-            if (_currentLineIndex >= _gcodeLines.Count && _pendingCommandsCount == 0)
+            if (_currentLineIndex >= _gcodeLines.Count && PendingCommandsCount == 0)
             {
                 _isRunning = false;
-                JobCompleted?.Invoke();
+                done = true;
             }
         }
+
+        if(done)
+        {
+            JobCompleted?.Invoke();
+        }
     }
+
 }
