@@ -460,7 +460,8 @@ public partial class MainForm : Form
         {
             if (txtLog.IsDisposed) return;
             // optimize: ignore 'ok' to prevent spam/lag
-            if (line == "ok") return; 
+            //if (line == "ok") return; 
+            if(line == "ok") line += $" ({_jobRunner.PendingCommandsCount} slots)";
 
             try {
                 txtLog.BeginInvoke(() => 

@@ -178,10 +178,12 @@ public class JobRunner
                 }
                 
                 // No need to call SendNext, the loop will pick it up
-            } else if(line.Contains("ALARM"))
+            } else if(line.Contains("ALARM:"))
             {
                 Stop();
-                MessageBox.Show(line, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                string alarmCode = line.Substring(line.IndexOf(':') + 1);
+                string msg = GrblErrors.GetAlarmMessage(alarmCode);
+                MessageBox.Show($"Machine Alarm: {line}\n{msg}", "Alarm", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }
