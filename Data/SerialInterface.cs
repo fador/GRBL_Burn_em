@@ -33,6 +33,7 @@ public class SerialInterface
             _serialPort.WriteTimeout = 500; // Prevent UI freeze on blocked write
             _serialPort.DtrEnable = true; // Essential for some controllers to reset or communicate
             _serialPort.DataReceived += _serialPort_DataReceived;
+            _serialPort.Handshake = Handshake.XOnXOff;
             _serialPort.Open();
             _serialPort.DiscardInBuffer(); // Clear any existing data
             
@@ -101,7 +102,7 @@ public class SerialInterface
 
     private readonly object _writeLock = new object();
 
-    public void Write(string data)
+    public bool Write(string data)
     {
         if (IsConnected && _serialPort != null)
         {
@@ -116,12 +117,15 @@ public class SerialInterface
             catch (TimeoutException)
             {
                 Debug.WriteLine("Serial Write Timeout - Port Blocked?");
+                return false;
             }
             catch (Exception ex) 
             { 
                 Debug.WriteLine($"Write Error: {ex.Message}"); 
+                return false;
             }
         }
+        return true;
     }
 
     public string[] GetAvailablePorts()
