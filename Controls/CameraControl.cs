@@ -23,72 +23,88 @@ namespace laser_gui_test.Controls
         {
             InitializeComponent();
             RefreshDevices();
+            CameraManager.Instance.CameraStopped += OnCameraStopped;
         }
 
         private void InitializeComponent()
         {
             this.Size = new Size(300, 400);
             
-            var layout = new FlowLayoutPanel
+            // Use TableLayoutPanel for better resizing
+            var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.TopDown,
+                ColumnCount = 1,
+                RowCount = 5,
                 Padding = new Padding(10),
                 AutoScroll = true
             };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); // Full width column
 
-            // Device Selection
-            layout.Controls.Add(new Label { Text = "Camera Device:", AutoSize = true });
-            _cmbDevices = new ComboBox { Width = 250, DropDownStyle = ComboBoxStyle.DropDownList };
-            layout.Controls.Add(_cmbDevices);
-            
+            // 1. Device Selection
+            var pnlDevice = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
+            pnlDevice.Controls.Add(new Label { Text = "Camera Device:", AutoSize = true });
+            _cmbDevices = new ComboBox { Width = 300, DropDownStyle = ComboBoxStyle.DropDownList, Anchor = AnchorStyles.Left | AnchorStyles.Right };
+            pnlDevice.Controls.Add(_cmbDevices);
             var btnRefresh = new Button { Text = "Refresh List", Width = 100 };
             btnRefresh.Click += (s, e) => RefreshDevices();
-            layout.Controls.Add(btnRefresh);
+            pnlDevice.Controls.Add(btnRefresh);
+            layout.Controls.Add(pnlDevice);
 
-            // Start/Stop
-            _btnStartStop = new Button { Text = "Start Camera", Width = 250, Height = 40, BackColor = Color.LightGreen };
+            // 2. Start/Stop
+            _btnStartStop = new Button { Text = "Start Camera", Height = 40, BackColor = Color.LightGreen, Dock = DockStyle.Top };
             _btnStartStop.Click += OnStartStopClick;
             layout.Controls.Add(_btnStartStop);
 
             layout.Controls.Add(new Label { Text = "", Height = 10 }); // Spacer
 
-            // Overlay Settings
-            var grpOverlay = new GroupBox { Text = "Overlay Settings", Width = 260, Height = 200 };
-            var flowOverlay = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown };
+            // 3. Overlay Settings
+            var grpOverlay = new GroupBox { Text = "Overlay Settings", Dock = DockStyle.Top, AutoSize = true };
+            var flowOverlay = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2 };
+            flowOverlay.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            flowOverlay.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
             
-            _chkOverlay = new CheckBox { Text = "Enable Overlay", Checked = false };
+            _chkOverlay = new CheckBox { Text = "Enable Overlay", Checked = false, AutoSize = true };
             _chkOverlay.CheckedChanged += (s, e) => 
             {
                 UpdateConfigFromUI(); // Save state
-                if (MainForm.Instance != null) // Access existing instance
+                if (MainForm.Instance != null && !_chkOverlay.Checked)
                 {
-                    // Logic to enable/disable rendering handled in Workbench via property?
-                    // Or we just push Image=null if disabled.
-                    UpdateOverlay();
+                    // Explicitly clear overlay if unchecked
+                     UpdateOverlay();
                 }
             };
-            flowOverlay.Controls.Add(_chkOverlay);
+            flowOverlay.Controls.Add(_chkOverlay, 0, 0);
+            flowOverlay.SetColumnSpan(_chkOverlay, 2);
             
-            flowOverlay.Controls.Add(new Label { Text = "Opacity:", AutoSize = true });
-            _trkOpacity = new TrackBar { Minimum = 0, Maximum = 100, Value = 50, Width = 240 };
+            flowOverlay.Controls.Add(new Label { Text = "Opacity:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
+            _trkOpacity = new TrackBar { Minimum = 0, Maximum = 100, Value = 50, Dock = DockStyle.Fill };
             _trkOpacity.Scroll += (s, e) => { UpdateConfigFromUI(); UpdateOverlay(); };
-            flowOverlay.Controls.Add(_trkOpacity);
+            flowOverlay.Controls.Add(_trkOpacity, 1, 1);
 
             // Manual Transforms
-            // Position X, Y
-            var pnlPos = new FlowLayoutPanel { AutoSize = true };
-            _nudX = new NumericUpDown { DecimalPlaces = 2, Minimum = -1000, Maximum = 1000, Width = 60 };
-            _nudY = new NumericUpDown { DecimalPlaces = 2, Minimum = -1000, Maximum = 1000, Width = 60 };
-            pnlPos.Controls.AddRange(new Control[] { new Label { Text = "X:" }, _nudX, new Label { Text = "Y:" }, _nudY });
-            flowOverlay.Controls.Add(pnlPos);
+            // X
+            flowOverlay.Controls.Add(new Label { Text = "X:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 2);
+            _nudX = new NumericUpDown { DecimalPlaces = 2, Minimum = -5000, Maximum = 5000, Dock = DockStyle.Fill };
+            flowOverlay.Controls.Add(_nudX, 1, 2);
+            
+            // Y
+            flowOverlay.Controls.Add(new Label { Text = "Y:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 3);
+            _nudY = new NumericUpDown { DecimalPlaces = 2, Minimum = -5000, Maximum = 5000, Dock = DockStyle.Fill };
+            flowOverlay.Controls.Add(_nudY, 1, 3);
+            
+            // W
+            flowOverlay.Controls.Add(new Label { Text = "W:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 4);
+            _nudWidth = new NumericUpDown { DecimalPlaces = 2, Minimum = 1, Maximum = 10000, Dock = DockStyle.Fill, Value = 100 };
+            flowOverlay.Controls.Add(_nudWidth, 1, 4);
 
-            // Size W, H
-            var pnlSize = new FlowLayoutPanel { AutoSize = true };
-            _nudWidth = new NumericUpDown { DecimalPlaces = 2, Minimum = 1, Maximum = 5000, Width = 60, Value = 100 };
-            _nudHeight = new NumericUpDown { DecimalPlaces = 2, Minimum = 1, Maximum = 5000, Width = 60, Value = 100 };
-            pnlSize.Controls.AddRange(new Control[] { new Label { Text = "W:" }, _nudWidth, new Label { Text = "H:" }, _nudHeight });
-            flowOverlay.Controls.Add(pnlSize);
+            // H
+            flowOverlay.Controls.Add(new Label { Text = "H:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 5);
+            _nudHeight = new NumericUpDown { DecimalPlaces = 2, Minimum = 1, Maximum = 10000, Dock = DockStyle.Fill, Value = 100 };
+            flowOverlay.Controls.Add(_nudHeight, 1, 5);
+            
+            grpOverlay.Controls.Add(flowOverlay);
+            layout.Controls.Add(grpOverlay);
             
             // Events for NUDs
             EventHandler updateVal = (s, e) => { UpdateConfigFromUI(); UpdateOverlay(); };
@@ -97,20 +113,17 @@ namespace laser_gui_test.Controls
             _nudWidth.ValueChanged += updateVal;
             _nudHeight.ValueChanged += updateVal;
 
-            grpOverlay.Controls.Add(flowOverlay);
-            layout.Controls.Add(grpOverlay);
-            
             layout.Controls.Add(new Label { Text = "", Height = 10 }); // Spacer
 
-            // Calibration & Mounting
-            var pnlMount = new FlowLayoutPanel { AutoSize = true };
+            // 4. Calibration & Mounting
+            var pnlMount = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown };
             _chkMounted = new CheckBox { Text = "Head Mounted Camera", Checked = AppConfiguration.Instance.CameraIsMounted, Width = 250 };
             _chkMounted.CheckedChanged += (s, e) => { AppConfiguration.Instance.CameraIsMounted = _chkMounted.Checked; AppConfiguration.Instance.Save(); };
             pnlMount.Controls.Add(_chkMounted);
             layout.Controls.Add(pnlMount);
 
-            _btnCalibrate = new Button { Text = "Calibrate (Manual)", Width = 250 };
-            _btnCalibrate.Click += (s, e) => StartManualCalibration(); // TODO
+            _btnCalibrate = new Button { Text = "Calibrate (Manual)", Dock = DockStyle.Top, Height = 30 };
+            _btnCalibrate.Click += (s, e) => StartManualCalibration();
             layout.Controls.Add(_btnCalibrate);
 
             this.Controls.Add(layout);
@@ -170,8 +183,7 @@ namespace laser_gui_test.Controls
             if (CameraManager.Instance.IsRunning)
             {
                 CameraManager.Instance.StopCamera();
-                _btnStartStop.Text = "Start Camera";
-                _btnStartStop.BackColor = Color.LightGreen;
+                // Button update handled by OnCameraStopped event
             }
             else
             {
@@ -252,10 +264,7 @@ namespace laser_gui_test.Controls
         
         private void UpdateOverlay()
         {
-             // Update logic if parameters change but frame doesn't (static image?)
-             // Or just wait for next frame.
-             // If camera is stopped, we might want to clear overlay.
-             if (!CameraManager.Instance.IsRunning && !AppConfiguration.Instance.ShowCameraOverlay)
+             if (!AppConfiguration.Instance.ShowCameraOverlay)
              {
                  var wb = GetWorkbench();
                  if (wb != null)
@@ -265,6 +274,45 @@ namespace laser_gui_test.Controls
                      old?.Dispose();
                      wb.Invalidate();
                  }
+                 return;
+             }
+             
+             // If config matches UI, do we need to do anything? 
+             // FrameReceived handles the image update.
+             // This is mostly for opacity/position update which is done inside FrameReceived too?
+             // Or if we want to repaint the Last Frame with new params?
+             
+             // If we have a background image, we can just invalidate.
+             var wbc = GetWorkbench();
+             if (wbc != null)
+             {
+                 var config = AppConfiguration.Instance;
+                 wbc.OverlayImageOpacity = config.CameraOverlayOpacity;
+                 wbc.OverlayImagePosition = new PointF(config.CameraOverlayX, config.CameraOverlayY);
+                 wbc.OverlayImageSize = new SizeF(config.CameraOverlayWidth, config.CameraOverlayHeight);
+                 wbc.Invalidate();
+             }
+        }
+
+        private void OnCameraStopped()
+        {
+             // Clear overlay when camera stops
+             if (this.InvokeRequired)
+             {
+                 this.Invoke(new Action(OnCameraStopped));
+                 return;
+             }
+             
+             _btnStartStop.Text = "Start Camera";
+             _btnStartStop.BackColor = Color.LightGreen;
+             
+             var wb = GetWorkbench();
+             if (wb != null)
+             {
+                 var old = wb.OverlayImage;
+                 wb.OverlayImage = null;
+                 old?.Dispose();
+                 wb.Invalidate();
              }
         }
 

@@ -24,6 +24,7 @@ namespace laser_gui_test.Data
         private List<DirectShowDeviceInfo> _devices = new List<DirectShowDeviceInfo>();
         
         public event Action<Bitmap>? FrameReceived;
+        public event Action? CameraStopped;
         
         public CalibrationData Calibration { get; set; } = new CalibrationData();
         
@@ -47,39 +48,38 @@ namespace laser_gui_test.Data
             if (_devices == null || deviceIndex < 0 || deviceIndex >= _devices.Count)
                 return;
             
-            // OpenCV VideoCapture index is usually 0, 1, 2... matching order.
-            // However, DeviceEnumerator returns list. 
-            // We hope the order matches the system index. It usually does for DirectShow.
-            
             _cts = new CancellationTokenSource();
             _captureTask = Task.Run(() => CaptureLoop(deviceIndex, _cts.Token));
         }
 
         private void CaptureLoop(int deviceIndex, CancellationToken token)
         {
+            VideoCapture? localCapture = null;
             try
             {
-                _capture = new VideoCapture(deviceIndex, VideoCaptureAPIs.DSHOW); // Use DirectShow backend explicitely
-                if (!_capture.IsOpened())
+                localCapture = new VideoCapture(deviceIndex, VideoCaptureAPIs.DSHOW);
+                
+                // Expose to Start/Stop logic if needed, but risky. 
+                // Let's use IsRunning to check thread status only.
+                // Or safely assign to field.
+                lock (this)
+                {
+                    _capture = localCapture;
+                }
+
+                if (!localCapture.IsOpened())
                 {
                      System.Diagnostics.Debug.WriteLine($"Failed to open camera index {deviceIndex}");
                      return;
                 }
-                
-                // Optional: set resolution?
-                // _capture.Set(VideoCaptureProperties.FrameWidth, 1280);
-                // _capture.Set(VideoCaptureProperties.FrameHeight, 720);
 
                 using var mat = new Mat();
                 
-                while (!token.IsCancellationRequested && _capture.IsOpened())
+                while (!token.IsCancellationRequested && localCapture.IsOpened())
                 {
-                    if (_capture.Read(mat) && !mat.Empty())
+                    if (localCapture.Read(mat) && !mat.Empty())
                     {
-                        // Convert to Bitmap
-                        // BitmapConverter.ToBitmap clone the data? No, it creates new Bitmap.
-                        // We must ensure we dispose it after use or the subscriber handles it.
-                        // To allow `using` in subscriber, we pass a new instance.
+                        if (token.IsCancellationRequested) break;
                         
                         var bmp = BitmapConverter.ToBitmap(mat);
                         FrameReceived?.Invoke(bmp);
@@ -96,9 +96,13 @@ namespace laser_gui_test.Data
             }
             finally
             {
-                _capture?.Release();
-                _capture?.Dispose();
-                _capture = null;
+                lock (this)
+                {
+                    if (_capture == localCapture) _capture = null;
+                }
+                
+                localCapture?.Release();
+                localCapture?.Dispose();
             }
         }
 
@@ -107,9 +111,11 @@ namespace laser_gui_test.Data
             if (_cts != null)
             {
                 _cts.Cancel();
-                // Wait for task to complete? 
-                // Better not block UI. The loop handles resource cleanup.
-                _cts = null;
+                _cts = null; // Detach
+                CameraStopped?.Invoke();
+                
+                // Note: We don't join the thread (Wait) to avoid UI Blocking.
+                // The thread cleans up itself.
             }
         }
 

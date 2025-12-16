@@ -225,6 +225,12 @@ public partial class MainForm : Form
             var frm = new CameraSettingsForm();
             frm.Show(this); // Modeless
         });
+        
+        toolMenu.DropDownItems.Add("Stop Camera", null, (s, e) => 
+        {
+            CameraManager.Instance.StopCamera();
+        });
+        
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         
         toolMenu.DropDownItems.Add("Group", null, (s, e) => 

@@ -212,9 +212,18 @@ public class WorkbenchControl : Control
                  new PointF(x, y - h)      // DL -> World Bottom-Left
              };
              
-             g.DrawImage(OverlayImage, destPoints, 
-                 new RectangleF(0, 0, OverlayImage.Width, OverlayImage.Height),
-                 GraphicsUnit.Pixel, ia);
+             try
+             {
+                 if (OverlayImage == null) return;
+                 
+                 g.DrawImage(OverlayImage, destPoints, 
+                     new RectangleF(0, 0, OverlayImage.Width, OverlayImage.Height),
+                     GraphicsUnit.Pixel, ia);
+             }
+             catch
+             {
+                 // Image might be disposed during paint
+             }
         }
     }
 

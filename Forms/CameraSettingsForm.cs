@@ -16,7 +16,7 @@ namespace laser_gui_test.Forms
         private void InitializeComponent()
         {
             this.Text = "Camera Settings";
-            this.Size = new System.Drawing.Size(350, 500);
+            this.Size = new System.Drawing.Size(460, 700);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.TopMost = true; // Keep on top of workbench
 
