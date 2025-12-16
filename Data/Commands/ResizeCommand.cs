@@ -11,6 +11,7 @@ public class ResizeCommand : ICommand
         public PointF Position;
         public SizeF Size;
         public List<PointF>? Points; // For paths
+        public float FontSize; // For text
     }
 
     private readonly Dictionary<LaserObject, ObjectState> _oldStates = new();
@@ -18,8 +19,8 @@ public class ResizeCommand : ICommand
     
     public string Description => "Resize objects";
 
-    public ResizeCommand(Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)> oldStates,
-                         Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)> newStates)
+    public ResizeCommand(Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize)> oldStates,
+                         Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize)> newStates)
     {
         foreach(var kvp in oldStates)
         {
@@ -27,7 +28,8 @@ public class ResizeCommand : ICommand
             { 
                 Position = kvp.Value.Pos, 
                 Size = kvp.Value.Size,
-                Points = kvp.Value.Points != null ? new List<PointF>(kvp.Value.Points) : null
+                Points = kvp.Value.Points != null ? new List<PointF>(kvp.Value.Points) : null,
+                FontSize = kvp.Value.FontSize
             };
         }
         
@@ -37,7 +39,8 @@ public class ResizeCommand : ICommand
             { 
                 Position = kvp.Value.Pos, 
                 Size = kvp.Value.Size,
-                Points = kvp.Value.Points != null ? new List<PointF>(kvp.Value.Points) : null
+                Points = kvp.Value.Points != null ? new List<PointF>(kvp.Value.Points) : null,
+                FontSize = kvp.Value.FontSize
             };
         }
     }
@@ -65,6 +68,15 @@ public class ResizeCommand : ICommand
             if (obj is LaserPath path && state.Points != null)
             {
                 path.Points = new List<PointF>(state.Points);
+            } else if (obj is LaserBezier bez && state.Points != null)
+            {
+                 bez.Points = new List<PointF>(state.Points);
+                 bez.UpdateBounds();
+            }
+            
+            if (obj is LaserText txt && state.FontSize > 0)
+            {
+                txt.FontSize = state.FontSize;
             }
         }
     }

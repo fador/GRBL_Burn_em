@@ -508,11 +508,9 @@ public class LaserText : LaserObject
             g.DrawString(Text, font, brush, 0, 0); // Local 0,0 is now Top-Left of text
             
             // Measure while font is alive
-            // Note: MeasureString might be affected by transform?
-            // If scale is 1, -1. Width is 1 * w. Height is -1 * h?
-            // Usually returns positive SizeF.
-            var size = g.MeasureString(Text, font);
-            this.Size = size;
+            // We could optionally verify Bounds but changing Size here breaks manual resize.
+            // var size = g.MeasureString(Text, font);
+            // this.Size = size;
         }
 
         g.Restore(state);

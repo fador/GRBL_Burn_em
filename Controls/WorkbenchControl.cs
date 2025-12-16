@@ -873,12 +873,17 @@ public class WorkbenchControl : Control
             _dragHandleIndex = -1;
             _initialGroupBounds = null;
             
-            var newStates = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)>();
+            var newStates = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize)>();
             foreach (var obj in ProjectState.Instance.SelectedObjects)
             {
                 List<PointF>? pts = null;
+                float fSize = 0;
                 if (obj is LaserPath p) pts = new List<PointF>(p.Points);
-                newStates[obj] = (obj.Position, obj.Size, pts);
+                else if (obj is LaserBezier b) pts = new List<PointF>(b.Points);
+                
+                if (obj is LaserText t) fSize = t.FontSize;
+                
+                newStates[obj] = (obj.Position, obj.Size, pts, fSize);
             }
             
             var cmd = new ResizeCommand(_initialStates, newStates);
@@ -1027,7 +1032,7 @@ public class WorkbenchControl : Control
     
     private bool _isResizing = false;
     private RectangleF? _initialGroupBounds;
-    private Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)> _initialStates = new();
+    private Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize)> _initialStates = new();
 
     private void SnapshotSelection()
     {
@@ -1035,9 +1040,13 @@ public class WorkbenchControl : Control
         foreach (var obj in ProjectState.Instance.SelectedObjects)
         {
             List<PointF>? pts = null;
+            float fSize = 0;
             if (obj is LaserPath p) pts = new List<PointF>(p.Points);
             else if (obj is LaserBezier b) pts = new List<PointF>(b.Points);
-            _initialStates[obj] = (obj.Position, obj.Size, pts);
+            
+            if (obj is LaserText t) fSize = t.FontSize;
+            
+            _initialStates[obj] = (obj.Position, obj.Size, pts, fSize);
         }
     }
 
@@ -1226,6 +1235,14 @@ public class WorkbenchControl : Control
                     bez.Points[i] = new PointF(newL + px * scaleX, newT + py * scaleY);
                 }
                 bez.UpdateBounds();
+            }
+            else if (obj is LaserText txt)
+            {
+                 // Update Font Size based on scaleY (Height controls font size)
+                 // Ensure we don't flip font size if scaleY is negative (flipped)
+                 float newFs = init.FontSize * Math.Abs(scaleY);
+                 if (newFs < 1f) newFs = 1f;
+                 txt.FontSize = newFs;
             }
         }
         Invalidate();
