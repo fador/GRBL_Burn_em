@@ -41,6 +41,24 @@ public class WorkbenchControl : Control
         }
     }
 
+    // Background Image Support
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Bitmap? OverlayImage { get; set; }
+    
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public PointF OverlayImagePosition { get; set; } = new PointF(0, 0); // World Coords (Top-Left?)
+    
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public SizeF OverlayImageSize { get; set; } = new SizeF(100, 100); // World Size
+    
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public float OverlayImageOpacity { get; set; } = 0.5f;
+
+
     private PointF Snap(PointF p)
     {
         if (!IsSnappingEnabled) return p;
@@ -82,6 +100,7 @@ public class WorkbenchControl : Control
         g.TranslateTransform(Width / 2f + _panOffset.X, Height / 2f + _panOffset.Y);
         g.ScaleTransform(_zoom, -_zoom); // Y-Up coordinate system
 
+        DrawBackgroundImage(g);
         DrawGrid(g);
         DrawWorkArea(g); // Draw Work Area before Origin
         DrawOrigin(g);
@@ -133,10 +152,140 @@ public class WorkbenchControl : Control
         
         using var pen = new Pen(Color.Black, 3.0f / _zoom);
         g.DrawRectangle(pen, x, y, w, h);
+    }
+
+    private void DrawBackgroundImage(Graphics g)
+    {
+        var config = AppConfiguration.Instance;
         
-        // Label?
-        // using var font = new Font("Arial", 10f / _zoom);
-        // g.DrawString($"Area {w}x{h}", font, Brushes.Gray, x + 5/ _zoom, y + 5/_zoom);
+        // 1. Draw Composite/Scanned Images (Head Mounted Backlog)
+        if (config.CameraIsMounted)
+        {
+             var frames = CameraManager.Instance.CapturedFrames;
+             // Lock and Iterate
+             // Using a Copy or Lock to avoid collection was modified?
+             // CameraManager should manage the list thread-safe.
+             var list = frames.ToList(); // Shallow copy of list
+             
+             if (list.Count > 0)
+             {
+                 float opacity = config.CameraOverlayOpacity;
+                 if (opacity <= 0) return;
+                 
+                 System.Drawing.Imaging.ColorMatrix cm = new System.Drawing.Imaging.ColorMatrix();
+                 cm.Matrix33 = opacity;
+                 using var ia = new System.Drawing.Imaging.ImageAttributes();
+                 ia.SetColorMatrix(cm);
+
+                 foreach(var frame in list)
+                 {
+                     try 
+                     {
+                         // Frame.WorldX/Y is Center of Camera
+                         // Frame.Width/Height is FOV size
+                         // Top-Left:
+                         float x = frame.WorldX - frame.Width / 2;
+                         float y = frame.WorldY + frame.Height / 2; // Y-Up: Top is Y+H/2
+                         
+                         // DrawImage expects Top-Left?
+                         // In our transform (Scale Y negative), we draw from Top-Left down.
+                         // It handles coordinates:
+                         // Dest Rect: x, y, w, h.
+                         // But if we simply use DrawImage(img, rx, ry, rw, rh):
+                         // It draws from rx,ry towards +X, +Y.
+                         // If Y is Up in World, +Y is "Up".
+                         // In Windows GDI, +Y is Down.
+                         // We have `g.ScaleTransform(zoom, -zoom)`.
+                         // So World +Y draws Screen -Y (Up).
+                         // So if we start at (x,y), and draw height H...
+                         // Let's rely on the 3-point draw to be safe, same as Overlay.
+                         
+                         PointF[] destPoints = {
+                             new PointF(x, y),                 // UL (World Top-Left)
+                             new PointF(x + frame.Width, y),   // UR
+                             new PointF(x, y - frame.Height)   // DL (World Bottom-Left)
+                         };
+                         
+                         g.DrawImage(frame.Image, destPoints, 
+                             new RectangleF(0, 0, frame.Image.Width, frame.Image.Height),
+                             GraphicsUnit.Pixel, ia);
+                     }
+                     catch {}
+                 }
+             }
+        }
+
+        // 2. Draw Live Overlay (Stationary or Single Frame Mounted)
+        if (OverlayImage != null && (!config.CameraIsMounted || config.ShowCameraOverlay)) // Show Live even if mounted? Yes, usually.
+        {
+             // ... existing logic ...
+             
+             // Create ColorMatrix
+             float opacity = OverlayImageOpacity;
+             if (opacity < 0) opacity = 0;
+             if (opacity > 1) opacity = 1;
+             
+             System.Drawing.Imaging.ColorMatrix cm = new System.Drawing.Imaging.ColorMatrix();
+             cm.Matrix33 = opacity;
+             
+             using var ia = new System.Drawing.Imaging.ImageAttributes();
+             ia.SetColorMatrix(cm);
+             
+             // Get Config
+             // Get Config
+             // Valid config already exists in scope from line 159
+             // var config = AppConfiguration.Instance;
+             
+             // Dest Rect
+             float x = config.CameraOverlayX;
+             float y = config.CameraOverlayY;
+             float w = config.CameraOverlayWidth;
+             float h = config.CameraOverlayHeight;
+             
+             // Note: In our current View Transform (Scale Y = -Zoom), +Y is Down on screen (if global Y is Up).
+             // Wait, OnPaint: g.ScaleTransform(_zoom, -_zoom);
+             // If World Y is Up. (0,0) is origin. (0, 100) is Up.
+             // Screen Y is Down. (0,0) is Top-Left.
+             // (0, 100) World -> (0, -100) Screen. (Above top edge).
+             
+             // Image Drawing:
+             // If we draw image at (x,y) with height h.
+             // We want Top of Image to be at Y+H? Or Y?
+             // Usually "Position" means Top-Left of the entity.
+             // In Y-Up world, Top-Left is (x, y_max).
+             // If User sets Y=0 (Bottom), and H=100. Top is 100.
+             // So if OverlayY is "Bottom Edge", then we draw from Y+H down to Y.
+             // If OverlayY is "Top Edge", we draw from Y down to Y-H.
+             
+             // Let's assume standard UI convention: X,Y is Top-Left.
+             // So Top Edge = Y. Bottom Edge = Y - H.
+             // Right Edge = X + W.
+             
+             // However, CameraControl NUDs allow negative values.
+             
+             // Let's try to map the Image (0,0) [Top-Left] to World (x,y).
+             // And Image (0,h) [Bottom-Left] to World (x, y-h).
+             // This assumes Y is Top-Left coordinate.
+             
+             PointF[] destPoints = {
+                 new PointF(x, y),         // UL (Upper Left of source maps here) -> World Top-Left
+                 new PointF(x + w, y),     // UR -> World Top-Right
+                 new PointF(x, y - h)      // DL -> World Bottom-Left
+             };
+             
+             try
+             {
+                 if (OverlayImage == null) return;
+                 
+                 g.DrawImage(OverlayImage, destPoints, 
+                     new RectangleF(0, 0, OverlayImage.Width, OverlayImage.Height),
+                     GraphicsUnit.Pixel, ia);
+             }
+             catch
+             {
+                 // Image might be disposed during paint
+             }
+        }
     }
 
     private void DrawGrid(Graphics g)
@@ -204,16 +353,33 @@ public class WorkbenchControl : Control
         }
         
         // Draw Resize Handles
-        if (ToolManager.Instance.CurrentTool == ToolType.Select && ProjectState.Instance.SelectedObjects.Count > 0)
+        if (ToolManager.Instance.CurrentTool == ToolType.Select && ProjectState.Instance.SelectedObjects.Count == 1)
         {
-            var bounds = GetSelectionBounds();
-            if (bounds != null)
-            {
-                using var boundaryPen = new Pen(Color.Cyan, 1.0f / _zoom);
-                boundaryPen.DashStyle = DashStyle.Solid;
-                g.DrawRectangle(boundaryPen, bounds.Value.X, bounds.Value.Y, bounds.Value.Width, bounds.Value.Height);
-                DrawResizeHandles(g, bounds.Value);
-            }
+             var obj = ProjectState.Instance.SelectedObjects[0];
+             if (obj is LaserBezier bezier)
+             {
+                 DrawNodeHandles(g, bezier);
+             }
+
+             var bounds = GetSelectionBounds();
+             if (bounds != null)
+             {
+                 using var boundaryPen = new Pen(Color.Cyan, 1.0f / _zoom);
+                 boundaryPen.DashStyle = DashStyle.Solid;
+                 g.DrawRectangle(boundaryPen, bounds.Value.X, bounds.Value.Y, bounds.Value.Width, bounds.Value.Height);
+                 DrawResizeHandles(g, bounds.Value);
+             }
+        }
+        else if (ProjectState.Instance.SelectedObjects.Count > 0)
+        {
+             var bounds = GetSelectionBounds();
+             if (bounds != null)
+             {
+                 using var boundaryPen = new Pen(Color.Cyan, 1.0f / _zoom);
+                 boundaryPen.DashStyle = DashStyle.Solid;
+                 g.DrawRectangle(boundaryPen, bounds.Value.X, bounds.Value.Y, bounds.Value.Width, bounds.Value.Height);
+                 DrawResizeHandles(g, bounds.Value);
+             }
         }
     }
 
@@ -302,6 +468,12 @@ public class WorkbenchControl : Control
         // 2. Panning (Right Click)
         if (e.Button == MouseButtons.Right)
         {
+            if (ToolManager.Instance.CurrentTool == ToolType.DrawBezier && _currentBezier != null)
+            {
+                FinalizeBezier();
+                return;
+            }
+            
             _isPanning = true;
             _lastMousePos = e.Location;
             Cursor = Cursors.SizeAll;
@@ -321,7 +493,15 @@ public class WorkbenchControl : Control
          _interactionObject = line;
          _isDragging = true;
          _dragStartPos = snappedPos;
-         _moveStartPos = snappedPos; // Track end of line
+         return;
+    }
+    else if (ToolType.DrawCircle == ToolManager.Instance.CurrentTool)
+    {
+         var circle = new LaserCircle { Name = "Circle", Position = snappedPos, Size = new SizeF(0, 0) };
+         ProjectState.Instance.AddObject(circle);
+         _interactionObject = circle;
+         _isDragging = true;
+         _dragStartPos = snappedPos;
          return;
     }
     else if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
@@ -333,48 +513,70 @@ public class WorkbenchControl : Control
          _dragStartPos = snappedPos;
          return;
     }
+    else if (ToolManager.Instance.CurrentTool == ToolType.DrawBezier)
+    {
+         if (_currentBezier == null)
+         {
+              _currentBezier = new LaserBezier { Name = "Bezier" };
+              _currentBezier.Points.Add(snappedPos);
+              ProjectState.Instance.AddObject(_currentBezier);
+         }
+         else
+         {
+              // Add new segment (C1, C2, End)
+              
+              // Snap to Start if close (Closing the loop)
+              if (_currentBezier.Points.Count > 0)
+              {
+                  var start = _currentBezier.Points[0];
+                  float distSq = (snappedPos.X - start.X) * (snappedPos.X - start.X) + (snappedPos.Y - start.Y) * (snappedPos.Y - start.Y);
+                  float snapThresh = 15.0f / _zoom; 
+                  if (distSq < snapThresh * snapThresh)
+                  {
+                      snappedPos = start;
+                  }
+              }
+
+              var last = _currentBezier.Points.Last();
+              float dx = snappedPos.X - last.X;
+              float dy = snappedPos.Y - last.Y;
+              // Auto-calculated smooth control points
+              _currentBezier.Points.Add(new PointF(last.X + dx * 0.33f, last.Y + dy * 0.33f)); // C1
+              _currentBezier.Points.Add(new PointF(last.X + dx * 0.66f, last.Y + dy * 0.66f)); // C2
+              _currentBezier.Points.Add(snappedPos); // End
+              
+              _currentBezier.UpdateBounds();
+              Invalidate();
+         }
+         return;
+    }
     else if (ToolManager.Instance.CurrentTool == ToolType.Text)
     {
-        // Prompt for text
+        // Use TextEditorForm
         string val = "Text";
-        // Simple Input Dialog using Form
-        using (var form = new Form())
-        using (var txt = new TextBox())
-        using (var btn = new Button())
+        string fontName = "Arial";
+        float fontSize = 20f;
+
+        using (var form = new TextEditorForm(val, fontName, fontSize))
         {
-            form.Text = "Enter Text";
-            form.Size = new Size(300, 150);
-            form.StartPosition = FormStartPosition.CenterParent;
-            form.FormBorderStyle = FormBorderStyle.FixedDialog;
-            form.MaximizeBox = false;
-            form.MinimizeBox = false;
-            
-            txt.Text = "Text";
-            txt.Location = new Point(10, 10);
-            txt.Width = 260;
-            
-            btn.Text = "OK";
-            btn.DialogResult = DialogResult.OK;
-            btn.Location = new Point(190, 50);
-            
-            form.Controls.Add(txt);
-            form.Controls.Add(btn);
-            form.AcceptButton = btn;
-            
-            if (form.ShowDialog() == DialogResult.OK)
-            {
-                val = txt.Text;
-            }
-            else
-            {
-                return; // Cancelled
-            }
+             if (form.ShowDialog() == DialogResult.OK)
+             {
+                 val = form.TextValue;
+                 fontName = form.FontName;
+                 fontSize = form.FontSize;
+             }
+             else
+             {
+                 return; // Cancelled
+             }
         }
 
         if (string.IsNullOrWhiteSpace(val)) return;
 
         var t = new LaserText();
         t.Text = val;
+        t.FontName = fontName;
+        t.FontSize = fontSize;
         t.Position = snappedPos;
         // Size will be calculated on Draw or we set a default?
         // Let's force a measure? Or let Draw handle it.
@@ -405,6 +607,27 @@ public class WorkbenchControl : Control
              _measureStart = worldPos;
              _measureEnd = worldPos;
              Invalidate();
+             return;
+        }
+
+        // 3b. Click To Move
+        if (ToolManager.Instance.CurrentTool == ToolType.ClickToMove)
+        {
+             // Send Jog Command
+             // G0 or $J? 
+             // Use $J for jogging logic if supported, or direct G0 if state allows.
+             // Usually Click-To-Move implies "Jog Here".
+             // $J=G90 X... Y... F...
+             
+             // Check if machine is Idle or Jogging
+             if (SerialInterface.Instance.IsConnected)
+             {
+                 // We need Feed Rate. Let's use a default or fetch from UI?
+                 // For now hardcode or use safe default.
+                 int feed = 1000; // mm/min
+                 string cmd = $"$J=G90 X{snappedPos.X:F3} Y{snappedPos.Y:F3} F{feed}";
+                 SerialInterface.Instance.Write(cmd + "\n");
+             }
              return;
         }
 
@@ -463,7 +686,7 @@ public class WorkbenchControl : Control
                 }
                 else
                 {
-                    // Normal Click
+                // Normal Click
                     if (isSelected)
                     {
                         // Clicked on already selected object -> Prepare for move (Group move)
@@ -483,6 +706,20 @@ public class WorkbenchControl : Control
                     }
                 }
             }
+            else if (ToolManager.Instance.CurrentTool == ToolType.Rotate)
+            {
+                 if (ProjectState.Instance.SelectedObjects.Count > 0)
+                 {
+                     var b = GetSelectionBounds();
+                     if (b != null)
+                     {
+                         _rotateCenter = new PointF(b.Value.Left + b.Value.Width/2, b.Value.Top + b.Value.Height/2);
+                         _rotateStartAngle = (float)(Math.Atan2(worldPos.Y - _rotateCenter.Y, worldPos.X - _rotateCenter.X) * 180.0 / Math.PI);
+                         SnapshotSelection();
+                         _isRotating = true;
+                     }
+                 }
+            }
             else
             {
                 // C. Clicked Empty Space -> Start Selection Box
@@ -495,6 +732,24 @@ public class WorkbenchControl : Control
     }
 
     private LaserObject? _interactionObject;
+    private LaserBezier? _currentBezier; // For multi-step creation
+
+    private void FinalizeBezier()
+    {
+        if (_currentBezier != null)
+        {
+            if (_currentBezier.Points.Count < 4) // Minimum 1 segment
+            {
+                ProjectState.Instance.RemoveObject(_currentBezier);
+            }
+            else
+            {
+                 // Done
+            }
+            _currentBezier = null;
+            Invalidate();
+        }
+    }
     private bool _isDragging = false; // For creation
     private bool _isMoving = false; // For moving existing objects
     private PointF _dragStartPos; // Used as "Last Mouse Pos" for moving
@@ -544,6 +799,65 @@ public class WorkbenchControl : Control
             return;
         }
 
+        if (_isRotating)
+        {
+            float currentAngle = (float)(Math.Atan2(worldPos.Y - _rotateCenter.Y, worldPos.X - _rotateCenter.X) * 180.0 / Math.PI);
+            float deltaAngle = currentAngle - _rotateStartAngle;
+            
+            foreach(var kvp in _initialStates)
+            {
+                var obj = kvp.Key;
+                var init = kvp.Value;
+                
+                // 1. Rotate Orientation
+                obj.Rotation = init.Rotation + deltaAngle;
+                
+                // 2. Orbit Position
+                float rx = init.Pos.X - _rotateCenter.X;
+                float ry = init.Pos.Y - _rotateCenter.Y;
+                
+                float rad = deltaAngle * (float)Math.PI / 180f;
+                float c = (float)Math.Cos(rad);
+                float s = (float)Math.Sin(rad);
+                
+                float nx = rx * c - ry * s;
+                float ny = rx * s + ry * c;
+                
+                obj.Position = new PointF(_rotateCenter.X + nx, _rotateCenter.Y + ny);
+                
+                if (obj is LaserPath p && init.Points != null)
+                {
+                    for(int i=0; i<p.Points.Count; i++)
+                    {
+                         float px = init.Points[i].X - _rotateCenter.X;
+                         float py = init.Points[i].Y - _rotateCenter.Y;
+                         p.Points[i] = new PointF(_rotateCenter.X + px * c - py * s, _rotateCenter.Y + px * s + py * c);
+                    }
+                }
+                else if (obj is LaserBezier b && init.Points != null)
+                {
+                    for(int i=0; i<b.Points.Count; i++)
+                    {
+                         float px = init.Points[i].X - _rotateCenter.X;
+                         float py = init.Points[i].Y - _rotateCenter.Y;
+                         b.Points[i] = new PointF(_rotateCenter.X + px * c - py * s, _rotateCenter.Y + px * s + py * c);
+                    }
+                    b.UpdateBounds();
+                }
+            }
+            Invalidate();
+            
+            // Fire Mouse Position Event (Throttled)
+            long nowMove = DateTime.Now.Ticks;
+            if (nowMove - _lastUpdateTicks > 500000) // 50ms
+            {
+                 // Update property grid live? Maybe too heavy logic 
+                 // MainForm.Instance.UpdateSelectedObjects(false);
+                 _lastUpdateTicks = nowMove;
+            }
+            return;
+        }
+
         // 3. Moving Objects
         if (_isMoving && _interactionObject != null)
         {
@@ -590,12 +904,22 @@ public class WorkbenchControl : Control
             // Let's assume DragStartPos IS snapped if we handled it in MouseDown? 
             // Or we just map it here.
             
-            if (ToolManager.Instance.CurrentTool == ToolType.DrawBox)
+            if (ToolManager.Instance.CurrentTool == ToolType.DrawBox || ToolManager.Instance.CurrentTool == ToolType.DrawCircle)
             {
-                float x = Math.Min(start.X, effectivePos.X);
-                float y = Math.Min(start.Y, effectivePos.Y);
                 float w = Math.Abs(effectivePos.X - start.X);
                 float h = Math.Abs(effectivePos.Y - start.Y);
+
+                if (Control.ModifierKeys == Keys.Control)
+                {
+                    float max = Math.Max(w, h);
+                    w = max;
+                    h = max;
+                }
+
+                // Determine Top-Left based on drag direction
+                float x = (effectivePos.X < start.X) ? start.X - w : start.X;
+                float y = (effectivePos.Y < start.Y) ? start.Y - h : start.Y;
+
                 _interactionObject.Position = new PointF(x, y);
                 _interactionObject.Size = new SizeF(w, h);
             }
@@ -606,6 +930,11 @@ public class WorkbenchControl : Control
                     path.Points[0] = start; // Ensure start point is snapped too if we want
                     path.Points[1] = effectivePos;
                 }
+            }
+            else if (ToolManager.Instance.CurrentTool == ToolType.DrawBezier)
+            {
+                 // No drag for new click-style bezier yet
+                 // Or we could preview the line to the mouse?
             }
             Invalidate();
             return;
@@ -673,6 +1002,33 @@ public class WorkbenchControl : Control
             // Actually, preventing text creation on drag end.
             // For now, text creation is on MouseDown, so this might be redundant unless we want drag-to-size.
             // Let's assume click-only for now.
+        }
+
+        if (_isRotating)
+        {
+            _isRotating = false;
+            
+             var newStates = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize, float Rotation)>();
+             foreach(var obj in ProjectState.Instance.SelectedObjects)
+             {
+                List<PointF>? pts = null;
+                float fSize = 0;
+                if (obj is LaserPath p) pts = new List<PointF>(p.Points);
+                else if (obj is LaserBezier b) pts = new List<PointF>(b.Points);
+                
+                if (obj is LaserText t) fSize = t.FontSize;
+                
+                newStates[obj] = (obj.Position, obj.Size, pts, fSize, obj.Rotation);
+             }
+             
+             // Reuse ResizeCommand (renamed conceptually to TransformCommand) 
+             // as it handles all state we care about.
+             CommandManager.Instance.Execute(new ResizeCommand(_initialStates, newStates));
+             
+             MainForm.Instance.UpdateSelectedObjects();
+             _initialStates.Clear();
+             ResetInteractionState();
+             return;
         }
 
         if (_isSelecting)
@@ -775,7 +1131,6 @@ public class WorkbenchControl : Control
                     _interactionObject != null)
                 {
                     ProjectState.Instance.SelectedObjects = new List<LaserObject> { _interactionObject };
-                    ProjectState.Instance.Objects.ResetBindings();
                     Invalidate();
                 }
             }
@@ -788,12 +1143,17 @@ public class WorkbenchControl : Control
             _dragHandleIndex = -1;
             _initialGroupBounds = null;
             
-            var newStates = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)>();
+            var newStates = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize, float Rotation)>();
             foreach (var obj in ProjectState.Instance.SelectedObjects)
             {
                 List<PointF>? pts = null;
+                float fSize = 0;
                 if (obj is LaserPath p) pts = new List<PointF>(p.Points);
-                newStates[obj] = (obj.Position, obj.Size, pts);
+                else if (obj is LaserBezier b) pts = new List<PointF>(b.Points);
+                
+                if (obj is LaserText t) fSize = t.FontSize;
+                
+                newStates[obj] = (obj.Position, obj.Size, pts, fSize, obj.Rotation);
             }
             
             var cmd = new ResizeCommand(_initialStates, newStates);
@@ -805,6 +1165,40 @@ public class WorkbenchControl : Control
         
         // Final safety reset
         ResetInteractionState();
+    }
+
+    protected override void OnMouseDoubleClick(MouseEventArgs e)
+    {
+        base.OnMouseDoubleClick(e);
+
+        if (ToolManager.Instance.CurrentTool != ToolType.Select) return;
+
+        PointF worldPos = ScreenToWorld(e.Location);
+        float hitTolerance = 8.0f / _zoom;
+
+        var hitObj = ProjectState.Instance.Objects.Reverse().FirstOrDefault(o => o.HitTest(worldPos, hitTolerance));
+
+        if (hitObj is LaserText textObj)
+        {
+            using (var form = new TextEditorForm(textObj.Text, textObj.FontName, textObj.FontSize))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    textObj.Text = form.TextValue;
+                    textObj.FontName = form.FontName;
+                    textObj.FontSize = form.FontSize;
+
+                    using (var tmpBmp = new Bitmap(1, 1))
+                    using (var g = Graphics.FromImage(tmpBmp))
+                    using (var f = new Font(textObj.FontName, textObj.FontSize))
+                    {
+                         textObj.Size = g.MeasureString(textObj.Text, f);
+                    }
+
+                    Invalidate();
+                }
+            }
+        }
     }
 
     private void ResetInteractionState()
@@ -873,12 +1267,46 @@ public class WorkbenchControl : Control
             new(b.Left, b.Top + b.Height/2) // L
         };
     }
+
+    private void DrawNodeHandles(Graphics g, LaserBezier b)
+    {
+        float size = 6.0f / _zoom;
+        using var brushAnchor = new SolidBrush(Color.Blue);
+        using var brushControl = new SolidBrush(Color.LightBlue);
+        using var penLine = new Pen(Color.Gray, 1.0f / _zoom);
+        
+        for (int i = 0; i < b.Points.Count; i++)
+        {
+            var p = b.Points[i];
+            bool isAnchor = (i % 3 == 0);
+            
+            // Draw connection lines
+            if (!isAnchor)
+            {
+                // Connect to anchor
+                // if i%3 == 1, anchor is i-1
+                // if i%3 == 2, anchor is i+1
+                int anchorIdx = (i % 3 == 1) ? i - 1 : i + 1;
+                if (anchorIdx >= 0 && anchorIdx < b.Points.Count)
+                {
+                    g.DrawLine(penLine, p, b.Points[anchorIdx]);
+                }
+            }
+
+            var brush = isAnchor ? brushAnchor : brushControl;
+            g.FillEllipse(brush, p.X - size/2, p.Y - size/2, size, size);
+        }
+    }
     
     private int _dragHandleIndex = -1; // -1 none, 0-7 handles
     
     private bool _isResizing = false;
+    private bool _isRotating = false;
+    private PointF _rotateCenter;
+    private float _rotateStartAngle;
+
     private RectangleF? _initialGroupBounds;
-    private Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points)> _initialStates = new();
+    private Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize, float Rotation)> _initialStates = new();
 
     private void SnapshotSelection()
     {
@@ -886,13 +1314,47 @@ public class WorkbenchControl : Control
         foreach (var obj in ProjectState.Instance.SelectedObjects)
         {
             List<PointF>? pts = null;
+            float fSize = 0;
             if (obj is LaserPath p) pts = new List<PointF>(p.Points);
-            _initialStates[obj] = (obj.Position, obj.Size, pts);
+            else if (obj is LaserBezier b) pts = new List<PointF>(b.Points);
+            
+            if (obj is LaserText t) fSize = t.FontSize;
+            
+            _initialStates[obj] = (obj.Position, obj.Size, pts, fSize, obj.Rotation);
         }
     }
 
     private void UpdateResize(PointF currentPos)
     {
+        // 1. Node Editing
+        if (_dragHandleIndex >= 100)
+        {
+             if (ProjectState.Instance.SelectedObjects.Count == 1 && ProjectState.Instance.SelectedObjects[0] is LaserBezier bezier)
+             {
+                 int idx = _dragHandleIndex - 100;
+                 if (idx >= 0 && idx < bezier.Points.Count)
+                 {
+                     // Snap Ends together
+                     if (idx == 0 || idx == bezier.Points.Count - 1)
+                     {
+                         int otherIdx = (idx == 0) ? bezier.Points.Count - 1 : 0;
+                         var other = bezier.Points[otherIdx];
+                         float distSq = (currentPos.X - other.X) * (currentPos.X - other.X) + (currentPos.Y - other.Y) * (currentPos.Y - other.Y);
+                         float snapThresh = 15.0f / _zoom;
+                         if (distSq < snapThresh * snapThresh)
+                         {
+                             currentPos = other;
+                         }
+                     }
+                     
+                     bezier.Points[idx] = currentPos;
+                     bezier.UpdateBounds();
+                     Invalidate();
+                 }
+             }
+             return;
+        }
+
         if (_initialGroupBounds == null) return;
         var b = _initialGroupBounds.Value;
         float l = b.Left, t = b.Top, r = b.Right, bm = b.Bottom;
@@ -960,7 +1422,6 @@ public class WorkbenchControl : Control
             float finalH = b.Height * scaleY;
             
             // Re-apply to L/T/R/B based on Anchor
-            // Handle 0 (TL): Right/Bottom fixed.
             if (_dragHandleIndex == 0) { newL = b.Right - finalW; newT = b.Bottom - finalH; }
             
             // Handle 1 (T): Bottom fixed. Center X.
@@ -1038,6 +1499,25 @@ public class WorkbenchControl : Control
                     p.Points[i] = new PointF(newL + px * scaleX, newT + py * scaleY);
                 }
             }
+            else if (obj is LaserBezier bez && init.Points != null)
+            {
+                // Resize all points
+                for(int i=0; i<bez.Points.Count && i<init.Points.Count; i++)
+                {
+                    float px = init.Points[i].X - b.Left;
+                    float py = init.Points[i].Y - b.Top;
+                    bez.Points[i] = new PointF(newL + px * scaleX, newT + py * scaleY);
+                }
+                bez.UpdateBounds();
+            }
+            else if (obj is LaserText txt)
+            {
+                 // Update Font Size based on scaleY (Height controls font size)
+                 // Ensure we don't flip font size if scaleY is negative (flipped)
+                 float newFs = init.FontSize * Math.Abs(scaleY);
+                 if (newFs < 1f) newFs = 1f;
+                 txt.FontSize = newFs;
+            }
         }
         Invalidate();
         
@@ -1060,6 +1540,18 @@ public class WorkbenchControl : Control
              }
              path.Position = new PointF(path.Position.X + dx, path.Position.Y + dy);
          }
+         else if (obj is LaserBezier bezier)
+         {
+             for(int i=0; i<bezier.Points.Count; i++)
+             {
+                 bezier.Points[i] = new PointF(bezier.Points[i].X + dx, bezier.Points[i].Y + dy);
+             }
+             // Ensure Position is also updated (usually Move logic expects Obj Position to be updated)
+             // But LaserBezier.Position is derived. 
+             // Wait, LaserObject.Position is a property.
+             // If we move points, Position (Bounds) should change.
+             bezier.Position = new PointF(bezier.Position.X + dx, bezier.Position.Y + dy);
+         }
          else if (obj is LaserGroup group)
          {
              foreach(var child in group.Children)
@@ -1075,15 +1567,30 @@ public class WorkbenchControl : Control
 
     private int HitTestHandles(PointF pos)
     {
+         // 1. Node Handles (Index >= 100)
+         if (ProjectState.Instance.SelectedObjects.Count == 1 && ProjectState.Instance.SelectedObjects[0] is LaserBezier bezier)
+         {
+             float size = 8.0f / _zoom;
+             for(int i=0; i<bezier.Points.Count; i++)
+             {
+                 var p = bezier.Points[i];
+                 if (new RectangleF(p.X - size/2, p.Y - size/2, size, size).Contains(pos))
+                 {
+                     return 100 + i;
+                 }
+             }
+         }
+
+         // 2. Resize Handles
          var bounds = GetSelectionBounds();
          if (bounds == null) return -1;
          
          var handles = GetHandlePositions(bounds.Value);
-         float size = 8.0f / _zoom;
+         float handleSize = 8.0f / _zoom;
          
          for(int i=0; i<handles.Length; i++)
          {
-             var r = new RectangleF(handles[i].X - size/2, handles[i].Y - size/2, size, size);
+             var r = new RectangleF(handles[i].X - handleSize/2, handles[i].Y - handleSize/2, handleSize, handleSize);
              if (r.Contains(pos)) return i;
          }
          return -1;

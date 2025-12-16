@@ -1,35 +1,42 @@
 # Laser Control Software
 
-A comprehensive Windows Forms application designed for controlling laser cutters, built with .NET 9.0. This tool provides a rich interface for designing, importing, and managing laser cutting jobs with advanced features like layer management, G-code generation, and hardware control.
+A Windows Forms application designed for controlling laser cutters, built with .NET 9.0. This tool provides an interface for designing, importing, and managing laser cutting jobs with features like layer management, G-code generation, and hardware control.
+
+*This project is made because of personal need for a laser cutter control software, LaserGRBL is too limited and Lightburn is too expensive.*
+
+*Everything verified only with Comgrow Z1 Pro 20W diode laser cutter with GRBL 1.1 firmware.*
 
 ## Key Features
 
 ### Object Management & Design
-- **Advanced Transformations**: Move, resize, and rotate objects with precision. Supports robust negative scaling (flipping).
+- **Transformations**: Move, resize, and rotate objects. Supports negative scaling (flipping).
 - **Group/Ungroup**: Organize complex designs by grouping multiple objects.
-- **Grid Array**: Quickly replicate selected objects in a configurable Row × Column grid.
+- **Grid Array**: Replicate selected objects in a configurable Row × Column grid.
 - **Creation Tools**: Draw Lines and Rectangles directly on the canvas.
 - **Ruler Tool**: Measure distances on the workbench for precise alignment.
 - **Snap-to-Grid**: Toggleable alignment aid with configurable grid size.
+- **Object Reordering**: Drag and Drop or use Up/Down arrows in the Object List to change processing order (Top = First).
 
 ### Import & Processing
-- **SVG Import**: High-fidelity vector import with configurable curve smoothness (flatness control) for perfect circles and ellipses.
-- **Image Rasterization**: Import bitmaps (PNG, JPG, BMP) with advanced raster settings:
+- **SVG Import**: Vector import with configurable curve smoothness (flatness control) for circles and ellipses.
+- **Image Rasterization**: Import bitmaps (PNG, JPG, BMP) with raster settings:
   - Configurable Line Interval (resolution).
   - Minimum Segment Length optimization.
-  - Bicubic Resampling for high-quality scaling.
+  - Bicubic Resampling for scaling.
   - 1 bit dithering for lasers without PWM support.
-  - **Smart Optimization**: Skips empty areas and handles transparency (laser off) automatically.
+  - **Optimization**: Skips empty areas and handles transparency (laser off) automatically.
 - **Layer System**: Color-coded layers to organize parts of your design.
 
 ### Machine Control & G-Code
 - **G-Code Generation**: Built-in generator compatible with Grbl controllers.
 - **Framing**: Trace the bounding box of your design with the laser (low power) to verify positioning before cutting.
-- **Serial Connection**: Direct COM port streaming with connection status monitoring.
+- **Serial Connection**: Direct COM port streaming using `RJCP.SerialPortStream`.
+- **Sender Thread**: Background thread for G-code transmission.
+- **Error Handling**: GRBL alarm messages and buffer synchronization.
 - **G-Code Preview**: Debug viewer to inspect the generated G-code before sending.
 
 ### Quality of Life
-- **Robust Undo/Redo**: Full history support for all modification actions.
+- **Undo/Redo**: History support for modification actions.
 - **Interactive Workbench**: Smooth Pan (Right-click dragging) and Zoom (Scroll wheel) navigation. **View state (Zoom/Pan) is saved between sessions.**
 - **Project Persistence**: Save and Load full project states via JSON.
 - **Customizable Options**: Configure workspace dimensions, origin point, connection defaults, and UI preferences (e.g., Skip Splash Screen).
@@ -107,5 +114,5 @@ dotnet run
 
 ## Architecture
 
--   **Command Pattern**: All state-modifying actions use `MoveCommand`, `GroupCommand`, `ResizeCommand`, etc., ensuring rock-solid Undo/Redo capability.
+-   **Command Pattern**: All state-modifying actions use `MoveCommand`, `GroupCommand`, `ResizeCommand`, etc., ensuring Undo/Redo capability.
 -   **Singleton State**: `ProjectState` and `AppConfiguration` provide centralized access to the application data and settings.

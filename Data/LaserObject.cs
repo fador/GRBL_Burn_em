@@ -10,7 +10,9 @@ public enum LaserObjectType
     Image,
     Rectangle,
     Group,
-    Text
+    Text,
+    Circle,
+    Bezier
 }
 
 public abstract class LaserObject
@@ -36,6 +38,136 @@ public abstract class LaserObject
     }
 
     public abstract LaserObject Clone();
+
+    protected RectangleF GetRotatedBoundsFromDef()
+    {
+        if (Rotation == 0) return new RectangleF(Position, Size);
+
+        var cx = Position.X + Size.Width / 2f;
+        var cy = Position.Y + Size.Height / 2f;
+
+        var corners = new PointF[]
+        {
+            new PointF(Position.X, Position.Y),
+            new PointF(Position.X + Size.Width, Position.Y),
+            new PointF(Position.X + Size.Width, Position.Y + Size.Height),
+            new PointF(Position.X, Position.Y + Size.Height)
+        };
+
+        using (var m = new System.Drawing.Drawing2D.Matrix())
+        {
+            m.RotateAt(Rotation, new PointF(cx, cy));
+            m.TransformPoints(corners);
+        }
+
+        float minX = float.MaxValue, minY = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue;
+        foreach(var p in corners)
+        {
+            if (p.X < minX) minX = p.X;
+            if (p.Y < minY) minY = p.Y;
+            if (p.X > maxX) maxX = p.X;
+            if (p.Y > maxY) maxY = p.Y;
+        }
+
+        return new RectangleF(minX, minY, maxX - minX, maxY - minY);
+    }
+}
+
+// ... (Existing classes: LaserPath, LaserRectangle, etc.) ...
+
+public class LaserCircle : LaserObject
+{
+    public LaserCircle()
+    {
+        Type = LaserObjectType.Circle;
+        Name = "Circle";
+        Size = new SizeF(50, 50); // Default size
+    }
+
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
+    }
+
+    public override void Draw(Graphics g, float scale)
+    {
+        var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
+                    ?? ProjectState.Instance.Layers.FirstOrDefault();
+        Color c = layer?.Color ?? Color.Black;
+
+        using var pen = new Pen(c, 1.0f / scale);
+        
+        var state = g.Save();
+        // Rotate around center
+        float cx = Position.X + Size.Width / 2f;
+        float cy = Position.Y + Size.Height / 2f;
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(Rotation);
+        g.TranslateTransform(-cx, -cy);
+        
+        g.DrawEllipse(pen, Position.X, Position.Y, Size.Width, Size.Height);
+        g.Restore(state);
+    }
+
+    public override bool HitTest(PointF point, float tolerance)
+    {
+        // Hit test for the outline of the ellipse
+        // Simplified: Check if point is close to the ellipse equation
+        
+        float h = Position.X + Size.Width / 2f;
+        float k = Position.Y + Size.Height / 2f;
+        float a = Size.Width / 2f;
+        float b = Size.Height / 2f;
+
+        if (a <= 0 || b <= 0) return false;
+
+        // Normalize point relative to center
+        float x = point.X - h;
+        float y = point.Y - k;
+
+        // Ellipse equation: (x/a)^2 + (y/b)^2 = 1
+        float val = (x * x) / (a * a) + (y * y) / (b * b);
+        
+        // We want to check if val is close to 1
+        // How close? tolerance related.
+        // It's non-linear.
+        // Better: Check if inside outer boundary (radius+tol) AND outside inner boundary (radius-tol)
+        
+        // Let's use GraphicsPath for robust checking? Expensive?
+        // Let's implement bounding box check first
+        if (!GetBounds().Contains(point)) return false; // Optimization
+
+        // Approximate with ring
+        // Transform point to unit circle space?
+        // x' = x/a, y' = y/b. dist = sqrt(x'^2 + y'^2). should be approx 1.
+        // But tolerance is in world units, not unit space.
+        
+        // Simple approximation: Closest point on ellipse is hard.
+        // Let's rely on loose check or "Contains" if filled? But it's hollow.
+        // Use GraphicsPath IsOutlineVisible
+        using var path = new GraphicsPath();
+        path.AddEllipse(Position.X, Position.Y, Size.Width, Size.Height);
+        using var pen = new Pen(Color.Black, tolerance);
+        return path.IsOutlineVisible(point, pen);
+    }
+
+    public override LaserObject Clone()
+    {
+         var clone = new LaserCircle
+        {
+            Id = Guid.NewGuid(),
+            Name = this.Name + " (Copy)",
+            LayerId = this.LayerId,
+            IsEnabled = this.IsEnabled,
+            Power = this.Power,
+            Speed = this.Speed,
+            Position = this.Position,
+            Rotation = this.Rotation,
+            Size = this.Size
+        };
+        return clone;
+    }
 }
 
 public class LaserPath : LaserObject
@@ -66,7 +198,16 @@ public class LaserPath : LaserObject
         Color c = layer?.Color ?? Color.Black;
 
         using var pen = new Pen(c, 1.0f / scale); // Constant width regardless of zoom
+        
+        var state = g.Save();
+        float cx = Position.X + Size.Width / 2f;
+        float cy = Position.Y + Size.Height / 2f;
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(Rotation);
+        g.TranslateTransform(-cx, -cy);
+        
         g.DrawLines(pen, Points.ToArray());
+        g.Restore(state);
     }
 
     public override bool HitTest(PointF point, float tolerance)
@@ -129,6 +270,11 @@ public class LaserRectangle : LaserObject
         Name = "Rectangle";
     }
 
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
+    }
+
     public override void Draw(Graphics g, float scale)
     {
         var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
@@ -136,7 +282,16 @@ public class LaserRectangle : LaserObject
         Color c = layer?.Color ?? Color.Black;
 
         using var pen = new Pen(c, 1.0f / scale);
+        
+        var state = g.Save();
+        float cx = Position.X + Size.Width / 2f;
+        float cy = Position.Y + Size.Height / 2f;
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(Rotation);
+        g.TranslateTransform(-cx, -cy);
+        
         g.DrawRectangle(pen, Position.X, Position.Y, Size.Width, Size.Height);
+        g.Restore(state);
     }
     
     public override bool HitTest(PointF point, float tolerance)
@@ -183,6 +338,7 @@ public class LaserImage : LaserObject
     // In a real app we'd store the path or byte array
     public Bitmap? Image { get; set; }
     public string ImagePath { get; set; } = "";
+    public Guid MaskId { get; set; } = Guid.Empty;
 
     public LaserImage()
     {
@@ -190,24 +346,63 @@ public class LaserImage : LaserObject
         Name = "Image";
     }
 
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
+    }
+
     public override void Draw(Graphics g, float scale)
     {
         if (Image != null)
         {
-            
-            // We want to draw the image UPRIGHT with Position as Bottom-Left.
-            // Image (0,0) [Top] should be at Position.Y + Height.
-            // Image (0,H) [Bottom] should be at Position.Y.
-            
             GraphicsState state = g.Save();
-            
+
+            // Apply Mask if present
+            if (MaskId != Guid.Empty)
+            {
+                var maskObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == MaskId);
+                if (maskObj != null)
+                {
+                    GraphicsPath? clipPath = null;
+                    if (maskObj is LaserCircle c)
+                    {
+                        clipPath = new GraphicsPath();
+                        clipPath.AddEllipse(c.Position.X, c.Position.Y, c.Size.Width, c.Size.Height);
+                    }
+                    else if (maskObj is LaserRectangle r)
+                    {
+                        clipPath = new GraphicsPath();
+                        clipPath.AddRectangle(new RectangleF(r.Position, r.Size));
+                    }
+                    
+                    if (clipPath != null)
+                    {
+                        g.SetClip(clipPath); 
+                        // Note: clipPath needs disposal?
+                        // Yes. But we can't dispose it immediately if SetClip uses it?
+                        // SetClip clones it? documentation says "Sets the clipping region... to the property of the specified GraphicsPath".
+                        // Usually SetClip copies.
+                    }
+                }
+            }
+
             // Move to Top-Left of the target rect (which is Pos.Y + Height)
             // Flip Y axis so Y+ is Down (Standard Image drawing)
-            g.TranslateTransform(Position.X, Position.Y + Size.Height);
-            g.ScaleTransform(1, -1);
             
-            // Draw standard top-down image at 0,0
-            g.DrawImage(Image, 0, 0, Size.Width, Size.Height);
+            // Rotation Handling:
+            // We want to rotate around the center of the image.
+            // Center in World Coords:
+            float cx = Position.X + Size.Width / 2f;
+            float cy = Position.Y + Size.Height / 2f;
+
+            // 1. Translate to Center
+            g.TranslateTransform(cx, cy);
+            // 2. Rotate
+            g.RotateTransform(Rotation);
+            // 3. Scale/Flip (Y+ Down) - Note: This flips the LOCAL axis
+            g.ScaleTransform(1, -1);
+            // 4. Draw Image centered at 0,0 (Extent is -W/2 to W/2)
+            g.DrawImage(Image, -Size.Width/2f, -Size.Height/2f, Size.Width, Size.Height);
             
             g.Restore(state);
         }
@@ -263,11 +458,20 @@ public class LaserText : LaserObject
     public string Text { get; set; } = "Text";
     public string FontName { get; set; } = "Arial";
     public float FontSize { get; set; } = 20f; // Points
+    public Guid PathId { get; set; } = Guid.Empty;
+    public float PathOffset { get; set; } = 0f;
+    public float VerticalOffset { get; set; } = 0f;
+    public bool ReversePath { get; set; } = false;
 
     public LaserText()
     {
         Type = LaserObjectType.Text;
         Name = "Text";
+    }
+
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
     }
 
     public override void Draw(Graphics g, float scale)
@@ -291,8 +495,98 @@ public class LaserText : LaserObject
         // For simple MVP usage: DrawString uses Font Size.
         
         // Text drawing needs unflip
-        // Text drawing needs unflip
         var state = g.Save();
+        
+        if (PathId != Guid.Empty)
+        {
+            var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == PathId);
+            if (pathObj != null)
+            {
+                 // Create Text Path at 0,0 locally
+                 using (var gp = new GraphicsPath())
+                 {
+                     var family = new FontFamily(FontName);
+                     // Conversion: FontSize (Points) -> EmSize (World)
+                     // Assuming display is roughly 96 DPI for "Points" meaning...
+                     // 1 Pt = 1/72 inch.
+                     // EmSize in AddString is in World Coordinates.
+                     // If 1 World Unit = 1 mm.
+                     // 1 Pt = 0.35277 mm.
+                     float emSize = FontSize * 0.35277f;
+                     // But previously we used Graphics.DrawString which takes Points.
+                     // We need to match visual size.
+                     // Graphics.DrawString(..., 20pt) draws 20pt text.
+                     // If World Scale is 1mm.
+                     // We probably want to keep consistency.
+                     // Let's stick to the multiplier used in GrblGenerator if possible,
+                     // or derive it.
+                     // 20pt at 96dpi = 20 * 96/72 pixels = 26.6 pixels.
+                     // If 1 pixel = 1mm (unlikely, usually 1px = screen px).
+                     // But our View is Scalable.
+                     // Let's assume EmSize ~ FontSize for now, or tune it.
+                     // Actually, Font(Size) uses Points. AddString uses EmHeight in World Units.
+                     // We need conversion factor.
+                     // Let's use 1.0 for now, user can resize.
+                     
+                     // Use the same scale as GrblGenerator logic: 96/72?
+                     emSize = FontSize * 96f / 72f; 
+
+                     gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+                     
+                     // Fix Orientation: AddString is Top-Down. World is Y-Up.
+                     // We want Baseline to be on the curve (Y=0 locally).
+                     // AddString draws from Top (Y=0) downwards.
+                     // Calculate Ascent to find Baseline.
+                     float ascent = family.GetCellAscent((int)FontStyle.Regular) * emSize / family.GetEmHeight((int)FontStyle.Regular);
+                     
+                     using (var m = new System.Drawing.Drawing2D.Matrix())
+                     {
+                         // 1. Move Baseline to Y=0 (Downwards Y means Baseline is at +Ascent)
+                         // Also apply VerticalOffset here (Y axis)
+                         m.Translate(0, -ascent + VerticalOffset);
+                         // 2. Flip Y so Up is Positive
+                         m.Scale(1, -1);
+                         
+                         // 3. Apply Object Rotation (around Origin 0,0?)
+                         // Text Origin is Top-Left of text box (now transformed to Baseline-Start).
+                         // User expects Rotation around Center usually?
+                         // But for Path Text, rotating around Start seems safer to just flip direction.
+                         // But if they rotate 180, they might want to keep position?
+                         // Let's just apply Rotation.
+                         m.Rotate(Rotation);
+                         
+                         gp.Transform(m);
+                     }
+                     
+                     // Get backbone
+                     var backbone = PathWarp.FlattenPath(pathObj);
+                     if (backbone.Count > 1)
+                     {
+                         // Reverse if requested
+                         if (ReversePath)
+                         {
+                             backbone.Reverse();
+                         }
+
+                         using (var warped = PathWarp.CreateWarpedPath(gp, backbone, PathOffset))
+                         {
+                             // Warped path is in World Coordinates (derived from backbone).
+                             // So we draw it directly.
+                             using (var p = new Pen(c, 1.0f / scale))
+                             {
+                                 // Fill?
+                                 if (scale > 0.5f) g.FillPath(brush, warped);
+                                 // And/Or Outline?
+                                // g.DrawPath(p, warped);
+                             }
+                         }
+                     }
+                 }
+                 g.Restore(state);
+                 return;
+            }
+        }
+
         // Position is Bottom-Left. We want to draw text starting there, but Graphics.DrawString draws Top-Down.
         // And we have Y-Up world coordinates.
         // We need to translate to Top-Left of the text box (Position.Y + Size.Height).
@@ -301,16 +595,26 @@ public class LaserText : LaserObject
         g.TranslateTransform(Position.X, Position.Y + Size.Height);
         g.ScaleTransform(1, -1);
         
+        // Apply Rotation for standard text? 
+        // Text "Position" is usually Top-Left (or Bottom-Left in World).
+        // If we rotate around Position:
+        if (Rotation != 0)
+        {
+             // This rotates around the top-left corner of the text block
+             // If we want center rotation, we need to know size.
+             // But Text alignment is usually Leading.
+             // Let's rotate around Origin (0,0 local) which is Pos.
+             g.RotateTransform(Rotation);
+        }
+        
         using (var font = new Font(FontName, FontSize))
         {
             g.DrawString(Text, font, brush, 0, 0); // Local 0,0 is now Top-Left of text
             
             // Measure while font is alive
-            // Note: MeasureString might be affected by transform?
-            // If scale is 1, -1. Width is 1 * w. Height is -1 * h?
-            // Usually returns positive SizeF.
-            var size = g.MeasureString(Text, font);
-            this.Size = size;
+            // We could optionally verify Bounds but changing Size here breaks manual resize.
+            // var size = g.MeasureString(Text, font);
+            // this.Size = size;
         }
 
         g.Restore(state);
@@ -319,6 +623,8 @@ public class LaserText : LaserObject
     public override bool HitTest(PointF point, float tolerance)
     {
         // Simple bounding box hit test
+        // WARN: If warped, Position/Size might not be accurate!
+        // We should update Position/Size when attaching?
         return new RectangleF(Position, Size).Contains(point);
     }
 
@@ -337,8 +643,109 @@ public class LaserText : LaserObject
             Size = this.Size,
             Text = this.Text,
             FontName = this.FontName,
-            FontSize = this.FontSize
+            FontSize = this.FontSize,
+            PathId = this.PathId,
+            PathOffset = this.PathOffset
         };
         return clone;
+    }
+}
+
+public class LaserBezier : LaserObject
+{
+    // Points structure:
+    // P0 (Start)
+    // P1 (Control 1.1)
+    // P2 (Control 1.2)
+    // P3 (End 1 / Start 2)
+    // P4 (Control 2.1) ...
+    // Count should be 3*N + 1
+    public List<PointF> Points { get; set; } = new List<PointF>();
+
+    public LaserBezier()
+    {
+        Type = LaserObjectType.Bezier;
+        Name = "Bezier";
+    }
+
+    public override RectangleF GetBounds()
+    {
+        // Ensure Position/Size are up to date?
+        // UpdateBounds() should be called when points change.
+        // Assuming Position/Size defines the Unrotated AABB.
+        return GetRotatedBoundsFromDef();
+    }
+
+    public void UpdateBounds()
+    {
+        if (Points.Count == 0) return;
+        
+        float minX = float.MaxValue, minY = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue;
+        
+        foreach (var p in Points)
+        {
+            if (p.X < minX) minX = p.X;
+            if (p.Y < minY) minY = p.Y;
+            if (p.X > maxX) maxX = p.X;
+            if (p.Y > maxY) maxY = p.Y;
+        }
+        
+        Position = new PointF(minX, minY);
+        Size = new SizeF(maxX - minX, maxY - minY);
+    }
+
+    public override void Draw(Graphics g, float scale)
+    {
+        if (Points.Count < 4) return;
+
+        var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
+                    ?? ProjectState.Instance.Layers.FirstOrDefault();
+        Color c = layer?.Color ?? Color.Black;
+
+        using var pen = new Pen(c, 1.0f / scale);
+        // Valid Bezier sequence: 4, 7, 10... points
+        // Graphics.DrawBeziers requires array of 3*k + 1 points
+        int count = Points.Count;
+        int validCount = count - (count - 1) % 3;
+        if (validCount < 4) return;
+        
+        var state = g.Save();
+        float cx = Position.X + Size.Width / 2f;
+        float cy = Position.Y + Size.Height / 2f;
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(Rotation);
+        g.TranslateTransform(-cx, -cy);
+        
+        g.DrawBeziers(pen, Points.Take(validCount).ToArray());
+        g.Restore(state);
+    }
+
+    public override bool HitTest(PointF point, float tolerance)
+    {
+         if (Points.Count < 4) return false;
+         int count = Points.Count;
+         int validCount = count - (count - 1) % 3;
+         using var path = new GraphicsPath();
+         path.AddBeziers(Points.Take(validCount).ToArray());
+         using var pen = new Pen(Color.Black, tolerance);
+         return path.IsOutlineVisible(point, pen);
+    }
+
+    public override LaserObject Clone()
+    {
+        return new LaserBezier
+        {
+            Id = Guid.NewGuid(),
+            Name = this.Name + " (Copy)",
+            LayerId = this.LayerId,
+            IsEnabled = this.IsEnabled,
+            Power = this.Power,
+            Speed = this.Speed,
+            Position = this.Position,
+            Rotation = this.Rotation,
+            Size = this.Size,
+            Points = new List<PointF>(this.Points)
+        };
     }
 }

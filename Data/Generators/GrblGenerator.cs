@@ -63,144 +63,279 @@ public class GrblGenerator : IGCodeGenerator
             if (obj is LaserText text)
             {
                 // Generate Vector Path for Text
-                using (var path = new GraphicsPath())
+                using (var gp = new GraphicsPath())
                 {
-                    // Add String expects a signature with origin.
-                    // We need to match the visual representation (Bottom-Left origin, Y-Up).
-                    // AddString uses Top-Down coordinates usually?
-                    // "The Position of the text in the path in world coordinates"
-                    // If we use AddString, we should be careful about coordinate systems.
-                    // Let's create path at 0,0 and translate?
-                    
                     var family = new FontFamily(text.FontName);
-                    // EmSize is height of the em square in world units.
-                    // LaserText.FontSize is in Points? Or World Units?
-                    // In LaserText.Draw we used new Font(..., FontSize). 
-                    // If FontSize is in Points (assuming 96dpi), 1 pt = 1.33 px? No.
-                    // Font(...) takes arguments based on Unit. Default is Point.
-                    // 1 Point = 1/72 inch.
-                    // 1 inch = 25.4 mm.
-                    // 1 Point = 0.35277 mm.
-                    // So if FontSize=20 (Points), height is ~7mm.
-                    
-                    // AddString EmSize argument is in "World Units" of the GraphicsPath.
-                    // We want it to match the visual size.
-                    // Graphics.DrawString with Font(size) draws size in Points.
-                    
-                    // Conversion:
-                    // LaserText.FontSize is in Points.
-                    // Graphics.DrawString uses PageUnit. If default (Display/Pixel), it scales Points by System DPI.
-                    // Usually 96 DPI on Windows.
-                    // We need `emSize` in World Units (which we treat as equivalent to Pixels in WorkbenchControl for scale purposes).
-                    // Size = Points * 96 / 72.
+                    // Use scale 96/72 to match screen
                     float emSize = text.FontSize * 96f / 72f; 
                     
                     int style = (int)FontStyle.Regular;
-                    path.AddString(text.Text, family, style, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+                    gp.AddString(text.Text, family, style, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+
+                    // Warp if needed
+                    GraphicsPath workPath = gp;
+                    GraphicsPath? warpedPath = null;
+                    bool checkWarp = false;
                     
-                    // Now Transform:
-                    using (var matrix = new System.Drawing.Drawing2D.Matrix())
+                    if (text.PathId != Guid.Empty)
                     {
-                         matrix.Translate(text.Position.X, text.Position.Y + text.Size.Height);
-                         matrix.Scale(1, -1);
-                         path.Transform(matrix);
-                    }
-                    
-                    path.Flatten(null, 0.05f); // 0.05mm precision
-                    
-                   if (path.PointCount > 0)
-                   {
-                        PointF[] points = path.PathPoints;
-                        byte[] types = path.PathTypes;
-                        PointF lastPos = new PointF(float.NaN, float.NaN);
-                        PointF subpathStart = new PointF(0,0);
-
-                        for (int i = 0; i < points.Length; i++)
+                        var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == text.PathId);
+                        if (pathObj != null)
                         {
-                            var p = points[i];
-                            byte type = types[i];
-                            byte typeMasked = (byte)(type & 0x07);
-                            
-                            bool isStart = (typeMasked == 0);
-                            
-                            // Check for coincident start (Stitching)
-                            if (isStart && !float.IsNaN(lastPos.X))
+                            var backbone = PathWarp.FlattenPath(pathObj);
+                            if (backbone.Count > 1)
                             {
-                                float dist = Math.Abs(p.X - lastPos.X) + Math.Abs(p.Y - lastPos.Y);
-                                if (dist < 0.001f)
+                                if (text.ReversePath)
                                 {
-                                    // It's a start point, but we are already there.
-                                    // Treat as continuous cut (Line)
-                                    isStart = false; 
-                                    // BUT: If checking for subpath closure, we need to know where this NEW subpath started.
-                                    // Even if stitched, it logically starts a new contour?
-                                    // Actually, if we stitch, we are continuing the previous cut? No, usually fonts are separate loops.
-                                    // If we share a point, it might be the same spot.
-                                    // Let's update subpathStart anyway.
-                                    subpathStart = p;
+                                    backbone.Reverse();
                                 }
-                            }
-                            
-                            if (isStart) 
-                            {
-                                subpathStart = p;
-                                yield return "G1 S0"; // Ensure off
-                                yield return $"G0 X{p.X:F3} Y{p.Y:F3}";
-                                yield return $"G1 F{fVal:F0}"; 
-                            }
-                            else 
-                            {
-                                yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
-                            }
-                            
-                            lastPos = p;
 
-                            if ((type & 0x80) != 0) // CloseSubpath
-                            {
-                                // Ensure we close the loop to the subpath start
-                                float dist = Math.Abs(p.X - subpathStart.X) + Math.Abs(p.Y - subpathStart.Y);
-                                if (dist > 0.001f)
+                                // Fix Orientation LOCALLY for warping
+                                // We need a clone to not mess up the original gp for fallback
+                                using (var warpInput = (GraphicsPath)gp.Clone())
                                 {
-                                    yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} S{sVal:F0}";
-                                    lastPos = subpathStart;
+                                    float ascent = family.GetCellAscent((FontStyle)style) * emSize / family.GetEmHeight((FontStyle)style);
+                                    using (var m = new System.Drawing.Drawing2D.Matrix())
+                                    {
+                                        m.Translate(0, -ascent + text.VerticalOffset);
+                                        m.Scale(1, -1);
+                                        m.Rotate(text.Rotation);
+                                        warpInput.Transform(m);
+                                    }
+                                    
+                                    warpedPath = PathWarp.CreateWarpedPath(warpInput, backbone, text.PathOffset);
+                                    workPath = warpedPath;
+                                    checkWarp = true;
                                 }
                             }
                         }
-                   }
+                    }
+                    
+                    // Transform if NOT warped (Placement logic)
+                    // If warped, position is defined by the backbone + offest.
+                    if (!checkWarp)
+                    {
+                         using (var matrix = new System.Drawing.Drawing2D.Matrix())
+                         {
+                              matrix.Translate(text.Position.X, text.Position.Y + text.Size.Height);
+                              matrix.Scale(1, -1);
+                              workPath.Transform(matrix);
+                         }
+                    }
+                    
+                    workPath.Flatten(null, 0.05f); // 0.05mm precision
+                    
+                    if (workPath.PointCount > 0)
+                    {
+                         PointF[] points = workPath.PathPoints;
+                         byte[] types = workPath.PathTypes;
+                         PointF lastPos = new PointF(float.NaN, float.NaN);
+                         PointF subpathStart = new PointF(0,0);
+
+                         for (int i = 0; i < points.Length; i++)
+                         {
+                             var p = points[i];
+                             byte type = types[i];
+                             byte typeMasked = (byte)(type & 0x07);
+                             
+                             bool isStart = (typeMasked == 0);
+                             
+                             if (isStart && !float.IsNaN(lastPos.X))
+                             {
+                                 float dist = Math.Abs(p.X - lastPos.X) + Math.Abs(p.Y - lastPos.Y);
+                                 if (dist < 0.001f)
+                                 {
+                                     isStart = false; 
+                                     subpathStart = p;
+                                 }
+                             }
+                             
+                             if (isStart) 
+                             {
+                                 subpathStart = p;
+                                 yield return "G1 S0"; 
+                                 yield return $"G0 X{p.X:F3} Y{p.Y:F3}";
+                                 yield return $"G1 F{fVal:F0}"; 
+                             }
+                             else 
+                             {
+                                 yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                             }
+                             
+                             lastPos = p;
+
+                             if ((type & 0x80) != 0) // CloseSubpath
+                             {
+                                 float dist = Math.Abs(p.X - subpathStart.X) + Math.Abs(p.Y - subpathStart.Y);
+                                 if (dist > 0.001f)
+                                 {
+                                     yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} S{sVal:F0}";
+                                     lastPos = subpathStart;
+                                 }
+                             }
+                         }
+                    }
+                    
+                    warpedPath?.Dispose();
                 }
                 yield return "G1 S0";
                 yield break;
             }
+            else if (obj is LaserCircle circle)
+            {
+                 // Linearize Ellipse/Circle
+                 using (var path = new GraphicsPath())
+                 {
+                     path.AddEllipse(circle.Position.X, circle.Position.Y, circle.Size.Width, circle.Size.Height);
+                     
+                     // Rotate around center
+                     float cx = circle.Position.X + circle.Size.Width / 2f;
+                     float cy = circle.Position.Y + circle.Size.Height / 2f;
+                     
+                     using (var m = new System.Drawing.Drawing2D.Matrix())
+                     {
+                         m.RotateAt(circle.Rotation, new PointF(cx, cy));
+                         path.Transform(m);
+                     }
+
+                     path.Flatten(null, 0.05f);
+                     PointF[] points = path.PathPoints;
+                     
+                     if (points.Length > 0)
+                     {
+                        yield return "G1 S0";
+                        yield return $"G0 X{points[0].X:F3} Y{points[0].Y:F3}";
+                        yield return $"G1 F{fVal:F0}"; // G1 to apply speed? Start Logic.
+                        // Actually Start usually means move to start.
+                        // G1 Sxxx is Power.
+                        
+                        // First point is Move.
+                        for(int i=1; i<points.Length; i++)
+                        {
+                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} S{sVal:F0}";
+                        }
+                        // Close loop
+                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} S{sVal:F0}";
+                     }
+                 }
+                 yield return "G1 S0";
+                 yield break;
+            }
+            else if (obj is LaserRectangle rect)
+            {
+                // Rectangle with optional Rotation
+                // We can use GraphicsPath for easy rotation
+                 using (var path = new GraphicsPath())
+                 {
+                     path.AddRectangle(new RectangleF(rect.Position, rect.Size));
+                     
+                     float cx = rect.Position.X + rect.Size.Width / 2f;
+                     float cy = rect.Position.Y + rect.Size.Height / 2f;
+                     
+                     using (var m = new System.Drawing.Drawing2D.Matrix())
+                     {
+                         m.RotateAt(rect.Rotation, new PointF(cx, cy));
+                         path.Transform(m);
+                     }
+                     
+                     // Rectangle is 4 points (closed). Flattening might add more if we warped (we didn't).
+                     // But AddRectangle adds 4 points.
+                     // Flattening ensures it's lines.
+                     path.Flatten(null, 0.05f); // Overkill for rect but safe
+                     
+                     PointF[] points = path.PathPoints;
+                     if (points.Length > 0)
+                     {
+                        yield return "G1 S0";
+                        yield return $"G0 X{points[0].X:F3} Y{points[0].Y:F3}";
+                        yield return $"G1 F{fVal:F0}"; 
+                        
+                        for(int i=1; i<points.Length; i++)
+                        {
+                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} S{sVal:F0}";
+                        }
+                        // Close loop
+                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} S{sVal:F0}";
+                     }
+                 }
+                 yield return "G1 S0";
+                 yield break;
+            }
             else if (obj is LaserPath path)
             {
                 if (path.Points.Count < 2) yield break;
+                
+                // Rotation handling
+                var finalPoints = path.Points.ToArray();
+                if (path.Rotation != 0)
+                {
+                    using (var m = new System.Drawing.Drawing2D.Matrix())
+                    {
+                         float cx = path.Position.X + path.Size.Width / 2f;
+                         float cy = path.Position.Y + path.Size.Height / 2f;
+                         m.RotateAt(path.Rotation, new PointF(cx, cy));
+                         m.TransformPoints(finalPoints);
+                    }
+                }
+
                 // Move to start
-                var start = path.Points[0];
+                var start = finalPoints[0];
                 yield return $"G0 X{start.X:F3} Y{start.Y:F3}";
                 yield return $"G1 F{fVal:F0}"; 
 
-                for (int i = 1; i < path.Points.Count; i++)
+                for (int i = 1; i < finalPoints.Length; i++)
                 {
-                    var p = path.Points[i];
+                    var p = finalPoints[i];
                     yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
                 }
                 yield return "G1 S0"; 
                 yield break;
             }
-            else if (obj is LaserRectangle rect)
+            else if (obj is LaserBezier bezier)
             {
-                float l = rect.Position.X;
-                float t = rect.Position.Y;
-                float r = l + rect.Size.Width;
-                float b = t + rect.Size.Height;
+                using (var gPath = new GraphicsPath())
+                {
+                    if (bezier.Points.Count >= 4)
+                    {
+                        // Ensure we have N segments: 4, 7, 10...
+                        int count = bezier.Points.Count;
+                        int valid = count - (count - 1) % 3;
+                        gPath.AddBeziers(bezier.Points.Take(valid).ToArray());
+                        
+                        // Apply Rotation
+                        if (bezier.Rotation != 0)
+                        {
+                            float cx = bezier.Position.X + bezier.Size.Width / 2f;
+                            float cy = bezier.Position.Y + bezier.Size.Height / 2f;
+                            using (var m = new System.Drawing.Drawing2D.Matrix())
+                            {
+                                m.RotateAt(bezier.Rotation, new PointF(cx, cy));
+                                gPath.Transform(m);
+                            }
+                        }
+                        
+                        gPath.Flatten(null, 0.05f);
+                    }
+                    else
+                    {
+                        // Nothing to draw
+                    }
 
-                yield return $"G0 X{l:F3} Y{t:F3}";
-                yield return $"G1 F{fVal:F0}";
-
-                yield return $"G1 X{r:F3} Y{t:F3} S{sVal:F0}";
-                yield return $"G1 X{r:F3} Y{b:F3} S{sVal:F0}";
-                yield return $"G1 X{l:F3} Y{b:F3} S{sVal:F0}";
-                yield return $"G1 X{l:F3} Y{t:F3} S{sVal:F0}";
+                    if (gPath.PointCount > 0)
+                    {
+                         var points = gPath.PathPoints;
+                         var p0 = points[0];
+                         
+                         yield return $"G0 X{p0.X:F3} Y{p0.Y:F3}";
+                         yield return $"G1 F{fVal:F0}";
+                         
+                         for (int i = 1; i < points.Length; i++)
+                         {
+                             var p = points[i];
+                             yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                         }
+                    }
+                }
                 yield return "G1 S0";
                 yield break;
             }
@@ -216,7 +351,41 @@ public class GrblGenerator : IGCodeGenerator
 
         if (obj is LaserImage img)
         {
-             bitmapToRasterize = img.Image;
+             // Rasterize Image using its own Draw method to handle Rotation/Masking/etc consistently
+             if (img.Image == null) yield break;
+
+             var bounds = img.GetBounds(); // Rotated AABB
+             if (bounds.Width <= 0 || bounds.Height <= 0) yield break;
+
+             rasterPos = bounds.Location;
+             rasterSize = bounds.Size;
+
+             // Resolution
+             float interval = AppConfiguration.Instance.RasterLineInterval;
+             if (interval <= 0) interval = 0.1f;
+             float dpmm = 1.0f / interval;
+
+             int w = (int)Math.Ceiling(bounds.Width * dpmm);
+             int h = (int)Math.Ceiling(bounds.Height * dpmm);
+             
+             if (w > 0 && h > 0)
+             {
+                 bitmapToRasterize = new Bitmap(w, h);
+                 disposeBitmap = true;
+                 
+                 using (var g = Graphics.FromImage(bitmapToRasterize))
+                 {
+                     g.Clear(Color.White);
+                     
+                     // Setup Transform: World (Y-Up) -> Bitmap (Y-Down)
+                     // Map World Bounds Top-Left (MinX, MaxY) to Bitmap (0,0)
+                     g.ScaleTransform(dpmm, -dpmm);
+                     g.TranslateTransform(-bounds.X, -(bounds.Y + bounds.Height));
+                     
+                     // Draw Image
+                     img.Draw(g, 1.0f);
+                 }
+             }
         }
         else
         {
@@ -251,41 +420,71 @@ public class GrblGenerator : IGCodeGenerator
                     
                     using (var brush = new SolidBrush(Color.Black)) // Black = Burn
                     {
-                        if (obj is LaserRectangle)
+                        using (var path = new GraphicsPath())
                         {
-                            g.FillRectangle(brush, obj.Position.X, obj.Position.Y, obj.Size.Width, obj.Size.Height);
-                        }
-                        else if (obj is LaserPath lp)
-                        {
-                             if (lp.Points.Count > 2)
-                                 g.FillPolygon(brush, lp.Points.ToArray());
-                        }
-                        else if (obj is LaserText lt)
-                        {
-                             // Simple draw for now
-                             // Text Draw method does transform. We need to match.
-                             // Text.Draw uses Position. We normalized manually above?
-                             // No, we translated G so 0,0 is Bounds TopLeft.
-                             // Text Position is in World.
-                             // If we just call Draw, it should draw at world coords, which are shifted by TranslateTransform.
-                             // But Text Draw expects to handle Scale(1,-1) itself for upright?
-                             // Our bitmap is Top-Down.
-                             // Text Logic:
-                             // g.TranslateTransform(Position.X, Position.Y);
-                             // g.ScaleTransform(1, -1);
-                             
-                             // We don't want the Y-flip for the bitmap generation if we just want "Black pixels where text is".
-                             // But Rasterizer expects standard image logic?
-                             // Rasterizer iterates Y top to bottom.
-                             // So we should draw Text Normally (Upright).
-                             
-                             // We can use Graphics.DrawString directly here.
-                             using (var f = new Font(lt.FontName, lt.FontSize)) // Unit?
-                             {
-                                 // DrawString coordinates are local. 
-                                 // We established transform.
-                                 g.DrawString(lt.Text, f, brush, lt.Position.X, lt.Position.Y);
-                             }
+                            bool hasPath = false;
+                            
+                            if (obj is LaserRectangle rect)
+                            {
+                                path.AddRectangle(new RectangleF(rect.Position, rect.Size));
+                                hasPath = true;
+                            }
+                            else if (obj is LaserCircle circ)
+                            {
+                                path.AddEllipse(circ.Position.X, circ.Position.Y, circ.Size.Width, circ.Size.Height);
+                                hasPath = true;
+                            }
+                            else if (obj is LaserPath lp)
+                            {
+                                if (lp.Points.Count > 1) 
+                                {
+                                    path.AddLines(lp.Points.ToArray());
+                                    path.CloseFigure();
+                                    hasPath = true;
+                                }
+                            }
+                            else if (obj is LaserBezier lb)
+                            {
+                                if (lb.Points.Count >= 4)
+                                {
+                                    int count = lb.Points.Count;
+                                    int valid = count - (count - 1) % 3;
+                                    path.AddBeziers(lb.Points.Take(valid).ToArray());
+                                    path.CloseFigure();
+                                    hasPath = true;
+                                }
+                            }
+                            else if (obj is LaserText lt)
+                            {
+                                var family = new FontFamily(lt.FontName);
+                                float emSize = lt.FontSize * 96f / 72f; 
+                                path.AddString(lt.Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+                                
+                                using (var m = new System.Drawing.Drawing2D.Matrix())
+                                {
+                                    float ascent = family.GetCellAscent((int)FontStyle.Regular) * emSize / family.GetEmHeight((int)FontStyle.Regular);
+                                    m.Translate(0, -ascent + lt.VerticalOffset);
+                                    m.Scale(1, -1);
+                                    m.Translate(lt.Position.X, lt.Position.Y + lt.Size.Height, MatrixOrder.Append);
+                                    path.Transform(m);
+                                }
+                                hasPath = true;
+                            }
+
+                            if (hasPath)
+                            {
+                                if (obj.Rotation != 0)
+                                {
+                                    float cx = obj.Position.X + obj.Size.Width / 2f;
+                                    float cy = obj.Position.Y + obj.Size.Height / 2f;
+                                    using (var m = new System.Drawing.Drawing2D.Matrix())
+                                    {
+                                        m.RotateAt(obj.Rotation, new PointF(cx, cy));
+                                        path.Transform(m);
+                                    }
+                                }
+                                g.FillPath(brush, path);
+                            }
                         }
                     }
                 }

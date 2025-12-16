@@ -44,16 +44,42 @@ public static class GrblErrors
         { 38, "Tool number greater than max supported value." }
     };
 
+    public static readonly Dictionary<int, string> AlarmMap = new Dictionary<int, string>
+    {
+        { 1, "Hard limit triggered. Machine position is likely lost due to sudden halt. Re-homing is highly recommended." },
+        { 2, "G-code motion target exceeds machine travel. Machine position safely retained. Alarm may be unlocked." },
+        { 3, "Reset while in motion. Grbl cannot guarantee position. Lost steps are likely. Re-homing is highly recommended." },
+        { 4, "Probe fail. The probe is not in the expected initial state before the probe cycle." },
+        { 5, "Probe fail. Probe did not contact the workpiece within the programmed travel for the probe cycle." },
+        { 6, "Homing fail. Reset during active homing cycle." },
+        { 7, "Homing fail. Safety door was opened during active homing cycle." },
+        { 8, "Homing fail. Cycle failed to clear limit switch when pulling off. Try increasing pull-off setting or check wiring." },
+        { 9, "Homing fail. Could not find limit switch within search distance. Defined as 1.5 * max_travel on search and 5 * pulloff on locate phases." }
+    };
+
     public static string GetMessage(string errorCodeStr)
     {
         if (int.TryParse(errorCodeStr, out int code))
         {
-            if (ErrorMap.TryGetValue(code, out string msg))
+            if (ErrorMap.TryGetValue(code, out string? msg))
             {
                 return msg;
             }
             return $"Unknown Error Code: {code}";
         }
         return "Invalid Error Format";
+    }
+
+    public static string GetAlarmMessage(string alarmCodeStr)
+    {
+        if (int.TryParse(alarmCodeStr, out int code))
+        {
+            if (AlarmMap.TryGetValue(code, out string? msg))
+            {
+                return msg;
+            }
+            return $"Unknown Alarm Code: {code}";
+        }
+        return "Invalid Alarm Format";
     }
 }

@@ -27,6 +27,8 @@ public class ProjectDataDto
 [JsonDerivedType(typeof(LaserRectangleDto), typeDiscriminator: "Rectangle")]
 [JsonDerivedType(typeof(LaserImageDto), typeDiscriminator: "Image")]
 [JsonDerivedType(typeof(LaserTextDto), typeDiscriminator: "Text")]
+[JsonDerivedType(typeof(LaserCircleDto), typeDiscriminator: "Circle")]
+[JsonDerivedType(typeof(LaserBezierDto), typeDiscriminator: "Bezier")]
 public abstract class LaserObjectDto
 {
     public Guid Id { get; set; }
@@ -40,6 +42,10 @@ public abstract class LaserObjectDto
     public SizeF Size { get; set; }
 }
 
+// ...
+
+public class LaserCircleDto : LaserObjectDto { }
+
 public class LaserPathDto : LaserObjectDto
 {
     public List<PointF> Points { get; set; } = new();
@@ -51,6 +57,7 @@ public class LaserImageDto : LaserObjectDto
 {
     public string ImagePath { get; set; } = "";
     public string Base64Data { get; set; } = "";
+    public Guid MaskId { get; set; }
 }
 
 public class LaserTextDto : LaserObjectDto
@@ -58,7 +65,17 @@ public class LaserTextDto : LaserObjectDto
     public string Text { get; set; } = "";
     public string FontName { get; set; } = "Arial";
     public float FontSize { get; set; }
+    public Guid PathId { get; set; }
+    public float PathOffset { get; set; }
+    public float VerticalOffset { get; set; }
+    public bool ReversePath { get; set; }
 }
+
+public class LaserBezierDto : LaserObjectDto
+{
+    public List<PointF> Points { get; set; } = new();
+}
+
 
 public static class ProjectSerializer
 {
@@ -103,7 +120,8 @@ public static class ProjectSerializer
                 {
                     Id = i.Id, Name = i.Name, LayerId = i.LayerId, IsEnabled = i.IsEnabled,
                     Power = i.Power, Speed = i.Speed, Position = i.Position, Rotation = i.Rotation, Size = i.Size,
-                    ImagePath = i.ImagePath
+                    ImagePath = i.ImagePath,
+                    MaskId = i.MaskId
                 };
                 
                 if (AppConfiguration.Instance.EmbedImagesInProject)
@@ -136,7 +154,25 @@ public static class ProjectSerializer
                 {
                     Id = t.Id, Name = t.Name, LayerId = t.LayerId, IsEnabled = t.IsEnabled,
                     Power = t.Power, Speed = t.Speed, Position = t.Position, Rotation = t.Rotation, Size = t.Size,
-                    Text = t.Text, FontName = t.FontName, FontSize = t.FontSize
+                    Text = t.Text, FontName = t.FontName, FontSize = t.FontSize, PathId = t.PathId, PathOffset = t.PathOffset,
+                    VerticalOffset = t.VerticalOffset, ReversePath = t.ReversePath
+                });
+            }
+            else if (obj is LaserCircle c)
+            {
+                dto.Objects.Add(new LaserCircleDto
+                {
+                    Id = c.Id, Name = c.Name, LayerId = c.LayerId, IsEnabled = c.IsEnabled,
+                    Power = c.Power, Speed = c.Speed, Position = c.Position, Rotation = c.Rotation, Size = c.Size
+                });
+            }
+            else if (obj is LaserBezier b)
+            {
+                dto.Objects.Add(new LaserBezierDto
+                {
+                    Id = b.Id, Name = b.Name, LayerId = b.LayerId, IsEnabled = b.IsEnabled,
+                    Power = b.Power, Speed = b.Speed, Position = b.Position, Rotation = b.Rotation, Size = b.Size,
+                    Points = b.Points
                 });
             }
         }
@@ -193,7 +229,7 @@ public static class ProjectSerializer
             }
             else if (objDto is LaserImageDto i)
             {
-                var imgObj = new LaserImage { ImagePath = i.ImagePath };
+                var imgObj = new LaserImage { ImagePath = i.ImagePath, MaskId = i.MaskId };
                 
                 if (!string.IsNullOrEmpty(i.Base64Data))
                 {
@@ -228,7 +264,22 @@ public static class ProjectSerializer
                 {
                     Text = t.Text,
                     FontName = t.FontName,
-                    FontSize = t.FontSize
+                    FontSize = t.FontSize,
+                    PathId = t.PathId,
+                    PathOffset = t.PathOffset,
+                    VerticalOffset = t.VerticalOffset,
+                    ReversePath = t.ReversePath
+                };
+            }
+            else if (objDto is LaserCircleDto)
+            {
+                obj = new LaserCircle();
+            }
+            else if (objDto is LaserBezierDto bDto)
+            {
+                obj = new LaserBezier
+                {
+                    Points = bDto.Points ?? new List<PointF>()
                 };
             }
 

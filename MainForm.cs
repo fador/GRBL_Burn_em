@@ -41,7 +41,17 @@ public partial class MainForm : Form
     private NumericUpDown _nudPosY = null!;
     private NumericUpDown _nudSizeW = null!;
     private NumericUpDown _nudSizeH = null!;
+    private NumericUpDown _nudRotation = null!;
     private ToolStripLabel _lblLayerInfo = null!;
+    
+    // Logging Optimization
+    private System.Collections.Concurrent.ConcurrentQueue<string> _logBuffer = new System.Collections.Concurrent.ConcurrentQueue<string>();
+    private System.Windows.Forms.Timer _logTimer = null!;
+    
+    // Text Toolbar Controls
+    private ToolStripTextBox _txtContent = null!;
+    private ToolStripComboBox _cmbFont = null!;
+    private NumericUpDown _nudFontSize = null!;
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -128,8 +138,45 @@ public partial class MainForm : Form
         }
 
         // 1. Menu Strip
+        // 1. Menu Strip
         var menuStrip = new MenuStrip();
         var fileMenu = new ToolStripMenuItem("File");
+
+        // Shared Actions
+        Action applyMask = () => 
+        {
+            var sel = _objectList.SelectedRows;
+            if (sel.Count != 2) 
+            {
+                MessageBox.Show("Please select exactly one Image and one Shape (Circle/Rectangle) to create a mask.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            
+            var obj1 = ProjectState.Instance.Objects[sel[0].Index];
+            var obj2 = ProjectState.Instance.Objects[sel[1].Index];
+            
+            LaserImage? img = obj1 as LaserImage ?? obj2 as LaserImage;
+            LaserObject? shape = (obj1 is LaserCircle || obj1 is LaserRectangle) ? obj1 :
+                                 (obj2 is LaserCircle || obj2 is LaserRectangle) ? obj2 : null;
+                                 
+            if (img != null && shape != null && img != shape)
+            {
+                 if (img.MaskId == shape.Id)
+                 {
+                     img.MaskId = Guid.Empty;
+                 }
+                 else
+                 {
+                     img.MaskId = shape.Id;
+                 }
+                 _workbench.Invalidate();
+            }
+            else
+            {
+                MessageBox.Show("Selection must include one Image and one Shape.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        };
+
         
         fileMenu.DropDownItems.Add("New", null, (s, e) => 
         {
@@ -169,6 +216,80 @@ public partial class MainForm : Form
             dlg.ShowDialog();
         });
         menuStrip.Items.Add(fileMenu);
+
+        var toolMenu = new ToolStripMenuItem("Tool");
+        toolMenu.DropDownItems.Add("Mask Image with Shape", null, (s, e) => applyMask());
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
+        toolMenu.DropDownItems.Add("Camera Settings", null, (s, e) => 
+        {
+            var frm = new CameraSettingsForm();
+            frm.Show(this); // Modeless
+        });
+        
+        toolMenu.DropDownItems.Add("Stop Camera", null, (s, e) => 
+        {
+            CameraManager.Instance.StopCamera();
+        });
+        
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
+        
+        toolMenu.DropDownItems.Add("Group", null, (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
+        });
+        
+        toolMenu.DropDownItems.Add("Ungroup", null, (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
+        });
+
+        toolMenu.DropDownItems.Add("Array Modifier", null, (s, e) =>
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 0) return;
+            
+            using var dlg = new GridArrayForm();
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                var cmd = new CloneArrayCommand(sel, dlg.Rows, dlg.Cols, dlg.GapX, dlg.GapY);
+                CommandManager.Instance.Execute(cmd);
+                if (_workbench != null) _workbench.Invalidate();
+            }
+        });
+        
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
+        
+        toolMenu.DropDownItems.Add("Attach to Path", null, (s, e) =>
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 2)
+            {
+                var txt = sel.OfType<LaserText>().FirstOrDefault();
+                var path = sel.FirstOrDefault(o => o is LaserPath || o is LaserBezier || o is LaserCircle);
+                if (txt != null && path != null && txt != path)
+                {
+                    txt.PathId = path.Id;
+                    // Auto-calculate offset based on text position
+                    txt.PathOffset = PathWarp.GetClosestOffset(path, txt.Position);
+                    _workbench.Invalidate();
+                }
+            }
+        });
+
+        toolMenu.DropDownItems.Add("Detach from Path", null, (s, e) =>
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            foreach (var txt in sel.OfType<LaserText>())
+            {
+                txt.PathId = Guid.Empty;
+            }
+            _workbench.Invalidate();
+        });
+
+        menuStrip.Items.Add(toolMenu);
+
         this.MainMenuStrip = menuStrip;
         this.Controls.Add(menuStrip);
 
@@ -234,7 +355,149 @@ public partial class MainForm : Form
             DataSource = ProjectState.Instance.Objects,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             RowHeadersVisible = false,
-            MultiSelect = true
+            MultiSelect = true,
+            AllowDrop = true // Enable Drag/Drop
+        };
+
+        // Context Menu
+        var ctxMenu = new ContextMenuStrip();
+        var itemMask = new ToolStripMenuItem("Mask Image with Shape");
+        var itemGroup = new ToolStripMenuItem("Group");
+        var itemUngroup = new ToolStripMenuItem("Ungroup");
+        var itemAttach = new ToolStripMenuItem("Attach to Path");
+        var itemDetach = new ToolStripMenuItem("Detach from Path");
+
+        itemMask.Click += (s, e) => applyMask();
+        itemGroup.Click += (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
+        };
+        itemUngroup.Click += (s, e) => 
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
+        };
+        itemAttach.Click += (s, e) => 
+        {
+             var sel = ProjectState.Instance.SelectedObjects;
+             if (sel.Count == 2)
+             {
+                 var txt = sel.OfType<LaserText>().FirstOrDefault();
+                 var path = sel.FirstOrDefault(o => o is LaserPath || o is LaserBezier || o is LaserCircle);
+                 if (txt != null && path != null && txt != path)
+                 {
+                     txt.PathId = path.Id;
+                     // Auto-calculate offset based on text position
+                     txt.PathOffset = PathWarp.GetClosestOffset(path, txt.Position);
+                     _workbench.Invalidate();
+                 }
+             }
+        };
+        itemDetach.Click += (s, e) =>
+        {
+             var sel = ProjectState.Instance.SelectedObjects;
+             foreach (var txt in sel.OfType<LaserText>())
+             {
+                 txt.PathId = Guid.Empty;
+             }
+             _workbench.Invalidate();
+        };
+
+        ctxMenu.Items.AddRange(new ToolStripItem[] { itemMask, new ToolStripSeparator(), itemGroup, itemUngroup, new ToolStripSeparator(), itemAttach, itemDetach });
+
+        ctxMenu.Opening += (s, e) => 
+        {
+            var sel = _objectList.SelectedRows;
+            itemMask.Enabled = false;
+            if (sel.Count == 2)
+            {
+                var obj1 = ProjectState.Instance.Objects[sel[0].Index];
+                var obj2 = ProjectState.Instance.Objects[sel[1].Index];
+                bool hasImage = obj1 is LaserImage || obj2 is LaserImage;
+                bool hasShape = obj1 is LaserCircle || obj1 is LaserRectangle || obj2 is LaserCircle || obj2 is LaserRectangle;
+                if (hasImage && hasShape) itemMask.Enabled = true;
+            }
+        };
+        ctxMenu.Items.Add(itemMask);
+        _objectList.ContextMenuStrip = ctxMenu;
+        
+        // Wire Drag/Drop Events
+        Rectangle dragBoxFromMouseDown = Rectangle.Empty;
+        int rowIndexFromMouseDown = -1;
+        int rowIndexOfItemUnderMouseToDrop = -1;
+
+        _objectList.MouseMove += (s, e) => 
+        {
+            if ((e.Button & MouseButtons.Left) == MouseButtons.Left)
+            {
+                // If the mouse moves outside the rectangle, start the drag
+                if (dragBoxFromMouseDown != Rectangle.Empty && !dragBoxFromMouseDown.Contains(e.X, e.Y))
+                {
+                    // Proceed with the drag and drop, passing in the list item
+                    DragDropEffects dropEffect = _objectList.DoDragDrop(_objectList.Rows[rowIndexFromMouseDown], DragDropEffects.Move);
+                }
+            }
+        };
+
+        _objectList.MouseDown += (s, e) => 
+        {
+             // Get the index of the item the mouse is below
+             rowIndexFromMouseDown = _objectList.HitTest(e.X, e.Y).RowIndex;
+
+             if (rowIndexFromMouseDown != -1)
+             {
+                 // Remember the point where the mouse down occurred
+                 // The DragSize indicates the size that the mouse can move before a drag event should be started
+                 Size dragSize = SystemInformation.DragSize;
+
+                 // Create a rectangle using the DragSize, with the MousePosition as the center of the rectangle
+                 dragBoxFromMouseDown = new Rectangle(new Point(e.X - (dragSize.Width / 2), e.Y - (dragSize.Height / 2)), dragSize);
+             }
+             else
+             {
+                 // Reset the rectangle if the mouse is not over an item in the ListBox
+                 dragBoxFromMouseDown = Rectangle.Empty;
+             }
+        };
+        
+        _objectList.DragOver += (s, e) => 
+        {
+            e.Effect = DragDropEffects.Move;
+        };
+
+        _objectList.DragDrop += (s, e) => 
+        {
+             // The mouse locations are relative to the screen, so they must be converted to client coordinates
+             Point clientPoint = _objectList.PointToClient(new Point(e.X, e.Y));
+                 
+             // Get the row index of the item the mouse is below
+             rowIndexOfItemUnderMouseToDrop = _objectList.HitTest(clientPoint.X, clientPoint.Y).RowIndex;
+
+             // If the drag operation was a move then remove and insert the row
+             if (e.Effect == DragDropEffects.Move)
+             {
+                 if (rowIndexOfItemUnderMouseToDrop < 0) rowIndexOfItemUnderMouseToDrop = _objectList.Rows.Count - 1; // Drop at end if missed
+                 
+                 // Perform reorder on Data Source
+                 var objects = ProjectState.Instance.Objects;
+                 if (rowIndexFromMouseDown >= 0 && rowIndexFromMouseDown < objects.Count)
+                 {
+                     var item = objects[rowIndexFromMouseDown];
+                     
+                     // Direct swap or move
+                     // Remove and Insert
+                     if (rowIndexOfItemUnderMouseToDrop != rowIndexFromMouseDown)
+                     {
+                         objects.RemoveAt(rowIndexFromMouseDown);
+                         objects.Insert(rowIndexOfItemUnderMouseToDrop, item);
+                         
+                         // Select the dropped item
+                         _objectList.ClearSelection();
+                         _objectList.Rows[rowIndexOfItemUnderMouseToDrop].Selected = true;
+                     }
+                 }
+             }
         };
         _objectList.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = "IsEnabled", HeaderText = "On", Width = 30 });
         _objectList.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Name", HeaderText = "Name", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
@@ -242,7 +505,71 @@ public partial class MainForm : Form
         _objectList.Columns.Add(new DataGridViewTextBoxColumn { Name = "LayerPower", HeaderText = "Pwr%", Width = 40, ReadOnly = true });
         _objectList.Columns.Add(new DataGridViewTextBoxColumn { Name = "LayerSpeed", HeaderText = "Spd", Width = 40, ReadOnly = true });
         
-        tabObjects.Controls.Add(_objectList);
+        // Order Buttons Toolbar
+        var tsOrder = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
+        var btnUp = new ToolStripButton("▲") { ToolTipText = "Move Up" };
+        var btnDown = new ToolStripButton("▼") { ToolTipText = "Move Down" };
+        
+        btnUp.Click += (s, e) => 
+        {
+            var sel = _objectList.SelectedRows;
+            if (sel.Count == 1)
+            {
+                int idx = sel[0].Index;
+                if (idx > 0)
+                {
+                    var objects = ProjectState.Instance.Objects;
+                    var item = objects[idx];
+                    objects.RemoveAt(idx);
+                    objects.Insert(idx - 1, item);
+                    _objectList.ClearSelection();
+                    _objectList.Rows[idx - 1].Selected = true;
+                }
+            }
+        };
+
+        btnDown.Click += (s, e) => 
+        {
+            var sel = _objectList.SelectedRows;
+            if (sel.Count == 1)
+            {
+                int idx = sel[0].Index;
+                var objects = ProjectState.Instance.Objects;
+                if (idx < objects.Count - 1)
+                {
+                    var item = objects[idx];
+                    objects.RemoveAt(idx);
+                    objects.Insert(idx + 1, item);
+                    _objectList.ClearSelection();
+                    _objectList.Rows[idx + 1].Selected = true;
+                }
+            }
+        };
+        
+        tsOrder.Items.Add(btnUp);
+        tsOrder.Items.Add(btnDown);
+
+        tabObjects.Controls.Add(_objectList); // Add list first (Fill)
+        tabObjects.Controls.Add(tsOrder); // Add toolbar (Top) - Docking order matters?
+        // In WinForms, Control added last is at top of Z-order?
+        // Docking precedence: The LAST added control with DockStyle.Top is at the TOP-MOST position? 
+        // No, typically if Fill is verified, we add Top first, then Fill.
+        // Or we add Fill first, but since it fills remaining, if Top is not there yet...
+        // Actually: "Controls are docked in reverse Z-order." (Last added is closest to edge?)
+        // Let's add ToolStrip FIRST if we want it at the top, or LAST?
+        // "The last control added to the Controls collection is the first one docked." 
+        // Wait, "The control at the beginning of the Controls collection is docked last." (Z-Order 0 is top).
+        // Controls.Add adds to the END of the collection.
+        // So `_objectList` is added. Then `tsOrder`.
+        // If we add `tsOrder` (Top) second, it will be added to the collection.
+        // If `tsOrder` is at generic Z-index 0 (top of stack).
+        // Docking: The control with Z-order 0 is docked FIRST?
+        // Let's rely on standard practice: Add Top controls, then Fill controls? No, Fill consumes remaining space.
+        // To be safe: Add tsOrder (Top), THEN _objectList (Fill).
+        
+        // So I will change the logic to clear and re-add or just use BringToFront on tsOrder.
+        // Actually, replacing content allows me to just add them in correct order.
+        
         _rightTabControl.TabPages.Add(tabObjects);
 
         // Tab 2: Layers
@@ -456,50 +783,57 @@ public partial class MainForm : Form
         _rightTabControl.TabPages.Add(tabConsole);
         
         // Wire up Logging
+        _logTimer = new System.Windows.Forms.Timer { Interval = 100 };
+        _logTimer.Tick += (s, e) => 
+        {
+            if (_logBuffer.IsEmpty || txtLog.IsDisposed) return;
+            
+            var sb = new System.Text.StringBuilder();
+            int count = 0;
+            while (_logBuffer.TryDequeue(out string? result) && count < 500) // Limit batch size just in case
+            {
+                sb.Append(result);
+                count++;
+            }
+            
+            if (sb.Length > 0)
+            {
+                txtLog.SelectionStart = txtLog.TextLength;
+                txtLog.SelectionLength = 0;
+                // AppendText automatically scrolls usually, but we can ensure it
+                txtLog.AppendText(sb.ToString());
+                txtLog.ScrollToCaret();  
+            }
+        };
+        _logTimer.Start();
+
+        // Wire up Logging
         SerialInterface.Instance.LineReceived += (line) => 
         {
             if (txtLog.IsDisposed) return;
-            // optimize: ignore 'ok' to prevent spam/lag
-            if (line == "ok") return; 
-
-            try {
-                txtLog.BeginInvoke(() => 
-                {
-                    if (line.Trim().StartsWith("error:"))
-                    {
-                         string errCode = line.Trim().Substring(6);
-                         string msg = GrblErrors.GetMessage(errCode);
-                         
-                         txtLog.SelectionStart = txtLog.TextLength;
-                         txtLog.SelectionLength = 0;
-                         txtLog.SelectionColor = Color.Red;
-                         txtLog.AppendText($"< {line} ({msg})\n");
-                         txtLog.SelectionColor = txtLog.ForeColor;
-                    }
-                    else
-                    {
-                        txtLog.AppendText($"< {line}\n");
-                    }
-                    txtLog.ScrollToCaret();
-                });
-            } catch { } 
+            
+            // Format message
+            string logMsg;
+            if (line.Contains("error:"))
+            {
+                 // We can't easily colorize inside the batch without complex RTF parsing or multiple appends.
+                 // For now, valid performance over fancy color for *errors* mixed with fast streams.
+                 // Or we can prefix specially.
+                 logMsg = $"< {line} (Error)\n";
+            }
+            else
+            {
+                logMsg = $"< {line}\n";
+            }
+            _logBuffer.Enqueue(logMsg);
         };
 
+        // Log Outgoing Data
         // Log Outgoing Data
         SerialInterface.Instance.LineSent += (line) =>
         {
             if (txtLog.IsDisposed) return;
-             try {
-                txtLog.BeginInvoke(() => 
-                {
-                    txtLog.SelectionStart = txtLog.TextLength;
-                    txtLog.SelectionLength = 0;
-                    txtLog.SelectionColor = Color.Yellow; 
-                    txtLog.AppendText($">> {line}\n");
-                    txtLog.SelectionColor = txtLog.ForeColor;
-                    txtLog.ScrollToCaret();
-                });
-             } catch {}
+            _logBuffer.Enqueue($">> {line}\n");
         };
 
         // Handle dynamically detected buffer size
@@ -667,19 +1001,44 @@ public partial class MainForm : Form
         tsRow2.Items.Add(new ToolStripControlHost(_nudSizeW));
         
         tsRow2.Items.Add(new ToolStripLabel("H:"));
-        _nudSizeH = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = 0, Maximum = 10000, Increment = 10 };
+        _nudSizeH = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 1000, Width = 60 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudSizeH));
-        
+
         tsRow2.Items.Add(new ToolStripSeparator());
+        tsRow2.Items.Add(new ToolStripLabel("R:"));
+        _nudRotation = new NumericUpDown { DecimalPlaces = 1, Minimum = -3600, Maximum = 3600, Width = 60 };
+        tsRow2.Items.Add(new ToolStripControlHost(_nudRotation));
+        
         _lblLayerInfo = new ToolStripLabel("-");
         tsRow2.Items.Add(_lblLayerInfo);
         
         _topToolbarPanel.Controls.Add(tsRow1);
         _topToolbarPanel.Controls.Add(tsRow2);
         
+        // Row 3: Text Controls
+        var tsRow3 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
+        
+        tsRow3.Items.Add(new ToolStripLabel("Text:"));
+        _txtContent = new ToolStripTextBox { Width = 150 };
+        tsRow3.Items.Add(_txtContent);
+        
+        tsRow3.Items.Add(new ToolStripLabel("Font:"));
+        _cmbFont = new ToolStripComboBox { Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        foreach (var family in FontFamily.Families)
+        {
+            _cmbFont.Items.Add(family.Name);
+        }
+        tsRow3.Items.Add(_cmbFont);
+        
+        tsRow3.Items.Add(new ToolStripLabel("Size:"));
+        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 1, Maximum = 1000, DecimalPlaces = 1 };
+        tsRow3.Items.Add(new ToolStripControlHost(_nudFontSize));
+        
+        _topToolbarPanel.Controls.Add(tsRow3);
+        
         this.Controls.Add(_topToolbarPanel); 
         
-        // Wire Properties Logic (Moved from Initialize to here for cleaner access)
+        // Wire Properties Logic
         EventHandler valChanged = (s, e) =>
         {
             if (_isUpdatingUI) return;
@@ -692,6 +1051,7 @@ public partial class MainForm : Form
                 float ny = (float)_nudPosY.Value;
                 float nw = (float)_nudSizeW.Value;
                 float nh = (float)_nudSizeH.Value;
+                float nRot = (float)_nudRotation.Value; // Added rotation value
                 
                 // Position Change
                 if(Math.Abs(obj.Position.X - nx) > 0.01 || Math.Abs(obj.Position.Y - ny) > 0.01)
@@ -702,12 +1062,18 @@ public partial class MainForm : Form
                      _workbench.Invalidate();
                 }
                 
-                // Size Change (Simplified: just update size directly for now to support "Live", logic for ScaleCommand is complex)
+                // Size Change
                 if(Math.Abs(obj.Size.Width - nw) > 0.01 || Math.Abs(obj.Size.Height - nh) > 0.01)
                 {
                     obj.Size = new SizeF(nw, nh);
                     _workbench.Invalidate();
-                    // Note: No Undo for Size yet as per previous code comments
+                }
+
+                // Rotation Change (Added)
+                if (Math.Abs(obj.Rotation - nRot) > 0.01)
+                {
+                    obj.Rotation = nRot;
+                    _workbench.Invalidate();
                 }
             }
         };
@@ -716,6 +1082,34 @@ public partial class MainForm : Form
         _nudPosY.ValueChanged += valChanged;
         _nudSizeW.ValueChanged += valChanged;
         _nudSizeH.ValueChanged += valChanged;
+        _nudRotation.ValueChanged += valChanged; // Added event handler
+
+        // Wire Text Logic
+        EventHandler textChanged = (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.Text = _txtContent.Text;
+                if (_cmbFont.SelectedItem != null) txt.FontName = _cmbFont.SelectedItem?.ToString() ?? "Arial";
+                txt.FontSize = (float)_nudFontSize.Value;
+                
+                // Recalc Size
+                 using (var tmpBmp = new Bitmap(1, 1))
+                 using (var g = Graphics.FromImage(tmpBmp))
+                 using (var f = new Font(txt.FontName, txt.FontSize))
+                 {
+                      txt.Size = g.MeasureString(txt.Text, f);
+                 }
+                
+                _workbench.Invalidate();
+            }
+        };
+
+        _txtContent.TextChanged += textChanged;
+        _cmbFont.SelectedIndexChanged += textChanged;
+        _nudFontSize.ValueChanged += textChanged;
     }
 
     private void InitializeLayers()
@@ -829,8 +1223,12 @@ public partial class MainForm : Form
             { "Select", ToolType.Select },
             { "Line", ToolType.DrawLine },
             { "Box", ToolType.DrawBox },
+            { "Circle", ToolType.DrawCircle },
+            { "Bezier", ToolType.DrawBezier },
             { "Text", ToolType.Text },
-            { "Ruler", ToolType.Ruler }
+            { "Rotate", ToolType.Rotate },
+            { "Ruler", ToolType.Ruler },
+            { "Move", ToolType.ClickToMove }
         };
 
         foreach (var kvp in toolMap)
@@ -1049,40 +1447,6 @@ public partial class MainForm : Form
         
         flow.Controls.Add(new Label { Text = "--------", AutoSize = true });
         
-        var flowGroup = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
-        var btnGroup = new Button { Text = "Group", Width = 60 };
-        var btnUngroup = new Button { Text = "Ungroup", Width = 60 };
-        var btnArray = new Button { Text = "Array", Width = 60 };
-        
-        btnGroup.Click += (s, e) => 
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
-        };
-        btnUngroup.Click += (s, e) => 
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
-        };
-        btnArray.Click += (s, e) =>
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count == 0) return;
-            
-            using var dlg = new GridArrayForm();
-            if (dlg.ShowDialog() == DialogResult.OK)
-            {
-                var cmd = new CloneArrayCommand(sel, dlg.Rows, dlg.Cols, dlg.GapX, dlg.GapY);
-                CommandManager.Instance.Execute(cmd);
-                if (_workbench != null) _workbench.Invalidate();
-            }
-        };
-        
-        flowGroup.Controls.Add(btnGroup);
-        flowGroup.Controls.Add(btnUngroup);
-        flowGroup.Controls.Add(btnArray);
-        
-        flow.Controls.Add(flowGroup);
         
         // REMOVED HISTORY
         // lbHistory.Items.Clear();
@@ -1293,12 +1657,37 @@ public partial class MainForm : Form
             _nudPosY.Enabled = true;
             _nudSizeW.Enabled = true;
             _nudSizeH.Enabled = true;
-            
+            _nudRotation.Enabled = true; // Added enable
+
             _nudPosX.Value = (decimal)obj.Position.X;
             _nudPosY.Value = (decimal)obj.Position.Y;
             _nudSizeW.Value = (decimal)obj.Size.Width;
             _nudSizeH.Value = (decimal)obj.Size.Height;
+            _nudRotation.Value = (decimal)obj.Rotation; // Added value set
             
+            // Text Toolbar
+            if (obj is LaserText txt)
+            {
+                _txtContent.Enabled = true;
+                _cmbFont.Enabled = true;
+                _nudFontSize.Enabled = true;
+                
+                _txtContent.Text = txt.Text;
+                if (_cmbFont.Items.Contains(txt.FontName))
+                    _cmbFont.SelectedItem = txt.FontName;
+                else if (_cmbFont.Items.Count > 0)
+                     _cmbFont.SelectedIndex = 0; 
+                    
+                _nudFontSize.Value = (decimal)txt.FontSize;
+            }
+            else
+            {
+                _txtContent.Enabled = false;
+                _cmbFont.Enabled = false;
+                _nudFontSize.Enabled = false;
+                _txtContent.Text = "";
+            }
+
             // Update Layer Info Label
             var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId);
             if (layer != null)
@@ -1316,6 +1705,11 @@ public partial class MainForm : Form
             _nudPosY.Enabled = false;
             _nudSizeW.Enabled = false;
             _nudSizeH.Enabled = false;
+            _nudRotation.Enabled = false; // Added disable
+            
+            _txtContent.Enabled = false;
+            _cmbFont.Enabled = false;
+            _nudFontSize.Enabled = false;
             
             // Clear or set to 0? NUDs don't support empty string.
             // Just leaving enabled=false is visible enough.
@@ -1324,7 +1718,8 @@ public partial class MainForm : Form
             _nudPosY.Value = 0;
             _nudSizeW.Value = 0;
             _nudSizeH.Value = 0;
-            
+            _txtContent.Text = "";
+
             _lblLayerInfo.Text = "-";
         }
         _isUpdatingUI = false;
