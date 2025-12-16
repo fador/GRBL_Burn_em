@@ -184,6 +184,7 @@ namespace laser_gui_test.Data
                 _allIds.ToArray(),
                 board,
                 _imageSize,
+                // Casting check
                 // ...
              );
              */

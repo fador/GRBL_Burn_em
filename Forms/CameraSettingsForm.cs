@@ -6,7 +6,7 @@ namespace laser_gui_test.Forms
 {
     public class CameraSettingsForm : Form
     {
-        private CameraControl _cameraControl;
+        private CameraControl _cameraControl = null!;
 
         public CameraSettingsForm()
         {

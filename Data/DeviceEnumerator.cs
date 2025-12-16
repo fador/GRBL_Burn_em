@@ -73,7 +73,7 @@ namespace laser_gui_test.Data
                         try
                         {
                             Guid IID_IPropertyBag = new Guid("55272A00-42CB-11CE-8135-00AA004BB851");
-                             moniker.BindToStorage(null, null, ref IID_IPropertyBag, out bagObj);
+                             moniker.BindToStorage((IBindCtx?)null, (IMoniker?)null, ref IID_IPropertyBag, out bagObj);
                              
                              IPropertyBag? bag = (IPropertyBag?)bagObj;
                              if (bag != null)
@@ -90,7 +90,7 @@ namespace laser_gui_test.Data
                         {
                             // moniker.GetDisplayName is generic, but IMoniker here is System.Runtime.InteropServices.ComTypes.IMoniker
                             // which has GetDisplayName method
-                            moniker.GetDisplayName(null, null, out devicePath);
+                            moniker.GetDisplayName((IBindCtx?)null, (IMoniker?)null, out devicePath);
                         }
                         catch {}
 

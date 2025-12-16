@@ -8,17 +8,20 @@ namespace laser_gui_test.Controls
 {
     public class CameraControl : UserControl
     {
-        private ComboBox _cmbDevices;
-        private Button _btnStartStop;
-        private CheckBox _chkOverlay;
-        private TrackBar _trkOpacity;
-        private Button _btnCalibrate;
+        private ComboBox _cmbDevices = null!;
+        private Button _btnStartStop = null!;
+        private CheckBox _chkOverlay = null!;
+        private TrackBar _trkOpacity = null!;
+        private Button _btnCalibrate = null!;
         
         // Manual Adjustments
-        private NumericUpDown _nudX;
-        private NumericUpDown _nudY;
-        private NumericUpDown _nudWidth;
-        private NumericUpDown _nudHeight;
+        private NumericUpDown _nudX = null!;
+        private NumericUpDown _nudY = null!;
+        private NumericUpDown _nudWidth = null!;
+        private NumericUpDown _nudHeight = null!;
+        
+        private Button _btnRefresh = null!;
+        private CheckBox _chkMounted = null!;
 
         public CameraControl()
         {
@@ -87,33 +90,30 @@ namespace laser_gui_test.Controls
             // X
             flowOverlay.Controls.Add(new Label { Text = "X:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 2);
             _nudX = new NumericUpDown { DecimalPlaces = 2, Minimum = -5000, Maximum = 5000, Dock = DockStyle.Fill };
+            _nudX.ValueChanged += (s,e) => { UpdateConfigFromUI(); UpdateOverlay(); };
             flowOverlay.Controls.Add(_nudX, 1, 2);
             
             // Y
             flowOverlay.Controls.Add(new Label { Text = "Y:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 3);
             _nudY = new NumericUpDown { DecimalPlaces = 2, Minimum = -5000, Maximum = 5000, Dock = DockStyle.Fill };
+            _nudY.ValueChanged += (s,e) => { UpdateConfigFromUI(); UpdateOverlay(); };
             flowOverlay.Controls.Add(_nudY, 1, 3);
             
             // W
             flowOverlay.Controls.Add(new Label { Text = "W:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 4);
             _nudWidth = new NumericUpDown { DecimalPlaces = 2, Minimum = 1, Maximum = 10000, Dock = DockStyle.Fill, Value = 100 };
+            _nudWidth.ValueChanged += (s,e) => { UpdateConfigFromUI(); UpdateOverlay(); };
             flowOverlay.Controls.Add(_nudWidth, 1, 4);
 
             // H
             flowOverlay.Controls.Add(new Label { Text = "H:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 5);
             _nudHeight = new NumericUpDown { DecimalPlaces = 2, Minimum = 1, Maximum = 10000, Dock = DockStyle.Fill, Value = 100 };
+            _nudHeight.ValueChanged += (s,e) => { UpdateConfigFromUI(); UpdateOverlay(); };
             flowOverlay.Controls.Add(_nudHeight, 1, 5);
             
             grpOverlay.Controls.Add(flowOverlay);
             layout.Controls.Add(grpOverlay);
             
-            // Events for NUDs
-            EventHandler updateVal = (s, e) => { UpdateConfigFromUI(); UpdateOverlay(); };
-            _nudX.ValueChanged += updateVal;
-            _nudY.ValueChanged += updateVal;
-            _nudWidth.ValueChanged += updateVal;
-            _nudHeight.ValueChanged += updateVal;
-
             layout.Controls.Add(new Label { Text = "", Height = 10 }); // Spacer
 
             // 4. Calibration & Mounting
@@ -151,8 +151,6 @@ namespace laser_gui_test.Controls
             UpdateUIState();
         }
 
-        private Button _btnRefresh;
-
         private void UpdateUIState()
         {
             var isMounted = _chkMounted.Checked;
@@ -161,7 +159,7 @@ namespace laser_gui_test.Controls
             // For now keep them available for manual tweak.
         }
 
-        private void OnCalibrateClick(object sender, EventArgs e)
+        private void OnCalibrateClick(object? sender, EventArgs e)
         {
             if (_chkMounted.Checked)
             {
@@ -260,7 +258,7 @@ namespace laser_gui_test.Controls
             }
         }
         
-        private void OnRefreshClick(object sender, EventArgs e)
+        private void OnRefreshClick(object? sender, EventArgs e)
         {
              // Trigger Grid Scan
              if (MessageBox.Show("Start Workspace Scan? The machine will move to cover the work area.", "Scan", MessageBoxButtons.YesNo) == DialogResult.Yes)
@@ -270,7 +268,7 @@ namespace laser_gui_test.Controls
              }
         }
 
-        private CheckBox _chkMounted;
+
 
         private void LoadSettings()
         {
@@ -316,7 +314,7 @@ namespace laser_gui_test.Controls
             }
         }
 
-        private void OnStartStopClick(object sender, EventArgs e)
+        private void OnStartStopClick(object? sender, EventArgs e)
         {
             if (CameraManager.Instance.IsRunning)
             {

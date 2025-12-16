@@ -10,11 +10,11 @@ namespace laser_gui_test.Forms
 {
     public class ArucoCalibrationForm : Form
     {
-        private PictureBox _pbCamera;
-        private Button _btnAddFrame;
-        private Button _btnCalibrate;
-        private Button _btnReset;
-        private Label _lblStatus;
+        private PictureBox _pbCamera = null!;
+        private Button _btnAddFrame = null!;
+        private Button _btnCalibrate = null!;
+        private Button _btnReset = null!;
+        private Label _lblStatus = null!;
         private int _framesCount = 0;
         
         private Mat? _currentFrameMat;

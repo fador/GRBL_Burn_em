@@ -14,7 +14,7 @@ namespace laser_gui_test.Data
         private bool _cancel = false;
         
         // public event Action<int, int> ProgressChanged;
-        public event Action Finished;
+        public event Action? Finished;
 
         public GridCaptureJob()
         {

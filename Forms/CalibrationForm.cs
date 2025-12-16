@@ -8,10 +8,10 @@ namespace laser_gui_test.Forms
 {
     public class CalibrationForm : Form
     {
-        private PictureBox _pbCamera;
-        private Label _lblInstruction;
+        private PictureBox _pbCamera = null!;
+        private Label _lblInstruction = null!;
         private List<PointF> _imagePoints = new List<PointF>();
-        private Bitmap _currentFrame;
+        private Bitmap _currentFrame = null!;
         
         public PointF[] SelectedPoints => _imagePoints.ToArray();
 
@@ -52,7 +52,7 @@ namespace laser_gui_test.Forms
             catch {}
         }
 
-        private void OnCameraClick(object sender, MouseEventArgs e)
+        private void OnCameraClick(object? sender, MouseEventArgs e)
         {
             if (_imagePoints.Count >= 4) return;
             
