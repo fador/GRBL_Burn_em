@@ -25,5 +25,12 @@ namespace laser_gui_test.Data
         public bool IsHeadMounted { get; set; }
         public int ImageWidth { get; set; }
         public int ImageHeight { get; set; }
+        
+        // Helper for basic affine (if not using Homography)
+        public float ScaleX { get; set; } = 1.0f;
+        public float ScaleY { get; set; } = 1.0f;
+        public float Rotation { get; set; } = 0.0f; // Degrees
+        public float TranslationX { get; set; }
+        public float TranslationY { get; set; }
     }
 }

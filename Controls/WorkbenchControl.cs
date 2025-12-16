@@ -156,10 +156,69 @@ public class WorkbenchControl : Control
 
     private void DrawBackgroundImage(Graphics g)
     {
-        if (OverlayImage != null)
+        var config = AppConfiguration.Instance;
+        
+        // 1. Draw Composite/Scanned Images (Head Mounted Backlog)
+        if (config.CameraIsMounted)
         {
-             // Draw Image in World Coordinates
-             // We need to handle Opacity
+             var frames = CameraManager.Instance.CapturedFrames;
+             // Lock and Iterate
+             // Using a Copy or Lock to avoid collection was modified?
+             // CameraManager should manage the list thread-safe.
+             var list = frames.ToList(); // Shallow copy of list
+             
+             if (list.Count > 0)
+             {
+                 float opacity = config.CameraOverlayOpacity;
+                 if (opacity <= 0) return;
+                 
+                 System.Drawing.Imaging.ColorMatrix cm = new System.Drawing.Imaging.ColorMatrix();
+                 cm.Matrix33 = opacity;
+                 using var ia = new System.Drawing.Imaging.ImageAttributes();
+                 ia.SetColorMatrix(cm);
+
+                 foreach(var frame in list)
+                 {
+                     try 
+                     {
+                         // Frame.WorldX/Y is Center of Camera
+                         // Frame.Width/Height is FOV size
+                         // Top-Left:
+                         float x = frame.WorldX - frame.Width / 2;
+                         float y = frame.WorldY + frame.Height / 2; // Y-Up: Top is Y+H/2
+                         
+                         // DrawImage expects Top-Left?
+                         // In our transform (Scale Y negative), we draw from Top-Left down.
+                         // It handles coordinates:
+                         // Dest Rect: x, y, w, h.
+                         // But if we simply use DrawImage(img, rx, ry, rw, rh):
+                         // It draws from rx,ry towards +X, +Y.
+                         // If Y is Up in World, +Y is "Up".
+                         // In Windows GDI, +Y is Down.
+                         // We have `g.ScaleTransform(zoom, -zoom)`.
+                         // So World +Y draws Screen -Y (Up).
+                         // So if we start at (x,y), and draw height H...
+                         // Let's rely on the 3-point draw to be safe, same as Overlay.
+                         
+                         PointF[] destPoints = {
+                             new PointF(x, y),                 // UL (World Top-Left)
+                             new PointF(x + frame.Width, y),   // UR
+                             new PointF(x, y - frame.Height)   // DL (World Bottom-Left)
+                         };
+                         
+                         g.DrawImage(frame.Image, destPoints, 
+                             new RectangleF(0, 0, frame.Image.Width, frame.Image.Height),
+                             GraphicsUnit.Pixel, ia);
+                     }
+                     catch {}
+                 }
+             }
+        }
+
+        // 2. Draw Live Overlay (Stationary or Single Frame Mounted)
+        if (OverlayImage != null && (!config.CameraIsMounted || config.ShowCameraOverlay)) // Show Live even if mounted? Yes, usually.
+        {
+             // ... existing logic ...
              
              // Create ColorMatrix
              float opacity = OverlayImageOpacity;
@@ -173,7 +232,9 @@ public class WorkbenchControl : Control
              ia.SetColorMatrix(cm);
              
              // Get Config
-             var config = AppConfiguration.Instance;
+             // Get Config
+             // Valid config already exists in scope from line 159
+             // var config = AppConfiguration.Instance;
              
              // Dest Rect
              float x = config.CameraOverlayX;

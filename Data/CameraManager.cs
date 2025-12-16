@@ -27,6 +27,9 @@ namespace laser_gui_test.Data
         public event Action? CameraStopped;
         
         public CalibrationData Calibration { get; set; } = new CalibrationData();
+        public List<CapturedFrame> CapturedFrames { get; private set; } = new List<CapturedFrame>();
+        private object _framesLock = new object();
+        
         
         public bool IsRunning => _capture != null && _capture.IsOpened();
 
@@ -226,6 +229,15 @@ namespace laser_gui_test.Data
         public void Dispose()
         {
             StopCamera();
+        }
+
+        public void StartScan()
+        {
+            // TODO: Implement Scanning Logic
+            // 1. Calculate Grid
+            // 2. Create Job
+            // 3. Run Job
+            System.Windows.Forms.MessageBox.Show("Scanning Logic Not Implemented Yet");
         }
     }
 }
