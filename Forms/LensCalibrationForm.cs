@@ -55,6 +55,7 @@ namespace laser_gui_test.Forms
         {
             this.Size = new Size(900, 600);
             this.Text = "Lens Calibration (Circle Grid)";
+            this.TopMost = true; // Keep form on top
             this.FormClosing += (s, e) => {
                  CameraManager.Instance.FrameReceived -= OnFrameReceived;
                  foreach(var m in _capturedFrames) m.Dispose();
@@ -85,6 +86,10 @@ namespace laser_gui_test.Forms
             _btnCalibrate = new Button { Text = "Calibrate Now", Width = 200, Height = 40, BackColor = Color.LightGreen, Enabled = false };
             _btnCalibrate.Click += OnCalibrateClick;
             pnlRight.Controls.Add(_btnCalibrate);
+
+            var btnAuto = new Button { Text = "Start Auto Calibration", Width = 200, Height = 40, BackColor = Color.LightSkyBlue, Margin = new Padding(0, 10, 0, 0) };
+            btnAuto.Click += OnAutoCalibrateClick;
+            pnlRight.Controls.Add(btnAuto);
             
             pnlRight.Controls.Add(new Label { Text = "Captured Frames:", AutoSize = true, Margin = new Padding(0, 10, 0, 0) });
             _lstFrames = new ListBox { Width = 200, Height = 200 };
@@ -140,7 +145,7 @@ namespace laser_gui_test.Forms
                     
                     if (detected != null)
                          _lblStatus.Text = "Pattern DETECTED";
-                    else
+                    else if (!_isAutoCalibrating) // Don't overwrite auto status
                          _lblStatus.Text = "Looking for pattern...";
                 }));
             }
@@ -153,6 +158,11 @@ namespace laser_gui_test.Forms
         }
         
         private void OnCaptureClick(object? sender, EventArgs e)
+        {
+            CaptureCurrentFrame();
+        }
+
+        private bool CaptureCurrentFrame()
         {
             Mat? capture = null;
             lock(_lock)
@@ -171,19 +181,140 @@ namespace laser_gui_test.Forms
                     _capturedFrames.Add(capture);
                     _lstFrames.Items.Add($"Frame {_capturedFrames.Count}");
                     UpdateButtons();
+                    return true;
                 }
                 else
                 {
-                    MessageBox.Show("Pattern not detected in this frame. Please adjust angle/lighting.");
+                    if (!_isAutoCalibrating)
+                        MessageBox.Show(this, "Pattern not detected in this frame. Please adjust angle/lighting.");
                     capture.Dispose();
                 }
             }
+            return false;
         }
         
         private void UpdateButtons()
         {
             _btnCalibrate.Enabled = _capturedFrames.Count >= 5;
             _btnCalibrate.Text = $"Calibrate ({_capturedFrames.Count} frames)";
+        }
+        
+        private bool _isAutoCalibrating = false;
+
+        private async void OnAutoCalibrateClick(object? sender, EventArgs e)
+        {
+            if (_isAutoCalibrating) return;
+            
+            if (MessageBox.Show(this, "Ensure the laser area is clear.\nThe machine will move around the current position.\nContinue?", "Auto Calibration", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            _isAutoCalibrating = true;
+            _lblStatus.Text = "Starting Auto Calibration...";
+            
+            // Define offsets (mm) - 3x3 grid around center, spacing 15mm
+            // Assumes current position is roughly centered over pattern
+            var offsets = new List<(float x, float y)> 
+            {
+                (0, 0),
+                (-15, 0), (15, 0),
+                (0, -15), (0, 15),
+                (-10, -10), (10, -10),
+                (-10, 10), (10, 10)
+            };
+
+            try
+            {
+                // Store original pos
+                // We assume we are in relative mode or we use relative moves
+                // Let's use Relative Moves (G91) to be safer if we don't know absolute coords?
+                // Or Get Current Pos, then Move To Absolute.
+                // SerialInterface keeps track of MachinePosition.
+                
+                // Ensure we have a valid position
+                if (SerialInterface.Instance.MachineState == "Unknown")
+                {
+                    MessageBox.Show(this, "Machine state unknown. Connect first.");
+                    return;
+                }
+
+                PointF startPos = SerialInterface.Instance.MachinePosition;
+                
+                // Set to Relative Mode for moves? No, Absolute is better if we have startPos.
+                // Let's use G0 for moves.
+                
+                foreach(var offset in offsets)
+                {
+                    if (!_isAutoCalibrating) break;
+
+                    float targetX = startPos.X + offset.x;
+                    float targetY = startPos.Y + offset.y;
+                    
+                    _lblStatus.Text = $"Moving to {offset.x}, {offset.y}...";
+                    
+                    // Move
+                    SerialInterface.Instance.Write($"G0 X{targetX:F3} Y{targetY:F3}\n");
+                    
+                    // Wait for Idle
+                    await WaitUntilIdle();
+                    
+                    // Wait a bit for vibration to settle
+                    await System.Threading.Tasks.Task.Delay(500);
+                    
+                    _lblStatus.Text = "Capturing...";
+                    
+                    // Retry capture a few times if failed (maybe lighting/focus issue at edges)
+                    bool captured = false;
+                    for(int i=0; i<3; i++)
+                    {
+                        if (CaptureCurrentFrame())
+                        {
+                            captured = true;
+                            break;
+                        }
+                        await System.Threading.Tasks.Task.Delay(500); // Wait and retry
+                    }
+                    
+                    if (!captured)
+                    {
+                        // Log but continue? Or stop?
+                        // Let's continue, maybe next pos is better.
+                         _lblStatus.Text = "Capture Failed at this pos.";
+                         await System.Threading.Tasks.Task.Delay(500);
+                    }
+                }
+                
+                // Return to start
+                SerialInterface.Instance.Write($"G0 X{startPos.X:F3} Y{startPos.Y:F3}\n");
+                await WaitUntilIdle();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Auto Calibration Error: {ex.Message}");
+            }
+            finally
+            {
+                _isAutoCalibrating = false;
+                _lblStatus.Text = "Auto Calibration Complete.";
+            }
+        }
+
+        private async System.Threading.Tasks.Task WaitUntilIdle()
+        {
+             // Give time for command to start (buffer, parse, accelerator start)
+             await System.Threading.Tasks.Task.Delay(250);
+
+             // Simple polling loop
+             while (true)
+             {
+                 if (SerialInterface.Instance.MachineState.Equals("Idle", StringComparison.OrdinalIgnoreCase))
+                     return;
+                     
+                 // If Alarm?
+                 if (SerialInterface.Instance.MachineState.Contains("Alarm"))
+                     throw new Exception("Machine Alarm triggered during move.");
+                     
+                 await System.Threading.Tasks.Task.Delay(100);
+             }
         }
         
         private async void OnCalibrateClick(object? sender, EventArgs e)
@@ -212,7 +343,7 @@ namespace laser_gui_test.Forms
             
             if (err >= 0 && camMatrix != null && distCoeffs != null)
             {
-                MessageBox.Show($"Calibration Successful!\nReprojection Error: {err:F4} px", "Result", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, $"Calibration Successful!\nReprojection Error: {err:F4} px", "Result", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 
                 // Save
                 var calib = CameraManager.Instance.Calibration;
@@ -230,7 +361,7 @@ namespace laser_gui_test.Forms
             }
             else
             {
-                MessageBox.Show("Calibration Failed. Ensure frames are distinct and pattern is clear.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, "Calibration Failed. Ensure frames are distinct and pattern is clear.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 _btnCalibrate.Enabled = true;
                 _lblStatus.Text = "Failed.";
             }
