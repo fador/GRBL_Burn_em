@@ -73,7 +73,7 @@ public class SerialInterface
             Write("\u0018"); // Ctrl-X (Soft Reset)
             Thread.Sleep(100);
             Write("$X\n"); // Unlock
-            Write("$10=3\n"); // Enable Buffer Stats (as per user request)
+            //Write("$10=3\n"); // Enable Buffer Stats (as per user request)
             Write("?"); // Status report
         }
         catch (Exception ex)

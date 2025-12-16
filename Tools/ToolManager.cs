@@ -11,7 +11,8 @@ public enum ToolType
     Text,
     DrawCircle,
     DrawBezier,
-    Rotate
+    Rotate,
+    ClickToMove
 }
 
 public class ToolManager

@@ -37,6 +37,18 @@ public class AppConfiguration
     public int WindowWidth { get; set; } = 1200;
     public int WindowHeight { get; set; } = 800;
     public int WindowState { get; set; } = 0; // 0=Normal, 1=Min, 2=Max
+    
+    // Camera Settings
+    public string LastCameraDevice { get; set; } = "";
+    public bool ShowCameraOverlay { get; set; } = false;
+    public float CameraOverlayOpacity { get; set; } = 0.5f;
+    public bool CameraIsMounted { get; set; } = false; // False = Stationary
+    
+    // Manual Overlay Override (Legacy/Simple mode)
+    public float CameraOverlayX { get; set; } = 0;
+    public float CameraOverlayY { get; set; } = 0;
+    public float CameraOverlayWidth { get; set; } = 100;
+    public float CameraOverlayHeight { get; set; } = 100;
 
     private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
 

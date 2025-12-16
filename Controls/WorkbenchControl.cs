@@ -41,6 +41,24 @@ public class WorkbenchControl : Control
         }
     }
 
+    // Background Image Support
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Bitmap? OverlayImage { get; set; }
+    
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public PointF OverlayImagePosition { get; set; } = new PointF(0, 0); // World Coords (Top-Left?)
+    
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public SizeF OverlayImageSize { get; set; } = new SizeF(100, 100); // World Size
+    
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public float OverlayImageOpacity { get; set; } = 0.5f;
+
+
     private PointF Snap(PointF p)
     {
         if (!IsSnappingEnabled) return p;
@@ -82,6 +100,7 @@ public class WorkbenchControl : Control
         g.TranslateTransform(Width / 2f + _panOffset.X, Height / 2f + _panOffset.Y);
         g.ScaleTransform(_zoom, -_zoom); // Y-Up coordinate system
 
+        DrawBackgroundImage(g);
         DrawGrid(g);
         DrawWorkArea(g); // Draw Work Area before Origin
         DrawOrigin(g);
@@ -133,10 +152,70 @@ public class WorkbenchControl : Control
         
         using var pen = new Pen(Color.Black, 3.0f / _zoom);
         g.DrawRectangle(pen, x, y, w, h);
-        
-        // Label?
-        // using var font = new Font("Arial", 10f / _zoom);
-        // g.DrawString($"Area {w}x{h}", font, Brushes.Gray, x + 5/ _zoom, y + 5/_zoom);
+    }
+
+    private void DrawBackgroundImage(Graphics g)
+    {
+        if (OverlayImage != null)
+        {
+             // Draw Image in World Coordinates
+             // We need to handle Opacity
+             
+             // Create ColorMatrix
+             float opacity = OverlayImageOpacity;
+             if (opacity < 0) opacity = 0;
+             if (opacity > 1) opacity = 1;
+             
+             System.Drawing.Imaging.ColorMatrix cm = new System.Drawing.Imaging.ColorMatrix();
+             cm.Matrix33 = opacity;
+             
+             using var ia = new System.Drawing.Imaging.ImageAttributes();
+             ia.SetColorMatrix(cm);
+             
+             // Get Config
+             var config = AppConfiguration.Instance;
+             
+             // Dest Rect
+             float x = config.CameraOverlayX;
+             float y = config.CameraOverlayY;
+             float w = config.CameraOverlayWidth;
+             float h = config.CameraOverlayHeight;
+             
+             // Note: In our current View Transform (Scale Y = -Zoom), +Y is Down on screen (if global Y is Up).
+             // Wait, OnPaint: g.ScaleTransform(_zoom, -_zoom);
+             // If World Y is Up. (0,0) is origin. (0, 100) is Up.
+             // Screen Y is Down. (0,0) is Top-Left.
+             // (0, 100) World -> (0, -100) Screen. (Above top edge).
+             
+             // Image Drawing:
+             // If we draw image at (x,y) with height h.
+             // We want Top of Image to be at Y+H? Or Y?
+             // Usually "Position" means Top-Left of the entity.
+             // In Y-Up world, Top-Left is (x, y_max).
+             // If User sets Y=0 (Bottom), and H=100. Top is 100.
+             // So if OverlayY is "Bottom Edge", then we draw from Y+H down to Y.
+             // If OverlayY is "Top Edge", we draw from Y down to Y-H.
+             
+             // Let's assume standard UI convention: X,Y is Top-Left.
+             // So Top Edge = Y. Bottom Edge = Y - H.
+             // Right Edge = X + W.
+             
+             // However, CameraControl NUDs allow negative values.
+             
+             // Let's try to map the Image (0,0) [Top-Left] to World (x,y).
+             // And Image (0,h) [Bottom-Left] to World (x, y-h).
+             // This assumes Y is Top-Left coordinate.
+             
+             PointF[] destPoints = {
+                 new PointF(x, y),         // UL (Upper Left of source maps here) -> World Top-Left
+                 new PointF(x + w, y),     // UR -> World Top-Right
+                 new PointF(x, y - h)      // DL -> World Bottom-Left
+             };
+             
+             g.DrawImage(OverlayImage, destPoints, 
+                 new RectangleF(0, 0, OverlayImage.Width, OverlayImage.Height),
+                 GraphicsUnit.Pixel, ia);
+        }
     }
 
     private void DrawGrid(Graphics g)
@@ -458,6 +537,27 @@ public class WorkbenchControl : Control
              _measureStart = worldPos;
              _measureEnd = worldPos;
              Invalidate();
+             return;
+        }
+
+        // 3b. Click To Move
+        if (ToolManager.Instance.CurrentTool == ToolType.ClickToMove)
+        {
+             // Send Jog Command
+             // G0 or $J? 
+             // Use $J for jogging logic if supported, or direct G0 if state allows.
+             // Usually Click-To-Move implies "Jog Here".
+             // $J=G90 X... Y... F...
+             
+             // Check if machine is Idle or Jogging
+             if (SerialInterface.Instance.IsConnected)
+             {
+                 // We need Feed Rate. Let's use a default or fetch from UI?
+                 // For now hardcode or use safe default.
+                 int feed = 1000; // mm/min
+                 string cmd = $"$J=G90 X{snappedPos.X:F3} Y{snappedPos.Y:F3} F{feed}";
+                 SerialInterface.Instance.Write(cmd + "\n");
+             }
              return;
         }
 

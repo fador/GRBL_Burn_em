@@ -220,6 +220,12 @@ public partial class MainForm : Form
         var toolMenu = new ToolStripMenuItem("Tool");
         toolMenu.DropDownItems.Add("Mask Image with Shape", null, (s, e) => applyMask());
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
+        toolMenu.DropDownItems.Add("Camera Settings", null, (s, e) => 
+        {
+            var frm = new CameraSettingsForm();
+            frm.Show(this); // Modeless
+        });
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
         
         toolMenu.DropDownItems.Add("Group", null, (s, e) => 
         {
@@ -1215,7 +1221,8 @@ public partial class MainForm : Form
             { "Bezier", ToolType.DrawBezier },
             { "Text", ToolType.Text },
             { "Rotate", ToolType.Rotate },
-            { "Ruler", ToolType.Ruler }
+            { "Ruler", ToolType.Ruler },
+            { "Move", ToolType.ClickToMove }
         };
 
         foreach (var kvp in toolMap)
