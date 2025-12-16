@@ -161,70 +161,28 @@ namespace laser_gui_test.Controls
 
         private void OnCalibrateClick(object? sender, EventArgs e)
         {
-            if (_chkMounted.Checked)
-            {
-                // Head Mounted Calibration
-                // Workflow:
-                // 1. User confirms they are over a target.
-                // 2. We toggle overlay transparency? Or show Crosshair?
-                // 3. User clicks "Confirm".
-                // 4. We calculate offset assuming Target = Current Laser Position?
-                // Wait, if Laser is at X,Y. Camera is at X_cam, Y_cam.
-                // Camera sees Target (which is at X,Y).
-                // Center of Camera Image = X_cam, Y_cam.
-                // If Target is at Center of Image, then Camera Position = Target Position.
-                // So Offset = CameraPos - HeadPos.
-                // Usage: We know HeadPos (Machine Coords). We know Camera sees HeadPos. 
-                // So Camera is Physically at HeadPos. Offset = 0.
-                // BUT, usually Camera is offset from Head.
-                // True Workflow:
-                // 1. Burn Dot at (X0, Y0).
-                // 2. Move Head to (X1, Y1) such that Camera Center is on Dot.
-                // 3. Physical Camera is now at (X0, Y0).
-                // 4. Head is at (X1, Y1).
-                // 5. Offset = PhysicalCamera - Head = (X0 - X1, Y0 - Y1).
-                
-                var laserPos = SerialInterface.Instance.MachinePosition; // This assumes we track position
-                var res = MessageBox.Show(
-                    $"1. Pulse Laser to mark current spot (X:{laserPos.X}, Y:{laserPos.Y}).\n" +
-                    "2. Release button and Jog machine until the Camera Crosshair is EXACTLY on that spot.\n" +
-                    "3. Click OK here.",
-                    "Head Mounted Calibration", MessageBoxButtons.OKCancel);
-                
-                if (res == DialogResult.OK)
-                {
-                     var newPos = SerialInterface.Instance.MachinePosition;
-                     // Offset = OriginalSpot - NewSpot
-                     // We need to know OriginalSpot.
-                     // The User shouldn't move before Step 1? We don't know if they moved.
-                     // Better: "Enter coordinates of the target you are looking at".
-                     // Or assume they started at "Zero" relative to move?
-                     
-                     // Interactive:
-                     // We can't know "OriginalSpot" unless we recorded it before they jogged.
-                     // Let's assume they entered this mode AT the spot.
-                     // So LaserPos IS the Spot.
-                     
-                     float spotX = laserPos.X;
-                     float spotY = laserPos.Y;
-                     
-                     float currentHeadX = newPos.X;
-                     float currentHeadY = newPos.Y;
-                     
-                     float offX = spotX - currentHeadX;
-                     float offY = spotY - currentHeadY;
-                     
-                     AppConfiguration.Instance.CameraOverlayX = offX; // Reuse X/Y for Offset? 
-                     // Or use CalibrationData
-                     CameraManager.Instance.Calibration.OffsetX = offX;
-                     CameraManager.Instance.Calibration.OffsetY = offY;
-                     //AppConfiguration.Instance.Save(); // Save Calibration
-                     
-                     MessageBox.Show($"Calibrated! Offset: {offX}, {offY}");
-                }
-            }
-            else
-            {
+             var menu = new ContextMenuStrip();
+             
+             menu.Items.Add("Lens Calibration (Distortion)", null, (s, args) => 
+             {
+                 using var form = new LensCalibrationForm();
+                 form.ShowDialog();
+             });
+             
+             menu.Items.Add("-");
+
+             menu.Items.Add("Alignment: Head Mounted (Offset)", null, (s, args) => 
+             {
+                 using var form = new OffsetCalibrationForm();
+                 if (form.ShowDialog() == DialogResult.OK)
+                 {
+                     UpdateUIState();
+                     UpdateOverlay();
+                 }
+             });
+
+             menu.Items.Add("Alignment: Stationary (Homography)", null, (s, args) => 
+             {
                 // Stationary Calibration
                 using var form = new CalibrationForm();
                 if (form.ShowDialog() == DialogResult.OK)
@@ -232,13 +190,6 @@ namespace laser_gui_test.Controls
                     var imgPoints = form.SelectedPoints;
                     // Now Ask for World Points.
                     MessageBox.Show("Now click the 4 corresponding points on the Workbench Grid.\nUse the 'Measure' tool or simply Click-to-Select logic (Not implemented yet). \n\nFor now, we will simulate 4 corners of the work area: \n(0,0), (AreaW,0), (AreaW, AreaH), (0, AreaH).", "Step 2");
-                    
-                    // TODO: Interactive World Point Selection.
-                    // For MVP/Demo: Assume they clicked corners of the image which correspond to corners of bed.
-                    // If they fill the camera view with the bed...
-                    
-                    // Let's just create a dummy "World Points" logic for now or rely on user typing them?
-                    // Better: Compute Homography with simulated Bed Corners.
                     
                     var config = AppConfiguration.Instance;
                     // World Points (Bed Corners)
@@ -249,13 +200,12 @@ namespace laser_gui_test.Controls
                         new PointF(0, 0) // Bottom-Left
                     };
                     
-                    // Order matters! CalibrationForm click order must match.
-                    // Re-Sort? Or instruct user: TL, TR, BR, BL.
-                    
                     CameraManager.Instance.ComputeHomography(imgPoints, worldPoints);
                     MessageBox.Show("Homography Computed and Applied.");
                 }
-            }
+             });
+             
+             menu.Show(_btnCalibrate, new Point(0, _btnCalibrate.Height));
         }
         
         private void OnRefreshClick(object? sender, EventArgs e)
@@ -324,9 +274,9 @@ namespace laser_gui_test.Controls
             else
             {
                 int index = _cmbDevices.SelectedIndex;
-                if (index >= 0)
+                if (index >= 0 && _cmbDevices.SelectedItem != null)
                 {
-                    var deviceName = _cmbDevices.SelectedItem.ToString();
+                    var deviceName = _cmbDevices.SelectedItem.ToString() ?? "";
                     AppConfiguration.Instance.LastCameraDevice = deviceName;
                     AppConfiguration.Instance.Save();
                     

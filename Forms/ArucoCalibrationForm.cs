@@ -142,7 +142,7 @@ namespace laser_gui_test.Forms
 
         // ProcessFrame Removed (Inlined above for correct threading context)
 
-        private void OnAddFrame(object sender, EventArgs e)
+        private void OnAddFrame(object? sender, EventArgs e)
         {
             lock (_lock)
             {
@@ -163,7 +163,7 @@ namespace laser_gui_test.Forms
             }
         }
         
-        private void OnCalibrate(object sender, EventArgs e)
+        private void OnCalibrate(object? sender, EventArgs e)
         {
             if (_framesCount < 5)
             {
@@ -184,7 +184,7 @@ namespace laser_gui_test.Forms
             }
         }
         
-        private void OnReset(object sender, EventArgs e)
+        private void OnReset(object? sender, EventArgs e)
         {
             CameraManager.Instance.ResetCalibration();
             _framesCount = 0;

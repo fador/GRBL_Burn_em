@@ -21,6 +21,12 @@ namespace laser_gui_test.Data
         public float OffsetX { get; set; }
         public float OffsetY { get; set; }
         
+        // Calibration Pattern Settings
+        public int PatternRows { get; set; } = 4;
+        public int PatternCols { get; set; } = 11;
+        public float PatternSpacingMm { get; set; } = 20.0f; // Distance between centers
+        public CalibrationPatternType PatternType { get; set; } = CalibrationPatternType.AsymmetricCircles;
+
         // Settings
         public bool IsHeadMounted { get; set; }
         public int ImageWidth { get; set; }
@@ -32,5 +38,12 @@ namespace laser_gui_test.Data
         public float Rotation { get; set; } = 0.0f; // Degrees
         public float TranslationX { get; set; }
         public float TranslationY { get; set; }
+    }
+
+    public enum CalibrationPatternType
+    {
+        Chessboard,
+        Circles,
+        AsymmetricCircles
     }
 }

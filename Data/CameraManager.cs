@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -129,18 +130,167 @@ namespace laser_gui_test.Data
         }
         */
         
+
+
         private void LoadCalibration()
         {
-            // Load from file (json)
-            // TODO: Implement persistence
+            try 
+            {
+                if (System.IO.File.Exists("calibration.json"))
+                {
+                    string json = System.IO.File.ReadAllText("calibration.json");
+                    var data = JsonSerializer.Deserialize<CalibrationData>(json);
+                    if (data != null) Calibration = data;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to load calibration: {ex.Message}");
+            }
         }
 
         public void SaveCalibration()
         {
-             // Save to file
-             // TODO: Implement persistence
+             try
+             {
+                 var options = new JsonSerializerOptions { WriteIndented = true };
+                 string json = JsonSerializer.Serialize(Calibration, options);
+                 System.IO.File.WriteAllText("calibration.json", json);
+             }
+             catch (Exception ex)
+             {
+                 System.Diagnostics.Debug.WriteLine($"Failed to save calibration: {ex.Message}");
+             }
         }
 
+        public double CalibrateCameraDots(List<Mat> frames, int rows, int cols, float spacingMm, CalibrationPatternType type, out double[] cameraMatrix, out double[] distCoeffs)
+        {
+            cameraMatrix = new double[9];
+            distCoeffs = new double[5];
+
+            if (frames.Count == 0 || frames[0].Rows == 0) return -1;
+            
+            var objectPoints = new List<Point3f[]>();
+            var imagePoints = new List<Point2f[]>();
+            var size = new OpenCvSharp.Size(frames[0].Width, frames[0].Height);
+
+            // Generate Object Points (Real World 3D Coords of the Pattern)
+            // Z = 0
+            var obj = new List<Point3f>();
+            
+            if (type == CalibrationPatternType.AsymmetricCircles)
+            {
+                for (int i = 0; i < rows; i++)
+                {
+                    for (int j = 0; j < cols; j++)
+                    {
+                        // Asymmetric Circle Grid Logic
+                        // https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html#gad1205c4b8de3b5bc7ed8be5e1938f7ee
+                        // For asymmetric circle grid, the centers are:
+                        // (2*j + i%2)*spacing, i*spacing
+                         obj.Add(new Point3f((2 * j + i % 2) * spacingMm, i * spacingMm, 0));
+                    }
+                }
+            }
+            else
+            {
+                // Symmetric
+                for (int i = 0; i < rows; i++)
+                {
+                    for (int j = 0; j < cols; j++)
+                    {
+                        obj.Add(new Point3f(j * spacingMm, i * spacingMm, 0));
+                    }
+                }
+            }
+            var objArray = obj.ToArray();
+
+            // Detect in each frame
+            var patternSize = new OpenCvSharp.Size(cols, rows);
+            
+            // Flags
+            var flags = CalibrationFlags.None; 
+            // Often helpful: CalibrationFlags.RationalModel | CalibrationFlags.ThinPrismModel if high distortion.
+            // For standard lens: None or FixK3.
+            
+            foreach(var frame in frames)
+            {
+                var corners = DetectDotPattern(frame, debugDraw: null, rows, cols, type);
+                if (corners != null && corners.Length == rows * cols)
+                {
+                    imagePoints.Add(corners);
+                    objectPoints.Add(objArray);
+                }
+            }
+
+            if (imagePoints.Count < 5) return -2; // Not enough valid frames
+
+            using var camMat = Mat.Eye(3, 3, MatType.CV_64FC1).ToMat();
+            using var dist = Mat.Zeros(5, 1, MatType.CV_64FC1).ToMat();
+            
+            Mat[] rvecs;
+            Mat[] tvecs;
+            
+            // Convert points to Mats
+            var objectPointsMats = objectPoints.Select(p => Mat.FromPixelData(p.Length, 1, MatType.CV_32FC3, p)).ToList();
+            var imagePointsMats = imagePoints.Select(p => Mat.FromPixelData(p.Length, 1, MatType.CV_32FC2, p)).ToList();
+
+            double error = Cv2.CalibrateCamera(
+                objectPointsMats,
+                imagePointsMats,
+                size,
+                camMat,
+                dist,
+                out rvecs,
+                out tvecs,
+                flags
+            );
+
+            // Dispose temporary Mats
+            foreach (var m in objectPointsMats) m.Dispose();
+            foreach (var m in imagePointsMats) m.Dispose();
+
+            // Output
+            for(int i=0; i<3;i++)
+                for(int j=0; j<3; j++)
+                    cameraMatrix[i*3+j] = camMat.At<double>(i, j);
+            
+            for(int i=0; i<5; i++)
+                distCoeffs[i] = dist.At<double>(i, 0);
+
+            // Cleanup Mats
+            if (rvecs != null) foreach(var m in rvecs) m.Dispose();
+            if (tvecs != null) foreach(var m in tvecs) m.Dispose();
+
+            return error;
+        }
+
+        public Point2f[]? DetectDotPattern(Mat frame, Mat? debugDraw, int rows, int cols, CalibrationPatternType type)
+        {
+             var patternSize = new OpenCvSharp.Size(cols, rows);
+             Point2f[] corners;
+             
+             var flags = FindCirclesGridFlags.SymmetricGrid;
+             if (type == CalibrationPatternType.AsymmetricCircles) flags = FindCirclesGridFlags.AsymmetricGrid;
+             else if (type == CalibrationPatternType.Circles) flags = FindCirclesGridFlags.SymmetricGrid;
+             else return null; // Chessboard not implemented here yet
+             
+             // Convert to gray? FindCirclesGrid handles color but gray is usually safer
+             using var gray = frame.CvtColor(ColorConversionCodes.BGR2GRAY);
+             
+             // Using SimpleBlobDetector is implicitly done by FindCirclesGrid if not custom.
+             // Sometimes we need to tweak blob detector params. 
+             // Default is usually okay for clear black dots on white.
+             
+             bool found = Cv2.FindCirclesGrid(gray, patternSize, out corners, flags);
+             
+             if (found && debugDraw != null)
+             {
+                 Cv2.DrawChessboardCorners(debugDraw, patternSize, corners, found);
+             }
+             
+             return found ? corners : null;
+        }
 
 
                 // Define ArUco Dictionary (standard 4x4_50 or user configurable?)
@@ -222,7 +372,7 @@ namespace laser_gui_test.Data
             // Better: We subscribe to FrameReceived, get one frame, then unsubscribe.
             
             var tcs = new TaskCompletionSource<Bitmap>();
-            Action<Bitmap> handler = null;
+            Action<Bitmap> handler = null!;
             handler = (bmp) => 
             {
                 tcs.TrySetResult(new Bitmap(bmp));
