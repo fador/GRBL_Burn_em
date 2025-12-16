@@ -128,9 +128,17 @@ namespace laser_gui_test.Controls
             pnlMount.Controls.Add(_chkMounted);
             layout.Controls.Add(pnlMount);
 
-            _btnCalibrate = new Button { Text = "Calibrate", Dock = DockStyle.Top, Height = 30 };
+            _btnCalibrate = new Button { Text = "Calibrate Alignment", Dock = DockStyle.Top, Height = 30 };
             _btnCalibrate.Click += OnCalibrateClick;
             layout.Controls.Add(_btnCalibrate);
+
+            var btnLensCalib = new Button { Text = "Calibrate Lens (ArUco)", Dock = DockStyle.Top, Height = 30 };
+            btnLensCalib.Click += (s, e) => 
+            {
+                 using var form = new ArucoCalibrationForm();
+                 form.ShowDialog();
+            };
+            layout.Controls.Add(btnLensCalib);
 
             _btnRefresh = new Button { Text = "Scan Workspace", Dock = DockStyle.Top, Height = 30, BackColor = Color.LightSkyBlue };
             _btnRefresh.Click += OnRefreshClick;

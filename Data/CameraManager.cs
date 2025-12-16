@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 //using AForge.Video.DirectShow;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
-//using OpenCvSharp.Aruco;
+using OpenCvSharp.Aruco;
 
 namespace laser_gui_test.Data
 {
@@ -141,49 +141,158 @@ namespace laser_gui_test.Data
              // TODO: Implement persistence
         }
 
-        public Dictionary<int, PointF[]> DetectMarkers(Bitmap bmp)
-        {
-            var result = new Dictionary<int, PointF[]>();
-            /* ArUco detection temporarily disabled due to OpenCvSharp namespace issues.
-            try
-            {
-                // Convert Bitmap to Mat
-                using var mat = BitmapConverter.ToMat(bmp);
-                using var gray = new Mat();
-                Cv2.CvtColor(mat, gray, ColorConversionCodes.BGR2GRAY);
+
 
                 // Define ArUco Dictionary (standard 4x4_50 or user configurable?)
-                // Let's use DICT_4X4_50 as a default standard
-                // using var dictionary = CvAruco.GetPredefinedDictionary(PredefinedDictionaryName.Dict4X4_50);
-                // using var detectorParameters = DetectorParameters.Create();
+               // Calibration State
+        private List<Point2f[][]> _allCorners = new List<Point2f[][]>();
+        private List<int[]> _allIds = new List<int[]>();
+        private OpenCvSharp.Size _imageSize;
+
+        public void ResetCalibration()
+        {
+            _allCorners.Clear();
+            _allIds.Clear();
+            // _imageSize set on first frame
+        }
+
+        public bool AddCalibrationFrame(Mat frame)
+        {
+            if (_imageSize == new OpenCvSharp.Size(0, 0)) _imageSize = frame.Size();
+            
+            DetectArucoMarkers(frame, out var corners, out var ids);
+            if (ids == null || ids.Length == 0) return false;
+
+            _allCorners.Add(corners);
+            _allIds.Add(ids);
+            return true;
+        }
+
+        public double CalibrateCameraAruco()
+        {
+             if (_allCorners.Count < 5) return -1; 
+             
+             // TODO: Fix OpenCvSharp ArUco Calibration bindings
+             // Currently CalibrateCameraAruco / GridBoard seems missing or moved.
+             // We need to implement manual object point generation and use Cv2.CalibrateCamera.
+             
+             /*
+             var dictionary = CvAruco.GetPredefinedDictionary(PredefinedDictionaryName.Dict4X4_50);
+             using var board = GridBoard.Create(5, 7, 0.04f, 0.01f, dictionary);
+             double error = CvAruco.CalibrateCameraAruco(
+                _allCorners.ToArray(),
+                _allIds.ToArray(),
+                board,
+                _imageSize,
+                // ...
+             );
+             */
+             
+             System.Diagnostics.Debug.WriteLine("Calibration Logic Temporarily Disabled due to API change.");
+             return 0;
+        }
+
+        public void DetectArucoMarkers(Mat frame, out Point2f[][] corners, out int[] ids)
+        {
+            var dictionary = CvAruco.GetPredefinedDictionary(PredefinedDictionaryName.Dict4X4_50);
+            var parameters = new DetectorParameters();
+            CvAruco.DetectMarkers(frame, dictionary, out corners, out ids, parameters, out var rejected);
+        }
+
+        public void StartScan()
+        {
+             // Start the GridCaptureJob
+             var workW = AppConfiguration.Instance.WorkAreaWidth;
+             var workH = AppConfiguration.Instance.WorkAreaHeight;
+             var job = new GridCaptureJob();
+             // Fire and forget? Or track?
+             Task.Run(() => job.Start(workW, workH));
+        }
+
+        public void CaptureCurrentFrame(float worldX, float worldY, float width, float height)
+        {
+            // We need the *latest* frame. 
+            // Since we are in a CaptureLoop, we might want to grab the last processed frame?
+            // Or wait for the next one?
+            // Let's assume we can grab the current frame from a property if we store it?
+            // Currently FrameReceived sends it out.
+            // Let's modify CaptureLoop to assume reliable stream.
+            
+            // Better: We subscribe to FrameReceived, get one frame, then unsubscribe.
+            
+            var tcs = new TaskCompletionSource<Bitmap>();
+            Action<Bitmap> handler = null;
+            handler = (bmp) => 
+            {
+                tcs.TrySetResult(new Bitmap(bmp));
+                FrameReceived -= handler;
+            };
+            
+            FrameReceived += handler;
+            
+            if (tcs.Task.Wait(1000))
+            {
+                 var img = tcs.Task.Result;
+                 
+                 // Undistort if possible?
+                 // Convert Bitmap to Mat?
+                 // If we have calibration, we should convert, undistort, convert back.
+                 // This is heavy.
+                 
+                 Mat mat = BitmapConverter.ToMat(img);
+                 Mat undistorted = UndistortFrame(mat);
+                 Bitmap finalImg = BitmapConverter.ToBitmap(undistorted);
+                 
+                 mat.Dispose();
+                 undistorted.Dispose();
+                 img.Dispose();
+                 
+                 lock(_framesLock)
+                 {
+                     CapturedFrames.Add(new CapturedFrame(finalImg, worldX, worldY, width, height));
+                 }
+                 finalImg.Dispose();
+            }
+            else
+            {
+                FrameReceived -= handler; // Timeout
+            }
+        }
+
+        public Mat UndistortFrame(Mat frame)
+        {
+            if (Calibration.CameraMatrix == null || Calibration.DistCoeffs == null || Calibration.CameraMatrix.Length != 9 || Calibration.DistCoeffs.Length != 5)
+                return frame;
                 
-                // CvAruco.DetectMarkers(gray, dictionary, out var corners, out var ids, detectorParameters, out var rejected);
-                
+            // Check if matrix is identity (uncalibrated)
+            if (Calibration.CameraMatrix[0] == 0) return frame;
+
+            var camMatrix = new double[3, 3];
+            for(int i=0; i<3; i++)
+                for(int j=0; j<3; j++)
+                    camMatrix[i,j] = Calibration.CameraMatrix[i*3 + j];
+            
+            var distCoeffs = Calibration.DistCoeffs;
+            
+            var result = new Mat();
+            // We can optimize this by computing maps once (InitUndistortRectifyMap) if size doesn't change.
+            // For now, simple Undistort.
+            Cv2.Undistort(frame, result, InputArray.Create(camMatrix), InputArray.Create(distCoeffs));
+            
+            return result;
+        }        
                 // if (ids != null && ids.Length > 0)
                 // {
                 //    for (int i = 0; i < ids.Length; i++)
                 //    {
                 //        var id = ids[i];
-                //        var cornerPoints = corners[i]; // Point2f[]
-                //        
-                //        // Convert to standard PointF array
-                //        var points = new PointF[4];
-                //        for(int j=0; j<4; j++)
-                //        {
-                //            points[j] = new PointF(cornerPoints[j].X, cornerPoints[j].Y);
-                //        }
-                //        result[id] = points;
-                //    }
-                // }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"ArUco Error: {ex.Message}");
-            }
-            */
-            System.Diagnostics.Debug.WriteLine("ArUco Detection Not Implemented yet.");
-            return result;
-        }
+                // using var dictionary = CvAruco.GetPredefinedDictionary(PredefinedDictionaryName.Dict4X4_50);
+                // using var detectorParameters = DetectorParameters.Create();
+                
+                // CvAruco.DetectMarkers(gray, dictionary, out var corners, out var ids, detectorParameters, out var rejected);
+                
+
+
 
         public void ComputeHomography(PointF[] imagePoints, PointF[] worldPoints)
         {
@@ -231,13 +340,6 @@ namespace laser_gui_test.Data
             StopCamera();
         }
 
-        public void StartScan()
-        {
-            // TODO: Implement Scanning Logic
-            // 1. Calculate Grid
-            // 2. Create Job
-            // 3. Run Job
-            System.Windows.Forms.MessageBox.Show("Scanning Logic Not Implemented Yet");
-        }
+
     }
 }
