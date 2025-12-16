@@ -516,7 +516,7 @@ public class WorkbenchControl : Control
                 }
                 else
                 {
-                    // Normal Click
+                // Normal Click
                     if (isSelected)
                     {
                         // Clicked on already selected object -> Prepare for move (Group move)
@@ -535,6 +535,20 @@ public class WorkbenchControl : Control
                         _moveStartPos = snappedPos;
                     }
                 }
+            }
+            else if (ToolManager.Instance.CurrentTool == ToolType.Rotate)
+            {
+                 if (ProjectState.Instance.SelectedObjects.Count > 0)
+                 {
+                     var b = GetSelectionBounds();
+                     if (b != null)
+                     {
+                         _rotateCenter = new PointF(b.Value.Left + b.Value.Width/2, b.Value.Top + b.Value.Height/2);
+                         _rotateStartAngle = (float)(Math.Atan2(worldPos.Y - _rotateCenter.Y, worldPos.X - _rotateCenter.X) * 180.0 / Math.PI);
+                         SnapshotSelection();
+                         _isRotating = true;
+                     }
+                 }
             }
             else
             {
@@ -612,6 +626,65 @@ public class WorkbenchControl : Control
         if (_isResizing)
         {
             UpdateResize(effectivePos); // Snap resize handle
+            return;
+        }
+
+        if (_isRotating)
+        {
+            float currentAngle = (float)(Math.Atan2(worldPos.Y - _rotateCenter.Y, worldPos.X - _rotateCenter.X) * 180.0 / Math.PI);
+            float deltaAngle = currentAngle - _rotateStartAngle;
+            
+            foreach(var kvp in _initialStates)
+            {
+                var obj = kvp.Key;
+                var init = kvp.Value;
+                
+                // 1. Rotate Orientation
+                obj.Rotation = init.Rotation + deltaAngle;
+                
+                // 2. Orbit Position
+                float rx = init.Pos.X - _rotateCenter.X;
+                float ry = init.Pos.Y - _rotateCenter.Y;
+                
+                float rad = deltaAngle * (float)Math.PI / 180f;
+                float c = (float)Math.Cos(rad);
+                float s = (float)Math.Sin(rad);
+                
+                float nx = rx * c - ry * s;
+                float ny = rx * s + ry * c;
+                
+                obj.Position = new PointF(_rotateCenter.X + nx, _rotateCenter.Y + ny);
+                
+                if (obj is LaserPath p && init.Points != null)
+                {
+                    for(int i=0; i<p.Points.Count; i++)
+                    {
+                         float px = init.Points[i].X - _rotateCenter.X;
+                         float py = init.Points[i].Y - _rotateCenter.Y;
+                         p.Points[i] = new PointF(_rotateCenter.X + px * c - py * s, _rotateCenter.Y + px * s + py * c);
+                    }
+                }
+                else if (obj is LaserBezier b && init.Points != null)
+                {
+                    for(int i=0; i<b.Points.Count; i++)
+                    {
+                         float px = init.Points[i].X - _rotateCenter.X;
+                         float py = init.Points[i].Y - _rotateCenter.Y;
+                         b.Points[i] = new PointF(_rotateCenter.X + px * c - py * s, _rotateCenter.Y + px * s + py * c);
+                    }
+                    b.UpdateBounds();
+                }
+            }
+            Invalidate();
+            
+            // Fire Mouse Position Event (Throttled)
+            long nowMove = DateTime.Now.Ticks;
+            if (nowMove - _lastUpdateTicks > 500000) // 50ms
+            {
+                 // Update property grid live? Maybe too heavy logic 
+                 // MainForm.Instance.UpdateSelectedObjects(false);
+                 _lastUpdateTicks = nowMove;
+            }
             return;
         }
 
@@ -761,6 +834,33 @@ public class WorkbenchControl : Control
             // Let's assume click-only for now.
         }
 
+        if (_isRotating)
+        {
+            _isRotating = false;
+            
+             var newStates = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize, float Rotation)>();
+             foreach(var obj in ProjectState.Instance.SelectedObjects)
+             {
+                List<PointF>? pts = null;
+                float fSize = 0;
+                if (obj is LaserPath p) pts = new List<PointF>(p.Points);
+                else if (obj is LaserBezier b) pts = new List<PointF>(b.Points);
+                
+                if (obj is LaserText t) fSize = t.FontSize;
+                
+                newStates[obj] = (obj.Position, obj.Size, pts, fSize, obj.Rotation);
+             }
+             
+             // Reuse ResizeCommand (renamed conceptually to TransformCommand) 
+             // as it handles all state we care about.
+             CommandManager.Instance.Execute(new ResizeCommand(_initialStates, newStates));
+             
+             MainForm.Instance.UpdateSelectedObjects();
+             _initialStates.Clear();
+             ResetInteractionState();
+             return;
+        }
+
         if (_isSelecting)
         {
             _isSelecting = false;
@@ -873,7 +973,7 @@ public class WorkbenchControl : Control
             _dragHandleIndex = -1;
             _initialGroupBounds = null;
             
-            var newStates = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize)>();
+            var newStates = new Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize, float Rotation)>();
             foreach (var obj in ProjectState.Instance.SelectedObjects)
             {
                 List<PointF>? pts = null;
@@ -883,7 +983,7 @@ public class WorkbenchControl : Control
                 
                 if (obj is LaserText t) fSize = t.FontSize;
                 
-                newStates[obj] = (obj.Position, obj.Size, pts, fSize);
+                newStates[obj] = (obj.Position, obj.Size, pts, fSize, obj.Rotation);
             }
             
             var cmd = new ResizeCommand(_initialStates, newStates);
@@ -1031,8 +1131,12 @@ public class WorkbenchControl : Control
     private int _dragHandleIndex = -1; // -1 none, 0-7 handles
     
     private bool _isResizing = false;
+    private bool _isRotating = false;
+    private PointF _rotateCenter;
+    private float _rotateStartAngle;
+
     private RectangleF? _initialGroupBounds;
-    private Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize)> _initialStates = new();
+    private Dictionary<LaserObject, (PointF Pos, SizeF Size, List<PointF>? Points, float FontSize, float Rotation)> _initialStates = new();
 
     private void SnapshotSelection()
     {
@@ -1046,7 +1150,7 @@ public class WorkbenchControl : Control
             
             if (obj is LaserText t) fSize = t.FontSize;
             
-            _initialStates[obj] = (obj.Position, obj.Size, pts, fSize);
+            _initialStates[obj] = (obj.Position, obj.Size, pts, fSize, obj.Rotation);
         }
     }
 

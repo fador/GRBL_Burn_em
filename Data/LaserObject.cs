@@ -38,6 +38,40 @@ public abstract class LaserObject
     }
 
     public abstract LaserObject Clone();
+
+    protected RectangleF GetRotatedBoundsFromDef()
+    {
+        if (Rotation == 0) return new RectangleF(Position, Size);
+
+        var cx = Position.X + Size.Width / 2f;
+        var cy = Position.Y + Size.Height / 2f;
+
+        var corners = new PointF[]
+        {
+            new PointF(Position.X, Position.Y),
+            new PointF(Position.X + Size.Width, Position.Y),
+            new PointF(Position.X + Size.Width, Position.Y + Size.Height),
+            new PointF(Position.X, Position.Y + Size.Height)
+        };
+
+        using (var m = new System.Drawing.Drawing2D.Matrix())
+        {
+            m.RotateAt(Rotation, new PointF(cx, cy));
+            m.TransformPoints(corners);
+        }
+
+        float minX = float.MaxValue, minY = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue;
+        foreach(var p in corners)
+        {
+            if (p.X < minX) minX = p.X;
+            if (p.Y < minY) minY = p.Y;
+            if (p.X > maxX) maxX = p.X;
+            if (p.Y > maxY) maxY = p.Y;
+        }
+
+        return new RectangleF(minX, minY, maxX - minX, maxY - minY);
+    }
 }
 
 // ... (Existing classes: LaserPath, LaserRectangle, etc.) ...
@@ -51,6 +85,11 @@ public class LaserCircle : LaserObject
         Size = new SizeF(50, 50); // Default size
     }
 
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
+    }
+
     public override void Draw(Graphics g, float scale)
     {
         var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
@@ -58,7 +97,17 @@ public class LaserCircle : LaserObject
         Color c = layer?.Color ?? Color.Black;
 
         using var pen = new Pen(c, 1.0f / scale);
+        
+        var state = g.Save();
+        // Rotate around center
+        float cx = Position.X + Size.Width / 2f;
+        float cy = Position.Y + Size.Height / 2f;
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(Rotation);
+        g.TranslateTransform(-cx, -cy);
+        
         g.DrawEllipse(pen, Position.X, Position.Y, Size.Width, Size.Height);
+        g.Restore(state);
     }
 
     public override bool HitTest(PointF point, float tolerance)
@@ -149,7 +198,16 @@ public class LaserPath : LaserObject
         Color c = layer?.Color ?? Color.Black;
 
         using var pen = new Pen(c, 1.0f / scale); // Constant width regardless of zoom
+        
+        var state = g.Save();
+        float cx = Position.X + Size.Width / 2f;
+        float cy = Position.Y + Size.Height / 2f;
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(Rotation);
+        g.TranslateTransform(-cx, -cy);
+        
         g.DrawLines(pen, Points.ToArray());
+        g.Restore(state);
     }
 
     public override bool HitTest(PointF point, float tolerance)
@@ -212,6 +270,11 @@ public class LaserRectangle : LaserObject
         Name = "Rectangle";
     }
 
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
+    }
+
     public override void Draw(Graphics g, float scale)
     {
         var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
@@ -219,7 +282,16 @@ public class LaserRectangle : LaserObject
         Color c = layer?.Color ?? Color.Black;
 
         using var pen = new Pen(c, 1.0f / scale);
+        
+        var state = g.Save();
+        float cx = Position.X + Size.Width / 2f;
+        float cy = Position.Y + Size.Height / 2f;
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(Rotation);
+        g.TranslateTransform(-cx, -cy);
+        
         g.DrawRectangle(pen, Position.X, Position.Y, Size.Width, Size.Height);
+        g.Restore(state);
     }
     
     public override bool HitTest(PointF point, float tolerance)
@@ -274,6 +346,11 @@ public class LaserImage : LaserObject
         Name = "Image";
     }
 
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
+    }
+
     public override void Draw(Graphics g, float scale)
     {
         if (Image != null)
@@ -311,11 +388,21 @@ public class LaserImage : LaserObject
 
             // Move to Top-Left of the target rect (which is Pos.Y + Height)
             // Flip Y axis so Y+ is Down (Standard Image drawing)
-            g.TranslateTransform(Position.X, Position.Y + Size.Height);
-            g.ScaleTransform(1, -1);
             
-            // Draw standard top-down image at 0,0
-            g.DrawImage(Image, 0, 0, Size.Width, Size.Height);
+            // Rotation Handling:
+            // We want to rotate around the center of the image.
+            // Center in World Coords:
+            float cx = Position.X + Size.Width / 2f;
+            float cy = Position.Y + Size.Height / 2f;
+
+            // 1. Translate to Center
+            g.TranslateTransform(cx, cy);
+            // 2. Rotate
+            g.RotateTransform(Rotation);
+            // 3. Scale/Flip (Y+ Down) - Note: This flips the LOCAL axis
+            g.ScaleTransform(1, -1);
+            // 4. Draw Image centered at 0,0 (Extent is -W/2 to W/2)
+            g.DrawImage(Image, -Size.Width/2f, -Size.Height/2f, Size.Width, Size.Height);
             
             g.Restore(state);
         }
@@ -380,6 +467,11 @@ public class LaserText : LaserObject
     {
         Type = LaserObjectType.Text;
         Name = "Text";
+    }
+
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
     }
 
     public override void Draw(Graphics g, float scale)
@@ -503,6 +595,18 @@ public class LaserText : LaserObject
         g.TranslateTransform(Position.X, Position.Y + Size.Height);
         g.ScaleTransform(1, -1);
         
+        // Apply Rotation for standard text? 
+        // Text "Position" is usually Top-Left (or Bottom-Left in World).
+        // If we rotate around Position:
+        if (Rotation != 0)
+        {
+             // This rotates around the top-left corner of the text block
+             // If we want center rotation, we need to know size.
+             // But Text alignment is usually Leading.
+             // Let's rotate around Origin (0,0 local) which is Pos.
+             g.RotateTransform(Rotation);
+        }
+        
         using (var font = new Font(FontName, FontSize))
         {
             g.DrawString(Text, font, brush, 0, 0); // Local 0,0 is now Top-Left of text
@@ -564,6 +668,14 @@ public class LaserBezier : LaserObject
         Name = "Bezier";
     }
 
+    public override RectangleF GetBounds()
+    {
+        // Ensure Position/Size are up to date?
+        // UpdateBounds() should be called when points change.
+        // Assuming Position/Size defines the Unrotated AABB.
+        return GetRotatedBoundsFromDef();
+    }
+
     public void UpdateBounds()
     {
         if (Points.Count == 0) return;
@@ -598,7 +710,15 @@ public class LaserBezier : LaserObject
         int validCount = count - (count - 1) % 3;
         if (validCount < 4) return;
         
+        var state = g.Save();
+        float cx = Position.X + Size.Width / 2f;
+        float cy = Position.Y + Size.Height / 2f;
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(Rotation);
+        g.TranslateTransform(-cx, -cy);
+        
         g.DrawBeziers(pen, Points.Take(validCount).ToArray());
+        g.Restore(state);
     }
 
     public override bool HitTest(PointF point, float tolerance)

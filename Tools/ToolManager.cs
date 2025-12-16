@@ -10,7 +10,8 @@ public enum ToolType
     Ruler,
     Text,
     DrawCircle,
-    DrawBezier
+    DrawBezier,
+    Rotate
 }
 
 public class ToolManager

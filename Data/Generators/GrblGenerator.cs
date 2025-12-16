@@ -186,54 +186,76 @@ public class GrblGenerator : IGCodeGenerator
                  // Linearize Ellipse/Circle
                  using (var path = new GraphicsPath())
                  {
-                     // AddEllipse takes x,y,w,h. Position is Bottom-Left in our World Logic?
-                     // No, Position is usually Top-Left of the Bounds in GDI+ logic?
-                     // LaserObject.Position:
-                     // LaserRectangle.Draw: DrawRectangle(pen, Position.X, Position.Y, ...) -> GDI+ draws from Top-Left (Coordinate system dependent).
-                     // In Workbench: Translate(CenterX, CenterY), Scale(Zoom, -Zoom).
-                     // So Y+ is Up.
-                     // If I draw Rectangle at (0,0) with size (10,10):
-                     // It draws from 0,0 to 10,10.
-                     // In Screen Coords (Y+ Down): 0,0 to 10,10 is Top-Left to Bottom-Right.
-                     // In World Coords (Y+ Up): 0,0 to 10,10 is Bottom-Left to Top-Right?
-                     // BUT `DrawRectangle` takes (x, y, w, h). 
-                     // If Y scale is negative:
-                     // Coordinate (0,0) maps to ScreenCenter.
-                     // Coordinate (0, 10). Scale(1, -1) -> (0, -10).
-                     // So (0, 10) is "Higher" on screen (smaller Y pixel value).
-                     // So yes, Y+ is Up.
-                     // `DrawRectangle(0, 0, 10, 10)`:
-                     // Starts at 0,0. Extends Width 10 (Right). Extends Height 10 (Down in GDI+ RAW).
-                     // But with Scale(1, -1):
-                     // The "Height" extension of +10 in Y becomes -10 in Screen Y (Up).
-                     // So result is box from 0,0 extending Right and Up.
-                     // So `Position` is Bottom-Left. Good.
-                     
-                     // GraphicsPath.AddEllipse(x, y, w, h).
-                     // Adds ellipse constrained by rect (x, y, w, h).
-                     // In transformed space (Y+ Up), this rect is Position (BL) extending Right and Up.
-                     // So the ellipse will be correct.
-                     
                      path.AddEllipse(circle.Position.X, circle.Position.Y, circle.Size.Width, circle.Size.Height);
                      
-                     // Flatten to polyline
-                     path.Flatten(null, 0.05f); // 0.05mm precision
+                     // Rotate around center
+                     float cx = circle.Position.X + circle.Size.Width / 2f;
+                     float cy = circle.Position.Y + circle.Size.Height / 2f;
                      
-                     if (path.PointCount > 0)
+                     using (var m = new System.Drawing.Drawing2D.Matrix())
                      {
-                         var points = path.PathPoints;
-                         var p0 = points[0];
-                         
-                         yield return $"G0 X{p0.X:F3} Y{p0.Y:F3}";
-                         yield return $"G1 F{fVal:F0}";
-                         
-                         for (int i = 1; i < points.Length; i++)
-                         {
-                             var p = points[i];
-                             yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
-                         }
-                         // Close loop
-                         yield return $"G1 X{p0.X:F3} Y{p0.Y:F3} S{sVal:F0}";
+                         m.RotateAt(circle.Rotation, new PointF(cx, cy));
+                         path.Transform(m);
+                     }
+
+                     path.Flatten(null, 0.05f);
+                     PointF[] points = path.PathPoints;
+                     
+                     if (points.Length > 0)
+                     {
+                        yield return "G1 S0";
+                        yield return $"G0 X{points[0].X:F3} Y{points[0].Y:F3}";
+                        yield return $"G1 F{fVal:F0}"; // G1 to apply speed? Start Logic.
+                        // Actually Start usually means move to start.
+                        // G1 Sxxx is Power.
+                        
+                        // First point is Move.
+                        for(int i=1; i<points.Length; i++)
+                        {
+                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} S{sVal:F0}";
+                        }
+                        // Close loop
+                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} S{sVal:F0}";
+                     }
+                 }
+                 yield return "G1 S0";
+                 yield break;
+            }
+            else if (obj is LaserRectangle rect)
+            {
+                // Rectangle with optional Rotation
+                // We can use GraphicsPath for easy rotation
+                 using (var path = new GraphicsPath())
+                 {
+                     path.AddRectangle(new RectangleF(rect.Position, rect.Size));
+                     
+                     float cx = rect.Position.X + rect.Size.Width / 2f;
+                     float cy = rect.Position.Y + rect.Size.Height / 2f;
+                     
+                     using (var m = new System.Drawing.Drawing2D.Matrix())
+                     {
+                         m.RotateAt(rect.Rotation, new PointF(cx, cy));
+                         path.Transform(m);
+                     }
+                     
+                     // Rectangle is 4 points (closed). Flattening might add more if we warped (we didn't).
+                     // But AddRectangle adds 4 points.
+                     // Flattening ensures it's lines.
+                     path.Flatten(null, 0.05f); // Overkill for rect but safe
+                     
+                     PointF[] points = path.PathPoints;
+                     if (points.Length > 0)
+                     {
+                        yield return "G1 S0";
+                        yield return $"G0 X{points[0].X:F3} Y{points[0].Y:F3}";
+                        yield return $"G1 F{fVal:F0}"; 
+                        
+                        for(int i=1; i<points.Length; i++)
+                        {
+                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} S{sVal:F0}";
+                        }
+                        // Close loop
+                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} S{sVal:F0}";
                      }
                  }
                  yield return "G1 S0";
@@ -242,34 +264,31 @@ public class GrblGenerator : IGCodeGenerator
             else if (obj is LaserPath path)
             {
                 if (path.Points.Count < 2) yield break;
+                
+                // Rotation handling
+                var finalPoints = path.Points.ToArray();
+                if (path.Rotation != 0)
+                {
+                    using (var m = new System.Drawing.Drawing2D.Matrix())
+                    {
+                         float cx = path.Position.X + path.Size.Width / 2f;
+                         float cy = path.Position.Y + path.Size.Height / 2f;
+                         m.RotateAt(path.Rotation, new PointF(cx, cy));
+                         m.TransformPoints(finalPoints);
+                    }
+                }
+
                 // Move to start
-                var start = path.Points[0];
+                var start = finalPoints[0];
                 yield return $"G0 X{start.X:F3} Y{start.Y:F3}";
                 yield return $"G1 F{fVal:F0}"; 
 
-                for (int i = 1; i < path.Points.Count; i++)
+                for (int i = 1; i < finalPoints.Length; i++)
                 {
-                    var p = path.Points[i];
+                    var p = finalPoints[i];
                     yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
                 }
                 yield return "G1 S0"; 
-                yield break;
-            }
-            else if (obj is LaserRectangle rect)
-            {
-                float l = rect.Position.X;
-                float t = rect.Position.Y;
-                float r = l + rect.Size.Width;
-                float b = t + rect.Size.Height;
-
-                yield return $"G0 X{l:F3} Y{t:F3}";
-                yield return $"G1 F{fVal:F0}";
-
-                yield return $"G1 X{r:F3} Y{t:F3} S{sVal:F0}";
-                yield return $"G1 X{r:F3} Y{b:F3} S{sVal:F0}";
-                yield return $"G1 X{l:F3} Y{b:F3} S{sVal:F0}";
-                yield return $"G1 X{l:F3} Y{t:F3} S{sVal:F0}";
-                yield return "G1 S0";
                 yield break;
             }
             else if (obj is LaserBezier bezier)
@@ -282,6 +301,19 @@ public class GrblGenerator : IGCodeGenerator
                         int count = bezier.Points.Count;
                         int valid = count - (count - 1) % 3;
                         gPath.AddBeziers(bezier.Points.Take(valid).ToArray());
+                        
+                        // Apply Rotation
+                        if (bezier.Rotation != 0)
+                        {
+                            float cx = bezier.Position.X + bezier.Size.Width / 2f;
+                            float cy = bezier.Position.Y + bezier.Size.Height / 2f;
+                            using (var m = new System.Drawing.Drawing2D.Matrix())
+                            {
+                                m.RotateAt(bezier.Rotation, new PointF(cx, cy));
+                                gPath.Transform(m);
+                            }
+                        }
+                        
                         gPath.Flatten(null, 0.05f);
                     }
                     else
@@ -319,93 +351,40 @@ public class GrblGenerator : IGCodeGenerator
 
         if (obj is LaserImage img)
         {
-             // Apply Mask if needed
-             if (img.MaskId != Guid.Empty)
+             // Rasterize Image using its own Draw method to handle Rotation/Masking/etc consistently
+             if (img.Image == null) yield break;
+
+             var bounds = img.GetBounds(); // Rotated AABB
+             if (bounds.Width <= 0 || bounds.Height <= 0) yield break;
+
+             rasterPos = bounds.Location;
+             rasterSize = bounds.Size;
+
+             // Resolution
+             float interval = AppConfiguration.Instance.RasterLineInterval;
+             if (interval <= 0) interval = 0.1f;
+             float dpmm = 1.0f / interval;
+
+             int w = (int)Math.Ceiling(bounds.Width * dpmm);
+             int h = (int)Math.Ceiling(bounds.Height * dpmm);
+             
+             if (w > 0 && h > 0)
              {
-                 var maskObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == img.MaskId);
-                 if (maskObj != null && img.Image != null)
+                 bitmapToRasterize = new Bitmap(w, h);
+                 disposeBitmap = true;
+                 
+                 using (var g = Graphics.FromImage(bitmapToRasterize))
                  {
-                     bitmapToRasterize = new Bitmap(img.Image.Width, img.Image.Height);
-                     disposeBitmap = true;
-                     using (var g = Graphics.FromImage(bitmapToRasterize))
-                     {
-                         // Maintain resolution/coordinates
-                         // We are drawing into a bitmap of precise PIXEL size of the original image.
-                         // But the MASK is defined in WORLD coordinates.
-                         // This is tricky.
-                         // The original image pixels map to World Rect (Position, Size).
-                         // The Mask is in World Rect.
-                         
-                         // Coordinate transform:
-                         // 0,0 of Bitmap -> Top-Left of Image in World?
-                         // Image.Draw draws (0,0,W,H) at Position.
-                         // So we need to map World Mask to Bitmap Coords.
-                         // Bitmap Width Bw maps to World Width Sw.
-                         // Scale = Bw / Sw.
-                         // Pos (Bitmap) = (Pos(World) - ImagePos(World)) * Scale.
-                         
-                         // Create GraphicsPath for mask
-                         GraphicsPath? clipPath = null;
-                         if (maskObj is LaserCircle c)
-                         {
-                             clipPath = new GraphicsPath();
-                             clipPath.AddEllipse(c.Position.X, c.Position.Y, c.Size.Width, c.Size.Height);
-                         }
-                         else if (maskObj is LaserRectangle r)
-                         {
-                             clipPath = new GraphicsPath();
-                             clipPath.AddRectangle(new RectangleF(r.Position, r.Size));
-                         }
-                         
-                         if (clipPath != null)
-                         {
-                             // Transform Path to Bitmap Coordinates
-                             using (var matrix = new Matrix())
-                             {
-                                 float scaleX = img.Image.Width / img.Size.Width;
-                                 float scaleY = img.Image.Height / img.Size.Height;
-                                 
-                                 // Translate World Point P to Image-Local P'
-                                 // P' = (P - ImagePos) * Scale
-                                 // Note: Y axis?
-                                 // Image Bitmap 0,0 is Top-Left.
-                                 // World Space Y+ is Up (Bottom-Left).
-                                 // Image.Draw does: Translate(Pos.X, Pos.Y+H), Scale(1,-1).
-                                 // So Image Top-Left is at World(Pos.X, Pos.Y+H).
-                                 // So P_Bitmap_X = (P_World_X - Pos.X) * scaleX.
-                                 // P_Bitmap_Y = (Pos.Y + H - P_World_Y) * scaleY.
-                                 
-                                 // Let's adjust Matrix:
-                                 // 1. Translate World Origin to Image Top-Left (which is Pos.X, Pos.Y+H)
-                                 matrix.Translate(-img.Position.X, -(img.Position.Y + img.Size.Height), MatrixOrder.Append);
-                                 
-                                 // 2. Flip Y (Because Bitmap Y+ is Down, World Y+ is Up)
-                                 matrix.Scale(1, -1, MatrixOrder.Append);
-                                 
-                                 // 3. Scale to Bitmap Pixels
-                                 matrix.Scale(scaleX, scaleY, MatrixOrder.Append);
-                                 
-                                 clipPath.Transform(matrix);
-                             }
-                             
-                             g.SetClip(clipPath);
-                             g.DrawImage(img.Image, 0, 0, img.Image.Width, img.Image.Height);
-                         }
-                         else
-                         {
-                             // Fallback
-                             g.DrawImage(img.Image, 0, 0, img.Image.Width, img.Image.Height);
-                         }
-                     }
+                     g.Clear(Color.White);
+                     
+                     // Setup Transform: World (Y-Up) -> Bitmap (Y-Down)
+                     // Map World Bounds Top-Left (MinX, MaxY) to Bitmap (0,0)
+                     g.ScaleTransform(dpmm, -dpmm);
+                     g.TranslateTransform(-bounds.X, -(bounds.Y + bounds.Height));
+                     
+                     // Draw Image
+                     img.Draw(g, 1.0f);
                  }
-                 else
-                 {
-                     bitmapToRasterize = img.Image;
-                 }
-             }
-             else
-             {
-                 bitmapToRasterize = img.Image;
              }
         }
         else
@@ -441,41 +420,71 @@ public class GrblGenerator : IGCodeGenerator
                     
                     using (var brush = new SolidBrush(Color.Black)) // Black = Burn
                     {
-                        if (obj is LaserRectangle)
+                        using (var path = new GraphicsPath())
                         {
-                            g.FillRectangle(brush, obj.Position.X, obj.Position.Y, obj.Size.Width, obj.Size.Height);
-                        }
-                        else if (obj is LaserPath lp)
-                        {
-                             if (lp.Points.Count > 2)
-                                 g.FillPolygon(brush, lp.Points.ToArray());
-                        }
-                        else if (obj is LaserText lt)
-                        {
-                             // Simple draw for now
-                             // Text Draw method does transform. We need to match.
-                             // Text.Draw uses Position. We normalized manually above?
-                             // No, we translated G so 0,0 is Bounds TopLeft.
-                             // Text Position is in World.
-                             // If we just call Draw, it should draw at world coords, which are shifted by TranslateTransform.
-                             // But Text Draw expects to handle Scale(1,-1) itself for upright?
-                             // Our bitmap is Top-Down.
-                             // Text Logic:
-                             // g.TranslateTransform(Position.X, Position.Y);
-                             // g.ScaleTransform(1, -1);
-                             
-                             // We don't want the Y-flip for the bitmap generation if we just want "Black pixels where text is".
-                             // But Rasterizer expects standard image logic?
-                             // Rasterizer iterates Y top to bottom.
-                             // So we should draw Text Normally (Upright).
-                             
-                             // We can use Graphics.DrawString directly here.
-                             using (var f = new Font(lt.FontName, lt.FontSize)) // Unit?
-                             {
-                                 // DrawString coordinates are local. 
-                                 // We established transform.
-                                 g.DrawString(lt.Text, f, brush, lt.Position.X, lt.Position.Y);
-                             }
+                            bool hasPath = false;
+                            
+                            if (obj is LaserRectangle rect)
+                            {
+                                path.AddRectangle(new RectangleF(rect.Position, rect.Size));
+                                hasPath = true;
+                            }
+                            else if (obj is LaserCircle circ)
+                            {
+                                path.AddEllipse(circ.Position.X, circ.Position.Y, circ.Size.Width, circ.Size.Height);
+                                hasPath = true;
+                            }
+                            else if (obj is LaserPath lp)
+                            {
+                                if (lp.Points.Count > 1) 
+                                {
+                                    path.AddLines(lp.Points.ToArray());
+                                    path.CloseFigure();
+                                    hasPath = true;
+                                }
+                            }
+                            else if (obj is LaserBezier lb)
+                            {
+                                if (lb.Points.Count >= 4)
+                                {
+                                    int count = lb.Points.Count;
+                                    int valid = count - (count - 1) % 3;
+                                    path.AddBeziers(lb.Points.Take(valid).ToArray());
+                                    path.CloseFigure();
+                                    hasPath = true;
+                                }
+                            }
+                            else if (obj is LaserText lt)
+                            {
+                                var family = new FontFamily(lt.FontName);
+                                float emSize = lt.FontSize * 96f / 72f; 
+                                path.AddString(lt.Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+                                
+                                using (var m = new System.Drawing.Drawing2D.Matrix())
+                                {
+                                    float ascent = family.GetCellAscent((int)FontStyle.Regular) * emSize / family.GetEmHeight((int)FontStyle.Regular);
+                                    m.Translate(0, -ascent + lt.VerticalOffset);
+                                    m.Scale(1, -1);
+                                    m.Translate(lt.Position.X, lt.Position.Y + lt.Size.Height, MatrixOrder.Append);
+                                    path.Transform(m);
+                                }
+                                hasPath = true;
+                            }
+
+                            if (hasPath)
+                            {
+                                if (obj.Rotation != 0)
+                                {
+                                    float cx = obj.Position.X + obj.Size.Width / 2f;
+                                    float cy = obj.Position.Y + obj.Size.Height / 2f;
+                                    using (var m = new System.Drawing.Drawing2D.Matrix())
+                                    {
+                                        m.RotateAt(obj.Rotation, new PointF(cx, cy));
+                                        path.Transform(m);
+                                    }
+                                }
+                                g.FillPath(brush, path);
+                            }
                         }
                     }
                 }

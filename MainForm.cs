@@ -41,6 +41,7 @@ public partial class MainForm : Form
     private NumericUpDown _nudPosY = null!;
     private NumericUpDown _nudSizeW = null!;
     private NumericUpDown _nudSizeH = null!;
+    private NumericUpDown _nudRotation = null!;
     private ToolStripLabel _lblLayerInfo = null!;
     
     // Text Toolbar Controls
@@ -771,7 +772,7 @@ public partial class MainForm : Form
             if (txtLog.IsDisposed) return;
             // optimize: ignore 'ok' to prevent spam/lag
             //if (line == "ok") return; 
-            if(line == "ok") line += $" ({_jobRunner.PendingCommandsCount} slots)";
+            //if(line == "ok") line += $" ({_jobRunner.PendingCommandsCount} slots)";
 
             try {
                 txtLog.BeginInvoke(() => 
@@ -978,10 +979,14 @@ public partial class MainForm : Form
         tsRow2.Items.Add(new ToolStripControlHost(_nudSizeW));
         
         tsRow2.Items.Add(new ToolStripLabel("H:"));
-        _nudSizeH = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = 0, Maximum = 10000, Increment = 10 };
+        _nudSizeH = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 1000, Width = 60 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudSizeH));
-        
+
         tsRow2.Items.Add(new ToolStripSeparator());
+        tsRow2.Items.Add(new ToolStripLabel("R:"));
+        _nudRotation = new NumericUpDown { DecimalPlaces = 1, Minimum = -3600, Maximum = 3600, Width = 60 };
+        tsRow2.Items.Add(new ToolStripControlHost(_nudRotation));
+        
         _lblLayerInfo = new ToolStripLabel("-");
         tsRow2.Items.Add(_lblLayerInfo);
         
@@ -1024,6 +1029,7 @@ public partial class MainForm : Form
                 float ny = (float)_nudPosY.Value;
                 float nw = (float)_nudSizeW.Value;
                 float nh = (float)_nudSizeH.Value;
+                float nRot = (float)_nudRotation.Value; // Added rotation value
                 
                 // Position Change
                 if(Math.Abs(obj.Position.X - nx) > 0.01 || Math.Abs(obj.Position.Y - ny) > 0.01)
@@ -1040,6 +1046,13 @@ public partial class MainForm : Form
                     obj.Size = new SizeF(nw, nh);
                     _workbench.Invalidate();
                 }
+
+                // Rotation Change (Added)
+                if (Math.Abs(obj.Rotation - nRot) > 0.01)
+                {
+                    obj.Rotation = nRot;
+                    _workbench.Invalidate();
+                }
             }
         };
         
@@ -1047,6 +1060,7 @@ public partial class MainForm : Form
         _nudPosY.ValueChanged += valChanged;
         _nudSizeW.ValueChanged += valChanged;
         _nudSizeH.ValueChanged += valChanged;
+        _nudRotation.ValueChanged += valChanged; // Added event handler
 
         // Wire Text Logic
         EventHandler textChanged = (s, e) =>
@@ -1190,6 +1204,7 @@ public partial class MainForm : Form
             { "Circle", ToolType.DrawCircle },
             { "Bezier", ToolType.DrawBezier },
             { "Text", ToolType.Text },
+            { "Rotate", ToolType.Rotate },
             { "Ruler", ToolType.Ruler }
         };
 
@@ -1619,11 +1634,13 @@ public partial class MainForm : Form
             _nudPosY.Enabled = true;
             _nudSizeW.Enabled = true;
             _nudSizeH.Enabled = true;
-            
+            _nudRotation.Enabled = true; // Added enable
+
             _nudPosX.Value = (decimal)obj.Position.X;
             _nudPosY.Value = (decimal)obj.Position.Y;
             _nudSizeW.Value = (decimal)obj.Size.Width;
             _nudSizeH.Value = (decimal)obj.Size.Height;
+            _nudRotation.Value = (decimal)obj.Rotation; // Added value set
             
             // Text Toolbar
             if (obj is LaserText txt)
@@ -1665,6 +1682,7 @@ public partial class MainForm : Form
             _nudPosY.Enabled = false;
             _nudSizeW.Enabled = false;
             _nudSizeH.Enabled = false;
+            _nudRotation.Enabled = false; // Added disable
             
             _txtContent.Enabled = false;
             _cmbFont.Enabled = false;

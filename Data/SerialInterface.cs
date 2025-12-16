@@ -35,6 +35,19 @@ public class SerialInterface
     {
         return _serialPort != null ? _serialPort.BytesToWrite : 0;
     }
+
+    public int WriteBufferSize()
+    {
+        return _serialPort != null ? _serialPort.WriteBufferSize : 0;
+    }
+
+    public bool EmptyBuffers()
+    {
+        _serialPort?.DiscardInBuffer();
+        _serialPort?.DiscardOutBuffer();
+        return true;
+    }
+
     public void Connect(string portName, int baudRate)
     {
         Disconnect();
@@ -117,7 +130,7 @@ public class SerialInterface
     {
         if (IsConnected && _serialPort != null)
         {
-            if(_serialPort.BytesToWrite + data.Length > 128)
+            if(data.Length > _serialPort.WriteBufferSize - _serialPort.BytesToWrite)
             {                
                 return false;
             }
@@ -224,6 +237,7 @@ public class SerialInterface
                         }
                     }
                 }
+                /*
                 else if (part.StartsWith("Bf:"))
                 {
                      // Bf:15,128  (Planner, Rx)
@@ -240,6 +254,7 @@ public class SerialInterface
                          }
                      }
                 }
+                */
             }
             
             StatusReceived?.Invoke(MachineState, MachinePosition);
