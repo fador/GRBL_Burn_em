@@ -44,6 +44,10 @@ public partial class MainForm : Form
     private NumericUpDown _nudRotation = null!;
     private ToolStripLabel _lblLayerInfo = null!;
     
+    // Logging Optimization
+    private System.Collections.Concurrent.ConcurrentQueue<string> _logBuffer = new System.Collections.Concurrent.ConcurrentQueue<string>();
+    private System.Windows.Forms.Timer _logTimer = null!;
+    
     // Text Toolbar Controls
     private ToolStripTextBox _txtContent = null!;
     private ToolStripComboBox _cmbFont = null!;
@@ -767,51 +771,57 @@ public partial class MainForm : Form
         _rightTabControl.TabPages.Add(tabConsole);
         
         // Wire up Logging
+        _logTimer = new System.Windows.Forms.Timer { Interval = 100 };
+        _logTimer.Tick += (s, e) => 
+        {
+            if (_logBuffer.IsEmpty || txtLog.IsDisposed) return;
+            
+            var sb = new System.Text.StringBuilder();
+            int count = 0;
+            while (_logBuffer.TryDequeue(out string? result) && count < 500) // Limit batch size just in case
+            {
+                sb.Append(result);
+                count++;
+            }
+            
+            if (sb.Length > 0)
+            {
+                txtLog.SelectionStart = txtLog.TextLength;
+                txtLog.SelectionLength = 0;
+                // AppendText automatically scrolls usually, but we can ensure it
+                txtLog.AppendText(sb.ToString());
+                txtLog.ScrollToCaret();  
+            }
+        };
+        _logTimer.Start();
+
+        // Wire up Logging
         SerialInterface.Instance.LineReceived += (line) => 
         {
             if (txtLog.IsDisposed) return;
-            // optimize: ignore 'ok' to prevent spam/lag
-            //if (line == "ok") return; 
-            //if(line == "ok") line += $" ({_jobRunner.PendingCommandsCount} slots)";
-
-            try {
-                txtLog.BeginInvoke(() => 
-                {
-                    if (line.Trim().StartsWith("error:"))
-                    {
-                         string errCode = line.Trim().Substring(6);
-                         string msg = GrblErrors.GetMessage(errCode);
-                         
-                         txtLog.SelectionStart = txtLog.TextLength;
-                         txtLog.SelectionLength = 0;
-                         txtLog.SelectionColor = Color.Red;
-                         txtLog.AppendText($"< {line} ({msg})\n");
-                         txtLog.SelectionColor = txtLog.ForeColor;
-                    }
-                    else
-                    {
-                        txtLog.AppendText($"< {line}\n");
-                    }
-                    txtLog.ScrollToCaret();
-                });
-            } catch { } 
+            
+            // Format message
+            string logMsg;
+            if (line.Contains("error:"))
+            {
+                 // We can't easily colorize inside the batch without complex RTF parsing or multiple appends.
+                 // For now, valid performance over fancy color for *errors* mixed with fast streams.
+                 // Or we can prefix specially.
+                 logMsg = $"< {line} (Error)\n";
+            }
+            else
+            {
+                logMsg = $"< {line}\n";
+            }
+            _logBuffer.Enqueue(logMsg);
         };
 
+        // Log Outgoing Data
         // Log Outgoing Data
         SerialInterface.Instance.LineSent += (line) =>
         {
             if (txtLog.IsDisposed) return;
-             try {
-                txtLog.BeginInvoke(() => 
-                {
-                    txtLog.SelectionStart = txtLog.TextLength;
-                    txtLog.SelectionLength = 0;
-                    txtLog.SelectionColor = Color.Yellow; 
-                    txtLog.AppendText($">> {line}\n");
-                    txtLog.SelectionColor = txtLog.ForeColor;
-                    txtLog.ScrollToCaret();
-                });
-             } catch {}
+            _logBuffer.Enqueue($">> {line}\n");
         };
 
         // Handle dynamically detected buffer size

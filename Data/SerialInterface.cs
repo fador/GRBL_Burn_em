@@ -237,7 +237,6 @@ public class SerialInterface
                         }
                     }
                 }
-                /*
                 else if (part.StartsWith("Bf:"))
                 {
                      // Bf:15,128  (Planner, Rx)
@@ -254,7 +253,6 @@ public class SerialInterface
                          }
                      }
                 }
-                */
             }
             
             StatusReceived?.Invoke(MachineState, MachinePosition);
