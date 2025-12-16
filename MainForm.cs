@@ -254,7 +254,8 @@ public partial class MainForm : Form
                 if (txt != null && path != null && txt != path)
                 {
                     txt.PathId = path.Id;
-                    txt.PathOffset = 0; // Default
+                    // Auto-calculate offset based on text position
+                    txt.PathOffset = PathWarp.GetClosestOffset(path, txt.Position);
                     _workbench.Invalidate();
                 }
             }
@@ -370,6 +371,8 @@ public partial class MainForm : Form
                  if (txt != null && path != null && txt != path)
                  {
                      txt.PathId = path.Id;
+                     // Auto-calculate offset based on text position
+                     txt.PathOffset = PathWarp.GetClosestOffset(path, txt.Position);
                      _workbench.Invalidate();
                  }
              }

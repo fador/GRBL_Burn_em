@@ -25,7 +25,7 @@ namespace laser_gui_test.Data
                     int n = b.Points.Count;
                     int valid = n - (n - 1) % 3;
                     gp.AddBeziers(b.Points.Take(valid).ToArray());
-                    gp.Flatten(null, 0.5f); // 0.5mm precision for warping backbone
+                    gp.Flatten(null, 0.05f); // 0.05mm precision for warping backbone
                     return gp.PathPoints.ToList();
                 }
             }
@@ -33,7 +33,7 @@ namespace laser_gui_test.Data
             {
                  using var gp = new GraphicsPath();
                  gp.AddEllipse(c.Position.X, c.Position.Y, c.Size.Width, c.Size.Height);
-                 gp.Flatten(null, 0.5f);
+                 gp.Flatten(null, 0.05f);
                  var pts = gp.PathPoints.ToList();
                  if (pts.Count > 0) pts.Add(pts[0]); // Close loop
                  return pts;
@@ -215,6 +215,48 @@ namespace laser_gui_test.Data
             }
             
             return new GraphicsPath(points, types);
+        }
+
+        public static float GetClosestOffset(LaserObject pathObj, PointF target)
+        {
+            var backbone = FlattenPath(pathObj);
+            if (backbone.Count < 2) return 0;
+
+            float bestDist = 0;
+            float minSqDist = float.MaxValue;
+            float currentPathLen = 0;
+
+            for (int i = 0; i < backbone.Count - 1; i++)
+            {
+                var p0 = backbone[i];
+                var p1 = backbone[i+1];
+                float segLen = (float)Math.Sqrt(Math.Pow(p1.X - p0.X, 2) + Math.Pow(p1.Y - p0.Y, 2));
+                
+                // Project point to line segment
+                float t = 0;
+                float l2 = segLen * segLen;
+                if (l2 > 0.0001f)
+                {
+                    t = ((target.X - p0.X) * (p1.X - p0.X) + (target.Y - p0.Y) * (p1.Y - p0.Y)) / l2;
+                }
+                
+                t = Math.Max(0, Math.Min(1, t));
+                
+                float px = p0.X + t * (p1.X - p0.X);
+                float py = p0.Y + t * (p1.Y - p0.Y);
+                
+                float distSq = (float)(Math.Pow(px - target.X, 2) + Math.Pow(py - target.Y, 2));
+                
+                if (distSq < minSqDist)
+                {
+                    minSqDist = distSq;
+                    bestDist = currentPathLen + t * segLen;
+                }
+                
+                currentPathLen += segLen;
+            }
+            
+            return bestDist;
         }
     }
 }

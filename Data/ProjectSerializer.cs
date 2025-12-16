@@ -67,6 +67,8 @@ public class LaserTextDto : LaserObjectDto
     public float FontSize { get; set; }
     public Guid PathId { get; set; }
     public float PathOffset { get; set; }
+    public float VerticalOffset { get; set; }
+    public bool ReversePath { get; set; }
 }
 
 public class LaserBezierDto : LaserObjectDto
@@ -152,7 +154,8 @@ public static class ProjectSerializer
                 {
                     Id = t.Id, Name = t.Name, LayerId = t.LayerId, IsEnabled = t.IsEnabled,
                     Power = t.Power, Speed = t.Speed, Position = t.Position, Rotation = t.Rotation, Size = t.Size,
-                    Text = t.Text, FontName = t.FontName, FontSize = t.FontSize, PathId = t.PathId, PathOffset = t.PathOffset
+                    Text = t.Text, FontName = t.FontName, FontSize = t.FontSize, PathId = t.PathId, PathOffset = t.PathOffset,
+                    VerticalOffset = t.VerticalOffset, ReversePath = t.ReversePath
                 });
             }
             else if (obj is LaserCircle c)
@@ -263,7 +266,9 @@ public static class ProjectSerializer
                     FontName = t.FontName,
                     FontSize = t.FontSize,
                     PathId = t.PathId,
-                    PathOffset = t.PathOffset
+                    PathOffset = t.PathOffset,
+                    VerticalOffset = t.VerticalOffset,
+                    ReversePath = t.ReversePath
                 };
             }
             else if (objDto is LaserCircleDto)

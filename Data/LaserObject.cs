@@ -373,6 +373,8 @@ public class LaserText : LaserObject
     public float FontSize { get; set; } = 20f; // Points
     public Guid PathId { get; set; } = Guid.Empty;
     public float PathOffset { get; set; } = 0f;
+    public float VerticalOffset { get; set; } = 0f;
+    public bool ReversePath { get; set; } = false;
 
     public LaserText()
     {
@@ -448,9 +450,19 @@ public class LaserText : LaserObject
                      using (var m = new System.Drawing.Drawing2D.Matrix())
                      {
                          // 1. Move Baseline to Y=0 (Downwards Y means Baseline is at +Ascent)
-                         m.Translate(0, -ascent);
-                         // 2. Flip Y so Up is Positive (Top at 0 becomes Top at +Ascent)
+                         // Also apply VerticalOffset here (Y axis)
+                         m.Translate(0, -ascent + VerticalOffset);
+                         // 2. Flip Y so Up is Positive
                          m.Scale(1, -1);
+                         
+                         // 3. Apply Object Rotation (around Origin 0,0?)
+                         // Text Origin is Top-Left of text box (now transformed to Baseline-Start).
+                         // User expects Rotation around Center usually?
+                         // But for Path Text, rotating around Start seems safer to just flip direction.
+                         // But if they rotate 180, they might want to keep position?
+                         // Let's just apply Rotation.
+                         m.Rotate(Rotation);
+                         
                          gp.Transform(m);
                      }
                      
@@ -458,6 +470,12 @@ public class LaserText : LaserObject
                      var backbone = PathWarp.FlattenPath(pathObj);
                      if (backbone.Count > 1)
                      {
+                         // Reverse if requested
+                         if (ReversePath)
+                         {
+                             backbone.Reverse();
+                         }
+
                          using (var warped = PathWarp.CreateWarpedPath(gp, backbone, PathOffset))
                          {
                              // Warped path is in World Coordinates (derived from backbone).

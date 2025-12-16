@@ -85,21 +85,27 @@ public class GrblGenerator : IGCodeGenerator
                             var backbone = PathWarp.FlattenPath(pathObj);
                             if (backbone.Count > 1)
                             {
+                                if (text.ReversePath)
+                                {
+                                    backbone.Reverse();
+                                }
+
                                 // Fix Orientation LOCALLY for warping
                                 // We need a clone to not mess up the original gp for fallback
                                 using (var warpInput = (GraphicsPath)gp.Clone())
                                 {
-                                     float ascent = family.GetCellAscent((FontStyle)style) * emSize / family.GetEmHeight((FontStyle)style);
-                                     using (var m = new System.Drawing.Drawing2D.Matrix())
-                                     {
-                                         m.Translate(0, -ascent);
-                                         m.Scale(1, -1);
-                                         warpInput.Transform(m);
-                                     }
-                                     
-                                     warpedPath = PathWarp.CreateWarpedPath(warpInput, backbone, text.PathOffset);
-                                     workPath = warpedPath;
-                                     checkWarp = true;
+                                    float ascent = family.GetCellAscent((FontStyle)style) * emSize / family.GetEmHeight((FontStyle)style);
+                                    using (var m = new System.Drawing.Drawing2D.Matrix())
+                                    {
+                                        m.Translate(0, -ascent + text.VerticalOffset);
+                                        m.Scale(1, -1);
+                                        m.Rotate(text.Rotation);
+                                        warpInput.Transform(m);
+                                    }
+                                    
+                                    warpedPath = PathWarp.CreateWarpedPath(warpInput, backbone, text.PathOffset);
+                                    workPath = warpedPath;
+                                    checkWarp = true;
                                 }
                             }
                         }
