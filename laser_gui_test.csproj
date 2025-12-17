@@ -19,7 +19,6 @@
   <ItemGroup>
     <PackageReference Include="OpenCvSharp4.Extensions" Version="4.11.0.20250507" />
     <PackageReference Include="OpenCvSharp4.Windows" Version="4.11.0.20250507" />
-    <PackageReference Include="Svg" Version="3.4.7" />
     <PackageReference Include="RJCP.SerialPortStream" Version="3.0.4" />
   </ItemGroup>
 
