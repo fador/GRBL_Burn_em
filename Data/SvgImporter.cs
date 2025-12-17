@@ -168,8 +168,8 @@ public class SvgImporter
         // Fill defaults to black in SVG if not specified? Actually defaults to black.
         // But if fill="none" and stroke="none", ignore.
         
-        string fill = GetStyleOrAttribute(elem, "fill");
-        string stroke = GetStyleOrAttribute(elem, "stroke");
+        string? fill = GetStyleOrAttribute(elem, "fill");
+        string? stroke = GetStyleOrAttribute(elem, "stroke");
         
         bool noFill = fill == "none" || fill == "transparent";
         bool noStroke = stroke == "none" || stroke == "transparent";
@@ -448,7 +448,7 @@ public class SvgImporter
         }
     }
 
-    private static string GetStyleOrAttribute(XElement elem, string name)
+    private static string? GetStyleOrAttribute(XElement elem, string name)
     {
         var attr = elem.Attribute(name)?.Value;
         if (!string.IsNullOrEmpty(attr)) return attr;
@@ -737,7 +737,7 @@ public class SvgImporter
 
     // --- Dimension Parsing ---
 
-    private static float ParseDimension(string s, float def)
+    private static float ParseDimension(string? s, float def)
     {
         if (string.IsNullOrEmpty(s)) return def;
         s = s.Trim();
