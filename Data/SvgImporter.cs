@@ -23,26 +23,53 @@ public class SvgImporter
             if (svg == null || svg.Name.LocalName != "svg") return laserObjects;
 
             // Parse document dimensions to establish coordinate system
-            float width = ParseDimension(svg.Attribute("width")?.Value, 0);
-            float height = ParseDimension(svg.Attribute("height")?.Value, 0);
+            // Parse document dimensions to establish coordinate system
+            // ParseDimension returns Pixels (96 DPI) for units like mm/cm/in/pt.
+            // We want the internal system to be in Millimeters (Target Units).
+            float pxToMm = 25.4f / 96.0f;
+            float width = ParseDimension(svg.Attribute("width")?.Value, 0) * pxToMm;
+            float height = ParseDimension(svg.Attribute("height")?.Value, 0) * pxToMm;
             
             var viewBoxAttr = svg.Attribute("viewBox");
+            float vx = 0, vy = 0, vw = 0, vh = 0;
+            bool hasViewBox = false;
+
             if (viewBoxAttr != null)
             {
                 var parts = ParseNumbers(viewBoxAttr.Value);
                 if (parts.Length == 4)
                 {
-                    if (width == 0) width = parts[2];
-                    if (height == 0) height = parts[3];
+                    vx = parts[0]; vy = parts[1];
+                    vw = parts[2]; vh = parts[3];
+                    hasViewBox = true;
+
+                    if (width == 0) width = vw;
+                    if (height == 0) height = vh;
                 }
             }
 
             // Default fallback if nothing specified (rare)
-            if (height == 0) height = 1000; 
+            if (height == 0) height = 1000;
+            if (width == 0) width = (hasViewBox && vw > 0) ? vw : 1000;
+
+            // Prepare Global Transform
+            // 1. ViewBox Transform (if applicable): Map ViewBox to (0,0)-(width,height)
+            // 2. Laser Flip: Map (0,0)-(width,height) Y-Down to Y-Up
+            
+            using var globalTransform = new Matrix(); // Identity
+
+            if (hasViewBox && vw > 0 && vh > 0)
+            {
+                // Translate SVG content so ViewBox top-left (vx, vy) is at (0,0)
+                globalTransform.Translate(-vx, -vy);
+                // Scale so ViewBox size (vw, vh) matches Document size (width, height)
+                globalTransform.Scale(width / vw, height / vh, MatrixOrder.Append);
+            }
 
             // Laser coordinate system flip: Y-Up vs SVG Y-Down
             // Transform: Scale(1, -1) then Translate(0, height)
-            using var globalTransform = new Matrix(1, 0, 0, -1, 0, height);
+            globalTransform.Scale(1, -1, MatrixOrder.Append);
+            globalTransform.Translate(0, height, MatrixOrder.Append);
 
             ParseElement(svg, laserObjects, globalTransform);
         }
