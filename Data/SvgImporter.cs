@@ -8,8 +8,11 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using System.IO;
 
+using System.Runtime.Versioning;
+
 namespace laser_gui_test.Data;
 
+[SupportedOSPlatform("windows")]
 public class SvgImporter
 {
     public static List<LaserObject> Import(string filePath)
@@ -64,6 +67,12 @@ public class SvgImporter
                 globalTransform.Translate(-vx, -vy);
                 // Scale so ViewBox size (vw, vh) matches Document size (width, height)
                 globalTransform.Scale(width / vw, height / vh, MatrixOrder.Append);
+            }
+            else
+            {
+                // No ViewBox: coordinate system is pixels (96 DPI).
+                // Scale to Millimeters.
+                globalTransform.Scale(pxToMm, pxToMm, MatrixOrder.Append);
             }
 
             // Laser coordinate system flip: Y-Up vs SVG Y-Down

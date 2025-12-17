@@ -1,6 +1,10 @@
 using System.Drawing;
 using System;
+using System.Text.Json.Serialization;
+using System.Runtime.Versioning;
 using System.Drawing.Drawing2D;
+
+[assembly: SupportedOSPlatform("windows")]
 
 namespace laser_gui_test.Data;
 
