@@ -102,6 +102,223 @@ public class GCodeSimulationTests
     }
 
     [Fact]
+    public void TestPathSimulation()
+    {
+        var layerId = Guid.NewGuid();
+        SetupDefaultLayer(layerId);
+
+        var path = new LaserPath
+        {
+            LayerId = layerId,
+            IsEnabled = true
+        };
+        path.Points.Add(new PointF(10, 10));
+        path.Points.Add(new PointF(20, 10));
+        path.Points.Add(new PointF(20, 20));
+        path.UpdateBounds();
+
+        var gcode = _generator.Generate(new[] { path }).ToList();
+        var simulator = new GCodeSimulator();
+        simulator.Simulate(gcode);
+
+        Assert.NotEmpty(simulator.Paths);
+        var allPoints = simulator.Paths.SelectMany(p => p.Points).ToList();
+        
+        Assert.Contains(allPoints, p => Math.Abs(p.X - 10) < 0.1 && Math.Abs(p.Y - 10) < 0.1);
+        Assert.Contains(allPoints, p => Math.Abs(p.X - 20) < 0.1 && Math.Abs(p.Y - 10) < 0.1);
+        Assert.Contains(allPoints, p => Math.Abs(p.X - 20) < 0.1 && Math.Abs(p.Y - 20) < 0.1);
+    }
+
+    [Fact]
+    public void TestCircleSimulation()
+    {
+        var layerId = Guid.NewGuid();
+        SetupDefaultLayer(layerId);
+
+        var circle = new LaserCircle
+        {
+            LayerId = layerId,
+            Position = new PointF(10, 10),
+            Size = new SizeF(20, 20),
+            IsEnabled = true
+        };
+
+        var gcode = _generator.Generate(new[] { circle }).ToList();
+        var simulator = new GCodeSimulator();
+        simulator.Simulate(gcode);
+
+        Assert.NotEmpty(simulator.Paths);
+        var allPoints = simulator.Paths.SelectMany(p => p.Points).ToList();
+        
+        // Linearized circle should range from 10 to 30 on both axes
+        Assert.Equal(10, allPoints.Min(p => p.X), 1);
+        Assert.Equal(30, allPoints.Max(p => p.X), 1);
+        Assert.Equal(10, allPoints.Min(p => p.Y), 1);
+        Assert.Equal(30, allPoints.Max(p => p.Y), 1);
+    }
+
+    [Fact]
+    public void TestBezierSimulation()
+    {
+        var layerId = Guid.NewGuid();
+        SetupDefaultLayer(layerId);
+
+        var bezier = new LaserBezier
+        {
+            LayerId = layerId,
+            IsEnabled = true
+        };
+        // Simple curve from (0,0) to (10,0) with control points at (3,5) and (7,5)
+        bezier.Points.Add(new PointF(0, 0));
+        bezier.Points.Add(new PointF(3, 5));
+        bezier.Points.Add(new PointF(7, 5));
+        bezier.Points.Add(new PointF(10, 0));
+        bezier.UpdateBounds();
+
+        var gcode = _generator.Generate(new[] { bezier }).ToList();
+        var simulator = new GCodeSimulator();
+        simulator.Simulate(gcode);
+
+        Assert.NotEmpty(simulator.Paths);
+        var allPoints = simulator.Paths.SelectMany(p => p.Points).ToList();
+        
+        Assert.Equal(0, allPoints.Min(p => p.X), 1);
+        Assert.Equal(10, allPoints.Max(p => p.X), 1);
+        Assert.True(allPoints.Max(p => p.Y) > 2); // Should have some height
+    }
+
+    [Fact]
+    public void TestStandardTextSimulation()
+    {
+        var layerId = Guid.NewGuid();
+        SetupDefaultLayer(layerId);
+
+        var text = new LaserText
+        {
+            LayerId = layerId,
+            Text = "ABC",
+            FontName = "Arial",
+            FontSize = 10,
+            Position = new PointF(10, 10),
+            Size = new SizeF(20, 10), // Approximate size
+            IsEnabled = true
+        };
+
+        var gcode = _generator.Generate(new[] { text }).ToList();
+        var simulator = new GCodeSimulator();
+        simulator.Simulate(gcode);
+
+        Assert.NotEmpty(simulator.Paths);
+        var allPoints = simulator.Paths.SelectMany(p => p.Points).ToList();
+        
+        // Text should be around the position
+        Assert.All(allPoints, p => Assert.True(p.X >= 5 && p.X <= 40));
+    }
+
+    [Fact]
+    public void TestImageSimulation()
+    {
+        var layerId = Guid.NewGuid();
+        SetupDefaultLayer(layerId, LayerMode.Fill);
+
+        using var bmp = new Bitmap(10, 10);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.White);
+            g.FillRectangle(Brushes.Black, 2, 2, 6, 6);
+        }
+
+        var image = new LaserImage
+        {
+            LayerId = layerId,
+            Image = bmp,
+            Position = new PointF(10, 10),
+            Size = new SizeF(20, 20),
+            IsEnabled = true
+        };
+
+        AppConfiguration.Instance.RasterLineInterval = 1.0f;
+
+        var gcode = _generator.Generate(new[] { image }).ToList();
+        var simulator = new GCodeSimulator();
+        simulator.Simulate(gcode);
+
+        Assert.NotEmpty(simulator.Paths);
+        var allPoints = simulator.Paths.SelectMany(p => p.Points).ToList();
+        
+        // Image at (10,10) size 20x20. Black square 60% in middle (20% padding)
+        // Expected black area approx (14,14) to (26,26)
+        Assert.InRange(allPoints.Min(p => p.X), 13, 15);
+        Assert.InRange(allPoints.Max(p => p.X), 25, 27);
+    }
+
+    [Fact]
+    public void TestGroupSimulation()
+    {
+        var layerId = Guid.NewGuid();
+        SetupDefaultLayer(layerId);
+
+        var rect1 = new LaserRectangle { Position = new PointF(0, 0), Size = new SizeF(10, 10), LayerId = layerId };
+        var rect2 = new LaserRectangle { Position = new PointF(20, 20), Size = new SizeF(10, 10), LayerId = layerId };
+
+        var group = new LaserGroup
+        {
+            LayerId = layerId,
+            IsEnabled = true
+        };
+        group.Children.Add(rect1);
+        group.Children.Add(rect2);
+
+        var gcode = _generator.Generate(new[] { group }).ToList();
+        var simulator = new GCodeSimulator();
+        simulator.Simulate(gcode);
+
+        // Should have at least 2 distinct path groups (one for each rect)
+        // But the simulator concatenates into Paths based on power transitions.
+        // Each rect has 4 segments + closure.
+        Assert.True(simulator.Paths.Count >= 2);
+        
+        var allPoints = simulator.Paths.SelectMany(p => p.Points).ToList();
+        Assert.Contains(allPoints, p => Math.Abs(p.X - 0) < 0.1 && Math.Abs(p.Y - 0) < 0.1);
+        Assert.Contains(allPoints, p => Math.Abs(p.X - 30) < 0.1 && Math.Abs(p.Y - 30) < 0.1);
+    }
+
+    [Fact]
+    public void TestCircleFillSimulation()
+    {
+        var layerId = Guid.NewGuid();
+        SetupDefaultLayer(layerId, LayerMode.Fill);
+
+        var circle = new LaserCircle
+        {
+            LayerId = layerId,
+            Position = new PointF(0, 0),
+            Size = new SizeF(10, 10),
+            IsEnabled = true
+        };
+
+        AppConfiguration.Instance.RasterLineInterval = 0.5f;
+
+        var gcode = _generator.Generate(new[] { circle }).ToList();
+        var simulator = new GCodeSimulator();
+        simulator.Simulate(gcode);
+
+        // Circle fill should have many scan lines
+        Assert.True(simulator.Paths.Count > 10);
+        
+        var allPoints = simulator.Paths.SelectMany(p => p.Points).ToList();
+        
+        // Check if points are roughly inside the circle bounds
+        Assert.True(allPoints.All(p => p.X >= -1 && p.X <= 11 && p.Y >= -1 && p.Y <= 11));
+        
+        // Check "middle" line (Y=5)
+        var middlePoints = allPoints.Where(p => Math.Abs(p.Y - 5) < 0.1).ToList();
+        Assert.NotEmpty(middlePoints);
+        Assert.Equal(0, middlePoints.Min(p => p.X), 0.5);
+        Assert.Equal(10, middlePoints.Max(p => p.X), 0.5);
+    }
+
+    [Fact]
     public void TestRasterFillSimulation()
     {
         var layerId = Guid.NewGuid();
