@@ -57,6 +57,7 @@ public partial class MainForm : Form
     private TrackBar _trkPathOffset = null!;
     private NumericUpDown _nudVerticalOffset = null!;
     private CheckBox _chkReversePath = null!;
+    private CheckBox _chkUpsideDown = null!;
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -1052,6 +1053,9 @@ public partial class MainForm : Form
 
         _chkReversePath = new CheckBox { Text = "Reverse", AutoSize = true };
         tsRow4.Items.Add(new ToolStripControlHost(_chkReversePath));
+
+        _chkUpsideDown = new CheckBox { Text = "Flip", AutoSize = true };
+        tsRow4.Items.Add(new ToolStripControlHost(_chkUpsideDown));
         
         _topToolbarPanel.Controls.Add(tsRow4);
         
@@ -1160,6 +1164,17 @@ public partial class MainForm : Form
             if (sel.Count == 1 && sel[0] is LaserText txt)
             {
                 txt.ReversePath = _chkReversePath.Checked;
+                _workbench.Invalidate();
+            }
+        };
+
+        _chkUpsideDown.CheckedChanged += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.UpsideDown = _chkUpsideDown.Checked;
                 _workbench.Invalidate();
             }
         };
@@ -1736,8 +1751,10 @@ public partial class MainForm : Form
                 // Path Controls [NEW]
                 _nudVerticalOffset.Enabled = true;
                 _chkReversePath.Enabled = true;
+                _chkUpsideDown.Enabled = true;
                 _nudVerticalOffset.Value = (decimal)txt.VerticalOffset;
                 _chkReversePath.Checked = txt.ReversePath;
+                _chkUpsideDown.Checked = txt.UpsideDown;
 
                 if (txt.PathId != Guid.Empty)
                 {
@@ -1775,6 +1792,7 @@ public partial class MainForm : Form
                 _trkPathOffset.Enabled = false;
                 _nudVerticalOffset.Enabled = false;
                 _chkReversePath.Enabled = false;
+                _chkUpsideDown.Enabled = false;
                 _txtContent.Text = "";
             }
 

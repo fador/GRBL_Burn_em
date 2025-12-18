@@ -466,6 +466,7 @@ public class LaserText : LaserObject
     public float PathOffset { get; set; } = 0f;
     public float VerticalOffset { get; set; } = 0f;
     public bool ReversePath { get; set; } = false;
+    public bool UpsideDown { get; set; } = false;
 
     public LaserText()
     {
@@ -540,27 +541,40 @@ public class LaserText : LaserObject
                      // Fix Orientation: AddString is Top-Down. World is Y-Up.
                      float emHeight = family.GetEmHeight((int)FontStyle.Regular);
                      float cellAscent = family.GetCellAscent((int)FontStyle.Regular);
+                     float cellDescent = family.GetCellDescent((int)FontStyle.Regular);
                      
-                     // Ascent in World Units
+                     // Convert to World Units
                      float ascent = (emSize * cellAscent) / emHeight;
+                     float descent = (emSize * cellDescent) / emHeight;
                      
                      using (var m = new System.Drawing.Drawing2D.Matrix())
                      {
-                         // 1. Position the visual baseline at Y=0.
-                         // AddString(..., new PointF(0,0), ...) puts the Top of the em-box at Y=0.
-                         // So the baseline is at Y = +ascent.
-                         // To get baseline to Y=0, we move the whole path by -ascent.
-                         // We also apply VerticalOffset here.
-                         m.Translate(0, -ascent + VerticalOffset);
+                         // 1. Position the Bottom of the text at Y=0.
+                         // AddString puts Top at Y=0. Total height is (ascent + descent).
+                         // So Bottom is at Y = ascent + descent.
+                         // To get bottom to Y=0, we move by -(ascent + descent).
+                         
+                         float totalHeight = ascent + descent;
+                         float alignmentShift = -totalHeight;
+                         
+                         // Apply VerticalOffset: Positive moves AWAY from path (Up in local space)
+                         float finalYShift = alignmentShift - VerticalOffset; 
+                         
+                         m.Translate(0, finalYShift);
+                         
                          // 2. Flip Y so Up is Positive
                          m.Scale(1, -1);
                          
-                         // 3. Apply Object Rotation (around Origin 0,0?)
-                         // Text Origin is Top-Left of text box (now transformed to Baseline-Start).
-                         // User expects Rotation around Center usually?
-                         // But for Path Text, rotating around Start seems safer to just flip direction.
-                         // But if they rotate 180, they might want to keep position?
-                         // Let's just apply Rotation.
+                         // 3. Upside Down flip (if requested)
+                         if (UpsideDown)
+                         {
+                             // Flip around the middle of the text height ideally, 
+                             // but user might want it flipped across the path.
+                             // Flipping across the path (Y=0) is simplest.
+                             m.Scale(1, -1);
+                         }
+
+                         // 4. Apply Object Rotation (around Baseline/Path point)
                          m.Rotate(Rotation);
                          
                          gp.Transform(m);
