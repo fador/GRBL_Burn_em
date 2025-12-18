@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,14 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- <ProjectReference Include="..\..\laser_gui_test.csproj" /> -->
-    <Compile Include="..\..\Data\SvgImporter.cs" Link="Data\SvgImporter.cs" />
-    <Compile Include="..\..\Data\LaserObject.cs" Link="Data\LaserObject.cs" />
-    <Compile Include="..\..\Data\LaserGroup.cs" Link="Data\LaserGroup.cs" />
-    <Compile Include="..\..\Data\ProjectState.cs" Link="Data\ProjectState.cs" />
-    <Compile Include="..\..\Data\PathWarp.cs" Link="Data\PathWarp.cs" />
-    <Compile Include="..\..\Data\AppConfiguration.cs" Link="Data\AppConfiguration.cs" />
-    <Compile Include="..\..\Data\Layer.cs" Link="Data\Layer.cs" />
+    <ProjectReference Include="..\..\laser_gui_test.csproj" />
   </ItemGroup>
 
 </Project>
