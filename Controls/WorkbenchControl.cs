@@ -675,8 +675,6 @@ public class WorkbenchControl : Control
                     {
                         newSelection.Add(hitObj);
                         ProjectState.Instance.SelectedObjects = newSelection;
-                        newSelection.Add(hitObj);
-                        ProjectState.Instance.SelectedObjects = newSelection;
                         // Prepare for move
                         _interactionObject = hitObj;
                         _isMoving = true;
@@ -706,20 +704,6 @@ public class WorkbenchControl : Control
                     }
                 }
             }
-            else if (ToolManager.Instance.CurrentTool == ToolType.Rotate)
-            {
-                 if (ProjectState.Instance.SelectedObjects.Count > 0)
-                 {
-                     var b = GetSelectionBounds();
-                     if (b != null)
-                     {
-                         _rotateCenter = new PointF(b.Value.Left + b.Value.Width/2, b.Value.Top + b.Value.Height/2);
-                         _rotateStartAngle = (float)(Math.Atan2(worldPos.Y - _rotateCenter.Y, worldPos.X - _rotateCenter.X) * 180.0 / Math.PI);
-                         SnapshotSelection();
-                         _isRotating = true;
-                     }
-                 }
-            }
             else
             {
                 // C. Clicked Empty Space -> Start Selection Box
@@ -728,6 +712,21 @@ public class WorkbenchControl : Control
             }
 
             Invalidate();
+        }
+        else if (ToolManager.Instance.CurrentTool == ToolType.Rotate)
+        {
+             if (ProjectState.Instance.SelectedObjects.Count > 0)
+             {
+                 var b = GetSelectionBounds();
+                 if (b != null)
+                 {
+                     _rotateCenter = new PointF(b.Value.Left + b.Value.Width/2, b.Value.Top + b.Value.Height/2);
+                     _rotateStartAngle = (float)(Math.Atan2(worldPos.Y - _rotateCenter.Y, worldPos.X - _rotateCenter.X) * 180.0 / Math.PI);
+                     SnapshotSelection();
+                     _isRotating = true;
+                     Invalidate();
+                 }
+             }
         }
     }
 
@@ -812,9 +811,12 @@ public class WorkbenchControl : Control
                 // 1. Rotate Orientation
                 obj.Rotation = init.Rotation + deltaAngle;
                 
-                // 2. Orbit Position
-                float rx = init.Pos.X - _rotateCenter.X;
-                float ry = init.Pos.Y - _rotateCenter.Y;
+                // 2. Orbit Position (Around Center)
+                float oldCenterX = init.Pos.X + init.Size.Width / 2f;
+                float oldCenterY = init.Pos.Y + init.Size.Height / 2f;
+                
+                float rx = oldCenterX - _rotateCenter.X;
+                float ry = oldCenterY - _rotateCenter.Y;
                 
                 float rad = deltaAngle * (float)Math.PI / 180f;
                 float c = (float)Math.Cos(rad);
@@ -823,24 +825,29 @@ public class WorkbenchControl : Control
                 float nx = rx * c - ry * s;
                 float ny = rx * s + ry * c;
                 
-                obj.Position = new PointF(_rotateCenter.X + nx, _rotateCenter.Y + ny);
+                float newCenterX = _rotateCenter.X + nx;
+                float newCenterY = _rotateCenter.Y + ny;
+
+                // Position is top-left
+                PointF newPos = new PointF(newCenterX - init.Size.Width / 2f, newCenterY - init.Size.Height / 2f);
+                float dx = newPos.X - obj.Position.X;
+                float dy = newPos.Y - obj.Position.Y;
                 
+                obj.Position = newPos;
+
+                // Shift points if absolute (Paths and Beziers)
                 if (obj is LaserPath p && init.Points != null)
                 {
                     for(int i=0; i<p.Points.Count; i++)
                     {
-                         float px = init.Points[i].X - _rotateCenter.X;
-                         float py = init.Points[i].Y - _rotateCenter.Y;
-                         p.Points[i] = new PointF(_rotateCenter.X + px * c - py * s, _rotateCenter.Y + px * s + py * c);
+                         p.Points[i] = new PointF(p.Points[i].X + dx, p.Points[i].Y + dy);
                     }
                 }
                 else if (obj is LaserBezier b && init.Points != null)
                 {
                     for(int i=0; i<b.Points.Count; i++)
                     {
-                         float px = init.Points[i].X - _rotateCenter.X;
-                         float py = init.Points[i].Y - _rotateCenter.Y;
-                         b.Points[i] = new PointF(_rotateCenter.X + px * c - py * s, _rotateCenter.Y + px * s + py * c);
+                         b.Points[i] = new PointF(b.Points[i].X + dx, b.Points[i].Y + dy);
                     }
                     b.UpdateBounds();
                 }
@@ -929,6 +936,7 @@ public class WorkbenchControl : Control
                 {
                     path.Points[0] = start; // Ensure start point is snapped too if we want
                     path.Points[1] = effectivePos;
+                    path.UpdateBounds();
                 }
             }
             else if (ToolManager.Instance.CurrentTool == ToolType.DrawBezier)

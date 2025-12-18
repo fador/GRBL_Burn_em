@@ -183,14 +183,20 @@ public class LaserPath : LaserObject
         Type = LaserObjectType.Path;
     }
 
-    public override RectangleF GetBounds()
+    public void UpdateBounds()
     {
-        if (Points.Count == 0) return RectangleF.Empty;
+        if (Points.Count == 0) return;
         float minX = Points.Min(p => p.X);
         float minY = Points.Min(p => p.Y);
         float maxX = Points.Max(p => p.X);
         float maxY = Points.Max(p => p.Y);
-        return new RectangleF(minX, minY, maxX - minX, maxY - minY);
+        Position = new PointF(minX, minY);
+        Size = new SizeF(maxX - minX, maxY - minY);
+    }
+
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
     }
 
     public override void Draw(Graphics g, float scale)
@@ -216,19 +222,29 @@ public class LaserPath : LaserObject
 
     public override bool HitTest(PointF point, float tolerance)
     {
-        // BBox optimization
+        PointF testPoint = point;
+        if (Rotation != 0)
+        {
+            float cx = Position.X + Size.Width / 2f;
+            float cy = Position.Y + Size.Height / 2f;
+            using (var m = new Matrix())
+            {
+                m.RotateAt(-Rotation, new PointF(cx, cy));
+                var pts = new PointF[] { point };
+                m.TransformPoints(pts);
+                testPoint = pts[0];
+            }
+        }
+
+        // BBox optimization (Unrotated)
         float bBuffer = tolerance;
-        float minX = Points.Min(p => p.X) - bBuffer;
-        float minY = Points.Min(p => p.Y) - bBuffer;
-        float maxX = Points.Max(p => p.X) + bBuffer;
-        float maxY = Points.Max(p => p.Y) + bBuffer;
-        
-        if (point.X < minX || point.X > maxX || point.Y < minY || point.Y > maxY) 
+        if (testPoint.X < Position.X - bBuffer || testPoint.X > Position.X + Size.Width + bBuffer || 
+            testPoint.Y < Position.Y - bBuffer || testPoint.Y > Position.Y + Size.Height + bBuffer) 
             return false;
 
         for (int i = 0; i < Points.Count - 1; i++)
         {
-            if (DistanceToSegment(point, Points[i], Points[i + 1]) <= tolerance)
+            if (DistanceToSegment(testPoint, Points[i], Points[i + 1]) <= tolerance)
                 return true;
         }
         return false;
@@ -746,12 +762,27 @@ public class LaserBezier : LaserObject
     public override bool HitTest(PointF point, float tolerance)
     {
          if (Points.Count < 4) return false;
+         
+         PointF testPoint = point;
+         if (Rotation != 0)
+         {
+             float cx = Position.X + Size.Width / 2f;
+             float cy = Position.Y + Size.Height / 2f;
+             using (var m = new Matrix())
+             {
+                 m.RotateAt(-Rotation, new PointF(cx, cy));
+                 var pts = new PointF[] { point };
+                 m.TransformPoints(pts);
+                 testPoint = pts[0];
+             }
+         }
+
          int count = Points.Count;
          int validCount = count - (count - 1) % 3;
          using var path = new GraphicsPath();
          path.AddBeziers(Points.Take(validCount).ToArray());
          using var pen = new Pen(Color.Black, tolerance);
-         return path.IsOutlineVisible(point, pen);
+         return path.IsOutlineVisible(testPoint, pen);
     }
 
     public override LaserObject Clone()

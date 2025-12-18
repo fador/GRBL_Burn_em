@@ -55,7 +55,16 @@ public class MoveCommand : ICommand
             {
                 path.Points[i] = new PointF(path.Points[i].X + x, path.Points[i].Y + y);
             }
-            path.Position = new PointF(path.Position.X + x, path.Position.Y + y);
+            path.UpdateBounds();
+        }
+        else if (obj is LaserBezier bezier)
+        {
+            // Move points
+            for(int i=0; i<bezier.Points.Count; i++)
+            {
+                bezier.Points[i] = new PointF(bezier.Points[i].X + x, bezier.Points[i].Y + y);
+            }
+            bezier.UpdateBounds();
         }
         else if (obj is LaserGroup group)
         {
