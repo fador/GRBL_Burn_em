@@ -100,4 +100,27 @@ public class PathWarpTests
         float chord = (float)Math.Sqrt(Math.Pow(pts[0].X - pts.Last().X, 2) + Math.Pow(pts[0].Y - pts.Last().Y, 2));
         Assert.True(totalDist > chord + 0.1f, "Path should be curved");
     }
+
+    [Fact]
+    public void TestPathLooping()
+    {
+        // 100mm straight line
+        var backbone = new List<PointF> { new PointF(0, 0), new PointF(100, 0) };
+        using var gp = new GraphicsPath();
+        // Rectangle from 90 to 110 (overlaps end)
+        gp.AddRectangle(new RectangleF(90, 0, 20, 5));
+        
+        using var warped = PathWarp.CreateWarpedPath(gp, backbone, 0);
+        var pts = warped.PathPoints;
+        
+        // Some points should be near 95, some wrapped to near 5
+        bool hasAtStart = pts.Any(p => p.X < 15);
+        bool hasAtEnd = pts.Any(p => p.X > 85);
+        
+        Assert.True(hasAtStart, "Should have wrapped points at the start of the path");
+        Assert.True(hasAtEnd, "Should have points at the end of the path");
+        
+        // Ensure nothing is beyond 100 or below 0 (modulo logic)
+        Assert.All(pts, p => Assert.True(p.X >= 0 && p.X <= 100));
+    }
 }

@@ -538,15 +538,19 @@ public class LaserText : LaserObject
                      gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
                      
                      // Fix Orientation: AddString is Top-Down. World is Y-Up.
-                     // We want Baseline to be on the curve (Y=0 locally).
-                     // AddString draws from Top (Y=0) downwards.
-                     // Calculate Ascent to find Baseline.
-                     float ascent = family.GetCellAscent((int)FontStyle.Regular) * emSize / family.GetEmHeight((int)FontStyle.Regular);
+                     float emHeight = family.GetEmHeight((int)FontStyle.Regular);
+                     float cellAscent = family.GetCellAscent((int)FontStyle.Regular);
+                     
+                     // Ascent in World Units
+                     float ascent = (emSize * cellAscent) / emHeight;
                      
                      using (var m = new System.Drawing.Drawing2D.Matrix())
                      {
-                         // 1. Move Baseline to Y=0 (Downwards Y means Baseline is at +Ascent)
-                         // Also apply VerticalOffset here (Y axis)
+                         // 1. Position the visual baseline at Y=0.
+                         // AddString(..., new PointF(0,0), ...) puts the Top of the em-box at Y=0.
+                         // So the baseline is at Y = +ascent.
+                         // To get baseline to Y=0, we move the whole path by -ascent.
+                         // We also apply VerticalOffset here.
                          m.Translate(0, -ascent + VerticalOffset);
                          // 2. Flip Y so Up is Positive
                          m.Scale(1, -1);

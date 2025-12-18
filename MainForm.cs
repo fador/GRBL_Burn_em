@@ -53,6 +53,11 @@ public partial class MainForm : Form
     private ToolStripComboBox _cmbFont = null!;
     private NumericUpDown _nudFontSize = null!;
 
+    // Row 4 Controls
+    private TrackBar _trkPathOffset = null!;
+    private NumericUpDown _nudVerticalOffset = null!;
+    private CheckBox _chkReversePath = null!;
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         try
@@ -1034,7 +1039,21 @@ public partial class MainForm : Form
         _nudFontSize = new NumericUpDown { Width = 60, Minimum = 1, Maximum = 1000, DecimalPlaces = 1 };
         tsRow3.Items.Add(new ToolStripControlHost(_nudFontSize));
         
-        _topToolbarPanel.Controls.Add(tsRow3);
+        // Row 4: Path Controls [NEW]
+        var tsRow4 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
+        
+        tsRow4.Items.Add(new ToolStripLabel("Path Pos:"));
+        _trkPathOffset = new TrackBar { Width = 200, Minimum = 0, Maximum = 1000, TickStyle = TickStyle.None, Height = 20 };
+        tsRow4.Items.Add(new ToolStripControlHost(_trkPathOffset));
+        
+        tsRow4.Items.Add(new ToolStripLabel("V-Offset:"));
+        _nudVerticalOffset = new NumericUpDown { Width = 60, DecimalPlaces = 1, Minimum = -500, Maximum = 500, Increment = 0.5m };
+        tsRow4.Items.Add(new ToolStripControlHost(_nudVerticalOffset));
+
+        _chkReversePath = new CheckBox { Text = "Reverse", AutoSize = true };
+        tsRow4.Items.Add(new ToolStripControlHost(_chkReversePath));
+        
+        _topToolbarPanel.Controls.Add(tsRow4);
         
         this.Controls.Add(_topToolbarPanel); 
         
@@ -1110,6 +1129,40 @@ public partial class MainForm : Form
         _txtContent.TextChanged += textChanged;
         _cmbFont.SelectedIndexChanged += textChanged;
         _nudFontSize.ValueChanged += textChanged;
+
+        // Wire Path Logic
+        _trkPathOffset.Scroll += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.PathOffset = _trkPathOffset.Value / 10f; // Multiplier for precision
+                _workbench.Invalidate();
+            }
+        };
+
+        _nudVerticalOffset.ValueChanged += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.VerticalOffset = (float)_nudVerticalOffset.Value;
+                _workbench.Invalidate();
+            }
+        };
+
+        _chkReversePath.CheckedChanged += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.ReversePath = _chkReversePath.Checked;
+                _workbench.Invalidate();
+            }
+        };
     }
 
     private void InitializeLayers()
@@ -1679,12 +1732,49 @@ public partial class MainForm : Form
                      _cmbFont.SelectedIndex = 0; 
                     
                 _nudFontSize.Value = (decimal)txt.FontSize;
+
+                // Path Controls [NEW]
+                _nudVerticalOffset.Enabled = true;
+                _chkReversePath.Enabled = true;
+                _nudVerticalOffset.Value = (decimal)txt.VerticalOffset;
+                _chkReversePath.Checked = txt.ReversePath;
+
+                if (txt.PathId != Guid.Empty)
+                {
+                    _trkPathOffset.Enabled = true;
+                    var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == txt.PathId);
+                    if (pathObj != null)
+                    {
+                        var backbone = PathWarp.FlattenPath(pathObj);
+                        float totalLen = 0;
+                        for (int i = 0; i < backbone.Count - 1; i++)
+                        {
+                            float dx = backbone[i+1].X - backbone[i].X;
+                            float dy = backbone[i+1].Y - backbone[i].Y;
+                            totalLen += (float)Math.Sqrt(dx*dx + dy*dy);
+                        }
+                        
+                        _trkPathOffset.Maximum = (int)(totalLen * 10); // 0.1mm precision
+                        int val = (int)(txt.PathOffset * 10);
+                        if (val < 0) val = 0;
+                        if (val > _trkPathOffset.Maximum) val = _trkPathOffset.Maximum;
+                        _trkPathOffset.Value = val;
+                    }
+                }
+                else
+                {
+                    _trkPathOffset.Enabled = false;
+                    _trkPathOffset.Value = 0;
+                }
             }
             else
             {
                 _txtContent.Enabled = false;
                 _cmbFont.Enabled = false;
                 _nudFontSize.Enabled = false;
+                _trkPathOffset.Enabled = false;
+                _nudVerticalOffset.Enabled = false;
+                _chkReversePath.Enabled = false;
                 _txtContent.Text = "";
             }
 

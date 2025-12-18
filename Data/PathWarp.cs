@@ -104,12 +104,20 @@ namespace laser_gui_test.Data
             // 3. Transform Points
             PointF[] points = flatText.PathPoints;
             byte[] types = flatText.PathTypes;
+            float totalLen = lengths[lengths.Length - 1];
 
             for (int i = 0; i < points.Length; i++)
             {
                 float localX = points[i].X;
                 float localY = points[i].Y; 
                 float targetDist = localX + offsetDist;
+
+                // Path Looping
+                if (totalLen > 0.001f)
+                {
+                    // Handle negative modulo correctly for reversed paths or offsets
+                    targetDist = ((targetDist % totalLen) + totalLen) % totalLen;
+                }
 
                 // Find segment
                 int idx = Array.BinarySearch(lengths, targetDist);
