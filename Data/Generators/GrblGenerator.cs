@@ -94,11 +94,27 @@ public class GrblGenerator : IGCodeGenerator
                                 // We need a clone to not mess up the original gp for fallback
                                 using (var warpInput = (GraphicsPath)gp.Clone())
                                 {
-                                    float ascent = family.GetCellAscent((FontStyle)style) * emSize / family.GetEmHeight((FontStyle)style);
+                                    float emHeight = family.GetEmHeight((FontStyle)style);
+                                    float cellAscent = family.GetCellAscent((FontStyle)style);
+                                    float cellDescent = family.GetCellDescent((FontStyle)style);
+                                    
+                                    float ascent = (emSize * cellAscent) / emHeight;
+                                    float descent = (emSize * cellDescent) / emHeight;
+
                                     using (var m = new System.Drawing.Drawing2D.Matrix())
                                     {
-                                        m.Translate(0, -ascent + text.VerticalOffset);
+                                        float totalHeight = ascent + descent;
+                                        float alignmentShift = -totalHeight;
+                                        float finalYShift = alignmentShift - text.VerticalOffset;
+
+                                        m.Translate(0, finalYShift);
                                         m.Scale(1, -1);
+
+                                        if (text.UpsideDown)
+                                        {
+                                            m.Scale(1, -1);
+                                        }
+
                                         m.Rotate(text.Rotation);
                                         warpInput.Transform(m);
                                     }

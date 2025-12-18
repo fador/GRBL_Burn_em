@@ -42,136 +42,69 @@ namespace laser_gui_test.Data
         }
 
         // Warps 'textPath' along 'backbone' points.
-        // textPath is assumed to be at a certain Y position relative to its baseline/origin.
-        // Usually, Text is at Y=0 (Baseline) or similar.
-        // We treat X as distance along backbone, Y as normal offset.
-        // Offset adds to the initial X.
-        public static void Warp(GraphicsPath textPath, List<PointF> backbone, float offsetDist)
-        {
-            if (backbone.Count < 2) return;
-
-            // 1. Calculate Arc Lengths of backbone
-            float[] lengths = new float[backbone.Count];
-            lengths[0] = 0;
-            for (int i = 1; i < backbone.Count; i++)
-            {
-                float dx = backbone[i].X - backbone[i-1].X;
-                float dy = backbone[i].Y - backbone[i-1].Y;
-                lengths[i] = lengths[i-1] + (float)Math.Sqrt(dx*dx + dy*dy);
-            }
-            float totalLen = lengths[lengths.Length - 1];
-
-            // 2. Transform Points
-            PointF[] points = textPath.PathPoints;
-            byte[] types = textPath.PathTypes;
-
-            for (int i = 0; i < points.Length; i++)
-            {
-                float localX = points[i].X;
-                float localY = points[i].Y; 
-                // Note: localY is up/down offset from baseline.
-                // In our text generation logic (GrblGenerator/LaserText.Draw), we place text.
-                // Usually we generate text at 0,0.
-                
-                float targetDist = localX + offsetDist;
-                
-                // Wrap? Or Clamp? Or Hide?
-                // Let's Clamp/Extend last segment?
-                
-                // Find segment
-                int idx = Array.BinarySearch(lengths, targetDist);
-                if (idx < 0) idx = ~idx; // Bitwise complement is insertion point
-                
-                // idx is the index of the first element LARGER than targetDist
-                // So the segment is idx-1 to idx.
-                
-                int p0_idx = idx - 1;
-                int p1_idx = idx;
-                
-                if (p0_idx < 0) 
-                {
-                    p0_idx = 0; p1_idx = 1;
-                }
-                if (p1_idx >= backbone.Count)
-                {
-                    p0_idx = backbone.Count - 2;
-                    p1_idx = backbone.Count - 1;
-                }
-
-                var p0 = backbone[p0_idx];
-                var p1 = backbone[p1_idx];
-                
-                float segLen = lengths[p1_idx] - lengths[p0_idx];
-                float distOnSeg = targetDist - lengths[p0_idx];
-                float t = (segLen > 0.0001f) ? distOnSeg / segLen : 0;
-                
-                // Interpolated Position
-                float tangentX = p1.X - p0.X;
-                float tangentY = p1.Y - p0.Y;
-                
-                // Normalize tangent
-                float len = (float)Math.Sqrt(tangentX*tangentX + tangentY*tangentY);
-                float nx = 0, ny = 1;
-                if (len > 0.0001f)
-                {
-                    tangentX /= len;
-                    tangentY /= len;
-                    
-                    // Normal (-y, x) for Left-Hand? (Y Up)
-                    // If tangent is (1,0) [Right], Normal should be (0,1) [Up].
-                    // So (-y, x)? (-0, 1) -> (0, 1). Correct.
-                    nx = -tangentY;
-                    ny = tangentX;
-                }
-                
-                // If localY is 10 (Up), we add 10 * Normal.
-                
-                // Base Position
-                float baseX = p0.X + tangentX * distOnSeg;
-                float baseY = p0.Y + tangentY * distOnSeg;
-                
-                // Final Position
-                points[i] = new PointF(baseX + nx * localY, baseY + ny * localY);
-            }
-            
-            // Reconstruct path with warped points?
-            // GraphicsPath property PathPoints is a clone. Setting array values doesn't affect Path.
-            // We cannot set PathPoints directly.
-            // We have to rebuild the path.
-            // Or use GraphicsPath(points, types).
-            
-            // Rebuild
-            // We can't modify 'textPath' easily in place without reflection or rebuild.
-            // But we can create a NEW path and replace content? 
-            // The method signature returns void... 
-            // Actually, we can't replace 'textPath'. The caller needs the result.
-            // Let's assume we modify the 'points' array and creating a new path is the caller's job?
-            // No, better to accept 'ref GraphicsPath' or return new one.
-            // But we passed 'GraphicsPath textPath'.
-            
-            // Hack: Create new path, swap internals? No.
-            // Let's verify usage.
-        }
-        
+        // Returns a NEW GraphicsPath.
         public static GraphicsPath CreateWarpedPath(GraphicsPath textPath, List<PointF> backbone, float offsetDist)
         {
             if (backbone.Count < 2) return (GraphicsPath)textPath.Clone();
-            
-            // ... Logic ... 
-            // Duplicating logic above
-             // 1. Calculate Arc Lengths of backbone
-            float[] lengths = new float[backbone.Count];
-            lengths[0] = 0;
-            for (int i = 1; i < backbone.Count; i++)
-            {
-                float dx = backbone[i].X - backbone[i-1].X;
-                float dy = backbone[i].Y - backbone[i-1].Y;
-                lengths[i] = lengths[i-1] + (float)Math.Sqrt(dx*dx + dy*dy);
-            }
-            float totalLen = lengths[lengths.Length - 1];
 
-            PointF[] points = textPath.PathPoints;
-            byte[] types = textPath.PathTypes; // Types match 1:1
+            // 1. Flatten the text path and subdivide long segments
+            // This ensures letters can bend along the curve.
+            var flatText = (GraphicsPath)textPath.Clone();
+            flatText.Flatten(null, 0.05f); // 0.05 unit tolerance (mm) for curves
+            
+            // Subdivide long lines
+            var subdivided = SubdividePath(flatText, 1.0f); // 1mm max segment length
+            flatText.Dispose();
+            flatText = subdivided;
+
+            // 2. Pre-calculate backbone properties
+            float[] lengths = new float[backbone.Count];
+            PointF[] normals = new PointF[backbone.Count];
+            PointF[] segmentNormals = new PointF[backbone.Count - 1];
+            
+            lengths[0] = 0;
+            for (int i = 0; i < backbone.Count - 1; i++)
+            {
+                float dx = backbone[i+1].X - backbone[i].X;
+                float dy = backbone[i+1].Y - backbone[i].Y;
+                float segLen = (float)Math.Sqrt(dx*dx + dy*dy);
+                lengths[i+1] = lengths[i] + segLen;
+
+                if (segLen > 0.0001f)
+                {
+                    segmentNormals[i] = new PointF(-dy / segLen, dx / segLen);
+                }
+                else
+                {
+                    segmentNormals[i] = i > 0 ? segmentNormals[i-1] : new PointF(0, 1);
+                }
+            }
+
+            // Vertex Normals (average of adjacent segments)
+            for (int i = 0; i < backbone.Count; i++)
+            {
+                if (i == 0) normals[i] = segmentNormals[0];
+                else if (i == backbone.Count - 1) normals[i] = segmentNormals[i-1];
+                else
+                {
+                    float nx = segmentNormals[i-1].X + segmentNormals[i].X;
+                    float ny = segmentNormals[i-1].Y + segmentNormals[i].Y;
+                    float nLen = (float)Math.Sqrt(nx*nx + ny*ny);
+                    if (nLen > 0.0001f)
+                    {
+                        normals[i] = new PointF(nx / nLen, ny / nLen);
+                    }
+                    else
+                    {
+                        normals[i] = segmentNormals[i];
+                    }
+                }
+            }
+
+            // 3. Transform Points
+            PointF[] points = flatText.PathPoints;
+            byte[] types = flatText.PathTypes;
+            float totalLen = lengths[lengths.Length - 1];
 
             for (int i = 0; i < points.Length; i++)
             {
@@ -179,38 +112,39 @@ namespace laser_gui_test.Data
                 float localY = points[i].Y; 
                 float targetDist = localX + offsetDist;
 
+                // Path Looping
+                if (totalLen > 0.001f)
+                {
+                    // Handle negative modulo correctly for reversed paths or offsets
+                    targetDist = ((targetDist % totalLen) + totalLen) % totalLen;
+                }
+
+                // Find segment
                 int idx = Array.BinarySearch(lengths, targetDist);
                 if (idx < 0) idx = ~idx;
 
-                int p0_idx = idx - 1;
-                int p1_idx = idx;
+                int i0 = idx - 1;
+                int i1 = idx;
                 
-                if (p0_idx < 0) { p0_idx = 0; p1_idx = 1; }
-                if (p1_idx >= backbone.Count) { p0_idx = backbone.Count - 2; p1_idx = backbone.Count - 1; }
+                if (i0 < 0) { i0 = 0; i1 = 1; }
+                if (i1 >= backbone.Count) { i0 = backbone.Count - 2; i1 = backbone.Count - 1; }
 
-                var p0 = backbone[p0_idx];
-                var p1 = backbone[p1_idx];
+                float segLen = lengths[i1] - lengths[i0];
+                float t = (segLen > 0.0001f) ? (targetDist - lengths[i0]) / segLen : 0;
                 
-                float segLen = lengths[p1_idx] - lengths[p0_idx];
-                float distOnSeg = targetDist - lengths[p0_idx];
-                // Extrapolate if outside
-                
-                float tangentX = p1.X - p0.X;
-                float tangentY = p1.Y - p0.Y;
-                float len = (float)Math.Sqrt(tangentX*tangentX + tangentY*tangentY);
-                
-                float nx = 0, ny = 1;
-                if (len > 0.0001f)
-                {
-                    tangentX /= len;
-                    tangentY /= len;
-                    nx = -tangentY;
-                    ny = tangentX;
-                }
+                // Position interpolation (linear)
+                float baseX = backbone[i0].X + (backbone[i1].X - backbone[i0].X) * t;
+                float baseY = backbone[i0].Y + (backbone[i1].Y - backbone[i0].Y) * t;
 
-                float baseX = p0.X + tangentX * distOnSeg;
-                float baseY = p0.Y + tangentY * distOnSeg;
+                // Normal interpolation (linear between vertex normals)
+                float nx = normals[i0].X + (normals[i1].X - normals[i0].X) * t;
+                float ny = normals[i0].Y + (normals[i1].Y - normals[i0].Y) * t;
                 
+                // Re-normalize interpolated normal
+                float nLen = (float)Math.Sqrt(nx*nx + ny*ny);
+                if (nLen > 0.0001f) { nx /= nLen; ny /= nLen; }
+
+                // Map Point
                 points[i] = new PointF(baseX + nx * localY, baseY + ny * localY);
             }
             
@@ -257,6 +191,44 @@ namespace laser_gui_test.Data
             }
             
             return bestDist;
+        }
+
+        public static GraphicsPath SubdividePath(GraphicsPath path, float maxLen)
+        {
+            var points = path.PathPoints;
+            var types = path.PathTypes;
+            var newPoints = new List<PointF>();
+            var newTypes = new List<byte>();
+
+            for (int i = 0; i < points.Length; i++)
+            {
+                newPoints.Add(points[i]);
+                newTypes.Add(types[i]);
+
+                // If this is the start of a segment and not the last point
+                // PathTypes: 0=Start, 1=Line, 3=Bezier (but we flattened to lines)
+                if (i < points.Length - 1 && (types[i+1] & 0x07) != 0) // Next is not a NewFigure/MoveTo
+                {
+                    var p0 = points[i];
+                    var p1 = points[i + 1];
+                    float dx = p1.X - p0.X;
+                    float dy = p1.Y - p0.Y;
+                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+
+                    if (dist > maxLen)
+                    {
+                        int divisions = (int)Math.Ceiling(dist / maxLen);
+                        for (int j = 1; j < divisions; j++)
+                        {
+                            float t = (float)j / divisions;
+                            newPoints.Add(new PointF(p0.X + dx * t, p0.Y + dy * t));
+                            newTypes.Add(1); // LineTo
+                        }
+                    }
+                }
+            }
+
+            return new GraphicsPath(newPoints.ToArray(), newTypes.ToArray());
         }
     }
 }

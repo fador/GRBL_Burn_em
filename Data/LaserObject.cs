@@ -1,6 +1,10 @@
 using System.Drawing;
 using System;
+using System.Text.Json.Serialization;
+using System.Runtime.Versioning;
 using System.Drawing.Drawing2D;
+
+[assembly: SupportedOSPlatform("windows")]
 
 namespace laser_gui_test.Data;
 
@@ -179,14 +183,20 @@ public class LaserPath : LaserObject
         Type = LaserObjectType.Path;
     }
 
-    public override RectangleF GetBounds()
+    public void UpdateBounds()
     {
-        if (Points.Count == 0) return RectangleF.Empty;
+        if (Points.Count == 0) return;
         float minX = Points.Min(p => p.X);
         float minY = Points.Min(p => p.Y);
         float maxX = Points.Max(p => p.X);
         float maxY = Points.Max(p => p.Y);
-        return new RectangleF(minX, minY, maxX - minX, maxY - minY);
+        Position = new PointF(minX, minY);
+        Size = new SizeF(maxX - minX, maxY - minY);
+    }
+
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
     }
 
     public override void Draw(Graphics g, float scale)
@@ -212,19 +222,29 @@ public class LaserPath : LaserObject
 
     public override bool HitTest(PointF point, float tolerance)
     {
-        // BBox optimization
+        PointF testPoint = point;
+        if (Rotation != 0)
+        {
+            float cx = Position.X + Size.Width / 2f;
+            float cy = Position.Y + Size.Height / 2f;
+            using (var m = new Matrix())
+            {
+                m.RotateAt(-Rotation, new PointF(cx, cy));
+                var pts = new PointF[] { point };
+                m.TransformPoints(pts);
+                testPoint = pts[0];
+            }
+        }
+
+        // BBox optimization (Unrotated)
         float bBuffer = tolerance;
-        float minX = Points.Min(p => p.X) - bBuffer;
-        float minY = Points.Min(p => p.Y) - bBuffer;
-        float maxX = Points.Max(p => p.X) + bBuffer;
-        float maxY = Points.Max(p => p.Y) + bBuffer;
-        
-        if (point.X < minX || point.X > maxX || point.Y < minY || point.Y > maxY) 
+        if (testPoint.X < Position.X - bBuffer || testPoint.X > Position.X + Size.Width + bBuffer || 
+            testPoint.Y < Position.Y - bBuffer || testPoint.Y > Position.Y + Size.Height + bBuffer) 
             return false;
 
         for (int i = 0; i < Points.Count - 1; i++)
         {
-            if (DistanceToSegment(point, Points[i], Points[i + 1]) <= tolerance)
+            if (DistanceToSegment(testPoint, Points[i], Points[i + 1]) <= tolerance)
                 return true;
         }
         return false;
@@ -462,6 +482,7 @@ public class LaserText : LaserObject
     public float PathOffset { get; set; } = 0f;
     public float VerticalOffset { get; set; } = 0f;
     public bool ReversePath { get; set; } = false;
+    public bool UpsideDown { get; set; } = false;
 
     public LaserText()
     {
@@ -534,25 +555,42 @@ public class LaserText : LaserObject
                      gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
                      
                      // Fix Orientation: AddString is Top-Down. World is Y-Up.
-                     // We want Baseline to be on the curve (Y=0 locally).
-                     // AddString draws from Top (Y=0) downwards.
-                     // Calculate Ascent to find Baseline.
-                     float ascent = family.GetCellAscent((int)FontStyle.Regular) * emSize / family.GetEmHeight((int)FontStyle.Regular);
+                     float emHeight = family.GetEmHeight((int)FontStyle.Regular);
+                     float cellAscent = family.GetCellAscent((int)FontStyle.Regular);
+                     float cellDescent = family.GetCellDescent((int)FontStyle.Regular);
+                     
+                     // Convert to World Units
+                     float ascent = (emSize * cellAscent) / emHeight;
+                     float descent = (emSize * cellDescent) / emHeight;
                      
                      using (var m = new System.Drawing.Drawing2D.Matrix())
                      {
-                         // 1. Move Baseline to Y=0 (Downwards Y means Baseline is at +Ascent)
-                         // Also apply VerticalOffset here (Y axis)
-                         m.Translate(0, -ascent + VerticalOffset);
+                         // 1. Position the Bottom of the text at Y=0.
+                         // AddString puts Top at Y=0. Total height is (ascent + descent).
+                         // So Bottom is at Y = ascent + descent.
+                         // To get bottom to Y=0, we move by -(ascent + descent).
+                         
+                         float totalHeight = ascent + descent;
+                         float alignmentShift = -totalHeight;
+                         
+                         // Apply VerticalOffset: Positive moves AWAY from path (Up in local space)
+                         float finalYShift = alignmentShift - VerticalOffset; 
+                         
+                         m.Translate(0, finalYShift);
+                         
                          // 2. Flip Y so Up is Positive
                          m.Scale(1, -1);
                          
-                         // 3. Apply Object Rotation (around Origin 0,0?)
-                         // Text Origin is Top-Left of text box (now transformed to Baseline-Start).
-                         // User expects Rotation around Center usually?
-                         // But for Path Text, rotating around Start seems safer to just flip direction.
-                         // But if they rotate 180, they might want to keep position?
-                         // Let's just apply Rotation.
+                         // 3. Upside Down flip (if requested)
+                         if (UpsideDown)
+                         {
+                             // Flip around the middle of the text height ideally, 
+                             // but user might want it flipped across the path.
+                             // Flipping across the path (Y=0) is simplest.
+                             m.Scale(1, -1);
+                         }
+
+                         // 4. Apply Object Rotation (around Baseline/Path point)
                          m.Rotate(Rotation);
                          
                          gp.Transform(m);
@@ -724,12 +762,27 @@ public class LaserBezier : LaserObject
     public override bool HitTest(PointF point, float tolerance)
     {
          if (Points.Count < 4) return false;
+         
+         PointF testPoint = point;
+         if (Rotation != 0)
+         {
+             float cx = Position.X + Size.Width / 2f;
+             float cy = Position.Y + Size.Height / 2f;
+             using (var m = new Matrix())
+             {
+                 m.RotateAt(-Rotation, new PointF(cx, cy));
+                 var pts = new PointF[] { point };
+                 m.TransformPoints(pts);
+                 testPoint = pts[0];
+             }
+         }
+
          int count = Points.Count;
          int validCount = count - (count - 1) % 3;
          using var path = new GraphicsPath();
          path.AddBeziers(Points.Take(validCount).ToArray());
          using var pen = new Pen(Color.Black, tolerance);
-         return path.IsOutlineVisible(point, pen);
+         return path.IsOutlineVisible(testPoint, pen);
     }
 
     public override LaserObject Clone()
