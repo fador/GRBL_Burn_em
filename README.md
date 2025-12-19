@@ -12,7 +12,7 @@ A Windows Forms application designed for controlling laser cutters, built with .
 - **Transformations**: Move, resize, and rotate objects. Supports negative scaling (flipping).
 - **Group/Ungroup**: Organize complex designs by grouping multiple objects.
 - **Grid Array**: Replicate selected objects in a configurable Row × Column grid.
-- **Creation Tools**: Draw Lines and Rectangles directly on the canvas.
+- **Creation Tools**: Draw Lines, Rectangles, Circles, and Beziers directly on the canvas. Supports interactive text creation.
 - **Ruler Tool**: Measure distances on the workbench for precise alignment.
 - **Snap-to-Grid**: Toggleable alignment aid with configurable grid size.
 - **Object Reordering**: Drag and Drop or use Up/Down arrows in the Object List to change processing order (Top = First).
@@ -33,12 +33,12 @@ A Windows Forms application designed for controlling laser cutters, built with .
 - **Serial Connection**: Direct COM port streaming using `RJCP.SerialPortStream`.
 - **Sender Thread**: Background thread for G-code transmission.
 - **Error Handling**: GRBL alarm messages and buffer synchronization.
-- **G-Code Preview**: Debug viewer to inspect the generated G-code before sending.
+- **G-Code Preview**: Debug viewer to inspect the generated G-code. Supports per-item G-code management with visibility toggling for individual design elements.
 
 ### Quality of Life
 - **Undo/Redo**: History support for modification actions.
 - **Interactive Workbench**: Smooth Pan (Right-click dragging) and Zoom (Scroll wheel) navigation. **View state (Zoom/Pan) is saved between sessions.**
-- **Project Persistence**: Save and Load full project states via JSON.
+- **Project Persistence**: Save and Load full project states via JSON. **Optimized for image-heavy projects by automatically deduplicating identical image resources in a project-wide library.**
 - **Customizable Options**: Configure workspace dimensions, origin point, connection defaults, and UI preferences (e.g., Skip Splash Screen).
 
 ## Project Structure
