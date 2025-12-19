@@ -374,6 +374,14 @@ public class SvgImporter
     
     private static void ParseText(XElement elem, List<LaserObject> list, Matrix transform)
     {
+        // Check for textPath
+        var textPath = elem.Elements().FirstOrDefault(e => e.Name.LocalName == "textPath");
+        if (textPath != null)
+        {
+            ParseTextPath(elem, textPath, list, transform);
+            return;
+        }
+
         // Minimal text support
         var txt = elem.Value?.Trim();
         if (string.IsNullOrEmpty(txt))
@@ -390,6 +398,8 @@ public class SvgImporter
         float fontSize = ParseDimension(GetStyleOrAttribute(elem, "font-size"), 12);
         string fontFamily = GetStyleOrAttribute(elem, "font-family") ?? "Arial";
 
+        // If simple text, we can still use GraphicsPath if we wanted to consistent, 
+        // but let's keep LaserText for simple text as it might be handled differently (e.g. native text in some outputs).
         var lText = new LaserText()
         {
             Name = elem.Attribute("id")?.Value ?? "Text",
@@ -412,6 +422,110 @@ public class SvgImporter
         }
 
         list.Add(lText);
+    }
+    
+    private static void ParseTextPath(XElement textElem, XElement textPathElem, List<LaserObject> list, Matrix transform)
+    {
+        string txt = textPathElem.Value?.Trim() ?? "";
+        if (string.IsNullOrEmpty(txt)) return;
+
+        // 1. Resolve Path
+        string pathData = textPathElem.Attribute("path")?.Value;
+        using var refTransform = new Matrix(); // Transform of the referenced path
+
+        if (string.IsNullOrEmpty(pathData))
+        {
+            string href = textPathElem.Attribute("href")?.Value ?? 
+                          textPathElem.Attribute(XNamespace.Get("http://www.w3.org/1999/xlink") + "href")?.Value;
+            
+            if (!string.IsNullOrEmpty(href))
+            {
+                if (href.StartsWith("#")) href = href.Substring(1);
+                var pathElem = GetElementById(textElem.Document, href);
+                if (pathElem != null)
+                {
+                    pathData = pathElem.Attribute("d")?.Value ?? pathElem.Attribute("path")?.Value;
+                    
+                    // Helper does not recurse parents, but local transform should be applied?
+                    // Usually textPath uses the geometry of the referenced path "conceptually".
+                    // The SVG spec says "The transform attribute on the referenced 'path' element... repesents a transformation... applied to the path geometry".
+                    // We only check the element itself for now.
+                    var tStr = pathElem.Attribute("transform")?.Value;
+                    
+                    if (!string.IsNullOrEmpty(tStr))
+                    {
+                        using var t = ParseTransform(tStr);
+                        refTransform.Multiply(t);
+                    }
+                }
+            }
+        }
+
+        if (string.IsNullOrEmpty(pathData)) return;
+
+        // 2. Parse Path to Backbone
+        using var backbonePath = ParsePathData(pathData);
+        if (!refTransform.IsIdentity)
+        {
+            backbonePath.Transform(refTransform);
+        }
+        
+        // Flatten backbone for warping
+        backbonePath.Flatten(null, 0.1f);
+        var backbonePoints = backbonePath.PathPoints.ToList();
+
+        // Handle 'side' attribute
+        string side = textPathElem.Attribute("side")?.Value?.ToLower() ?? "left";
+        if (side == "right")
+        {
+            backbonePoints.Reverse();
+        }
+
+        // 3. Create Text Path
+        float fontSize = ParseDimension(GetStyleOrAttribute(textElem, "font-size"), 12);
+        string fontFamily = GetStyleOrAttribute(textElem, "font-family") ?? "Arial";
+        
+        using var textGp = new GraphicsPath();
+        
+        FontFamily ffm;
+        try { ffm = new FontFamily(fontFamily); } catch { ffm = FontFamily.GenericSansSerif; }
+        
+        // StartOffset
+        float startOffset = 0;
+        string startOffsetStr = textPathElem.Attribute("startOffset")?.Value;
+        if (!string.IsNullOrEmpty(startOffsetStr))
+        {
+            if (startOffsetStr.EndsWith("%"))
+            {
+                 float pct = float.Parse(startOffsetStr.TrimEnd('%'), CultureInfo.InvariantCulture) / 100f;
+                 float totalLen = 0;
+                 for(int i=0; i<backbonePoints.Count-1; i++) 
+                    totalLen += (float)Math.Sqrt(Math.Pow(backbonePoints[i+1].X - backbonePoints[i].X, 2) + Math.Pow(backbonePoints[i+1].Y - backbonePoints[i].Y, 2));
+                 startOffset = totalLen * pct;
+            }
+            else
+            {
+                 startOffset = ParseDimension(startOffsetStr, 0);
+            }
+        }
+        
+        // AddString(string, FontFamily, int style, float emSize, Point origin, StringFormat)
+        textGp.AddString(txt, ffm, (int)FontStyle.Regular, fontSize, new PointF(0, -fontSize), StringFormat.GenericDefault); 
+        
+        var bounds = textGp.GetBounds();
+        var shiftY = -bounds.Bottom; // Move bottom to 0
+        var mat = new Matrix();
+        mat.Translate(0, shiftY);
+        textGp.Transform(mat);
+
+        // 4. Warp
+        using var warpedGp = PathWarp.CreateWarpedPath(textGp, backbonePoints, startOffset);
+        
+        // 5. Add to list (as LaserPath)
+        // Apply element transform
+        warpedGp.Transform(transform);
+        
+        AddGraphicsPath(warpedGp, textElem, list, new Matrix()); // Transform already applied
     }
 
     private static void AddGraphicsPath(GraphicsPath gp, XElement elem, List<LaserObject> list, Matrix transform)
@@ -476,6 +590,12 @@ public class SvgImporter
             }
         }
         return null;
+    }
+
+    private static XElement? GetElementById(XDocument? doc, string id)
+    {
+        if (doc == null || string.IsNullOrEmpty(id)) return null;
+        return doc.Descendants().FirstOrDefault(e => e.Attribute("id")?.Value == id);
     }
 
     // --- Path Parsing Helpers ---

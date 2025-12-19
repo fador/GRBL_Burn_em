@@ -995,19 +995,19 @@ public partial class MainForm : Form
         var tsRow2 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
         
         tsRow2.Items.Add(new ToolStripLabel("X:"));
-        _nudPosX = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -10000, Maximum = 10000, Increment = 10 };
+        _nudPosX = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -100000, Maximum = 100000, Increment = 10 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudPosX));
         
         tsRow2.Items.Add(new ToolStripLabel("Y:"));
-        _nudPosY = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -10000, Maximum = 10000, Increment = 10 };
+        _nudPosY = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -100000, Maximum = 100000, Increment = 10 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudPosY));
         
         tsRow2.Items.Add(new ToolStripLabel("W:"));
-        _nudSizeW = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = 0, Maximum = 10000, Increment = 10 };
+        _nudSizeW = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = 0, Maximum = 100000, Increment = 10 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudSizeW));
         
         tsRow2.Items.Add(new ToolStripLabel("H:"));
-        _nudSizeH = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 1000, Width = 60 };
+        _nudSizeH = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 100000, Width = 60 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudSizeH));
 
         tsRow2.Items.Add(new ToolStripSeparator());
@@ -1037,7 +1037,7 @@ public partial class MainForm : Form
         tsRow3.Items.Add(_cmbFont);
         
         tsRow3.Items.Add(new ToolStripLabel("Size:"));
-        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 1, Maximum = 1000, DecimalPlaces = 1 };
+        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 1, Maximum = 10000, DecimalPlaces = 1 };
         tsRow3.Items.Add(new ToolStripControlHost(_nudFontSize));
         
         // Row 4: Path Controls [NEW]
@@ -1048,7 +1048,7 @@ public partial class MainForm : Form
         tsRow4.Items.Add(new ToolStripControlHost(_trkPathOffset));
         
         tsRow4.Items.Add(new ToolStripLabel("V-Offset:"));
-        _nudVerticalOffset = new NumericUpDown { Width = 60, DecimalPlaces = 1, Minimum = -500, Maximum = 500, Increment = 0.5m };
+        _nudVerticalOffset = new NumericUpDown { Width = 60, DecimalPlaces = 1, Minimum = -10000, Maximum = 10000, Increment = 0.5m };
         tsRow4.Items.Add(new ToolStripControlHost(_nudVerticalOffset));
 
         _chkReversePath = new CheckBox { Text = "Reverse", AutoSize = true };
