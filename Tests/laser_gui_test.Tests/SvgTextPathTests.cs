@@ -203,5 +203,50 @@ namespace laser_gui_test.Tests
                 File.Delete(path);
             }
         }
+        [Fact]
+        public void TestLeadingSpaces()
+        {
+             // Case: Leading spaces should shift the text if xml:space="preserve" is used or if we handle it correctly.
+             // User wants to displace text using spaces.
+             
+             string xmlNoSpace = @"
+                <text>
+                    <textPath path=""M 0 0 L 100 0"">A</textPath>
+                </text>";
+             
+             // Using xml:space='preserve' to ensure spaces are kept.
+             // Note: The Importer must respect this.
+             string xmlSpaces = @"
+                <text xml:space=""preserve"">
+                    <textPath path=""M 0 0 L 100 0"">   A</textPath>
+                </text>";
+
+            string path1 = CreateTempSvg(xmlNoSpace);
+            string path2 = CreateTempSvg(xmlSpaces);
+            
+            try
+            {
+                var res1 = SvgImporter.Import(path1);
+                var lp1 = res1.OfType<LaserPath>().First();
+                
+                var res2 = SvgImporter.Import(path2);
+                var lp2 = res2.OfType<LaserPath>().First();
+                
+                // lp1 'A' should be near 0.
+                Assert.True(lp1.Position.X < 5, $"Expected 'A' near 0, got {lp1.Position.X}");
+                
+                // lp2 '   A' should be shifted right relative to lp1.
+                // If trimmed, they would be identical.
+                // 3 spaces width depends on font, but definitely > 0.
+                
+                Assert.True(lp2.Position.X > lp1.Position.X + 2, 
+                    $"Expected shifted text with spaces. NoSpace X: {lp1.Position.X}, Space X: {lp2.Position.X}");
+            }
+            finally
+            {
+                File.Delete(path1);
+                File.Delete(path2);
+            }
+        }
     }
 }

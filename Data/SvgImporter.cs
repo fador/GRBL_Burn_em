@@ -426,7 +426,33 @@ public class SvgImporter
     
     private static void ParseTextPath(XElement textElem, XElement textPathElem, List<LaserObject> list, Matrix transform)
     {
-        string txt = textPathElem.Value?.Trim() ?? "";
+        // Check xml:space
+        // xml:space is a namespaced attribute.
+        string xmlSpace = textElem.Attribute(XNamespace.Xml + "space")?.Value ?? 
+                          textPathElem.Attribute(XNamespace.Xml + "space")?.Value ?? 
+                          "default";
+        string rawTxt = textPathElem.Value ?? "";
+        
+        string txt;
+        if (xmlSpace == "preserve")
+        {
+            txt = rawTxt; // Keep as is, including newlines/tabs usually? Or maybe still convert newlines to space?
+            // SVG spec: "preserve" means only newlines are converted to spaces (if not already handled), 
+            // but we'll assume the string is largely what the user wants.
+            // Actually, we generally shouldn't trim.
+        }
+        else
+        {
+            // "default" behavior:
+            // - Remove all newline characters.
+            // - Reduce tab characters to space.
+            // - Strip leading and trailing whitespace.
+            // - Collapse multiple spaces into one.
+            
+            // Simple implementation:
+            txt = System.Text.RegularExpressions.Regex.Replace(rawTxt, @"\s+", " ").Trim();
+        }
+
         if (string.IsNullOrEmpty(txt)) return;
 
         // 1. Resolve Path
