@@ -552,56 +552,43 @@ public class WorkbenchControl : Control
     }
     else if (ToolManager.Instance.CurrentTool == ToolType.Text)
     {
-        // Use TextEditorForm
         string val = "Text";
         string fontName = "Arial";
         float fontSize = 20f;
 
-        using (var form = new TextEditorForm(val, fontName, fontSize))
+        using (var form = new TextEditorForm(val, fontName, fontSize, FontStyle.Regular))
         {
-             if (form.ShowDialog() == DialogResult.OK)
-             {
-                 val = form.TextValue;
-                 fontName = form.FontName;
-                 fontSize = form.FontSize;
-             }
-             else
-             {
-                 return; // Cancelled
-             }
+            if (form.ShowDialog() == DialogResult.OK)
+            {
+                val = form.TextValue;
+                fontName = form.FontName;
+                fontSize = form.FontSize;
+                
+                if (string.IsNullOrWhiteSpace(val)) return;
+
+                var t = new LaserText();
+                t.Text = val;
+                t.FontName = fontName;
+                t.FontSize = fontSize;
+                t.FontStyle = form.FontStyle;
+                t.Position = snappedPos;
+
+                t.UpdateTextSize();
+                
+                ProjectState.Instance.AddObject(t);
+
+                // Auto-select
+                ProjectState.Instance.SelectedObjects = new List<LaserObject> { t };
+
+                // Switch back to select for convenience
+                ToolManager.Instance.SetTool(ToolType.Select);
+
+                Invalidate();
+            }
         }
-
-        if (string.IsNullOrWhiteSpace(val)) return;
-
-        var t = new LaserText();
-        t.Text = val;
-        t.FontName = fontName;
-        t.FontSize = fontSize;
-        t.Position = snappedPos;
-        // Size will be calculated on Draw or we set a default?
-        // Let's force a measure? Or let Draw handle it.
-        // Draw calculates Size if it changes? 
-        // LaserText.Draw updates .Size property.
-        // Issue: Selection Box needs Size immediately for HitTest/Draw Highlight.
-        // We can create a temporary bitmap to measure.
-        using (var tmpBmp = new Bitmap(1, 1))
-        using (var g = Graphics.FromImage(tmpBmp))
-        using (var f = new Font(t.FontName, t.FontSize))
-        {
-             t.Size = g.MeasureString(t.Text, f);
-        }
-
-        ProjectState.Instance.AddObject(t);
-        
-        // Auto-select
-        ProjectState.Instance.SelectedObjects = new List<LaserObject> { t };
-        
-        // Switch back to select for convenience
-        ToolManager.Instance.SetTool(ToolType.Select);
-        
-        Invalidate();
         return;
-    }    if (ToolManager.Instance.CurrentTool == ToolType.Ruler)
+    }
+    if (ToolManager.Instance.CurrentTool == ToolType.Ruler)
         {
              _isMeasuring = true;
              _measureStart = worldPos;

@@ -24,13 +24,14 @@ public partial class MainForm : Form
 
         if (textObj != null)
         {
-            using (var form = new TextEditorForm(textObj.Text, textObj.FontName, textObj.FontSize))
+            using (var form = new TextEditorForm(textObj.Text, textObj.FontName, textObj.FontSize, textObj.FontStyle))
             {
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     textObj.Text = form.TextValue;
                     textObj.FontName = form.FontName;
                     textObj.FontSize = form.FontSize;
+                    textObj.FontStyle = form.FontStyle;
 
                     // Recalc Size
                     if (textObj.PathId != Guid.Empty)
@@ -39,12 +40,7 @@ public partial class MainForm : Form
                     }
                     else
                     {
-                        using (var tmpBmp = new Bitmap(1, 1))
-                        using (var g = Graphics.FromImage(tmpBmp))
-                        using (var f = new Font(textObj.FontName, textObj.FontSize))
-                        {
-                            textObj.Size = g.MeasureString(textObj.Text, f);
-                        }
+                        textObj.UpdateTextSize();
                     }
 
                     _workbench.Invalidate();
@@ -92,6 +88,8 @@ public partial class MainForm : Form
     private ToolStripTextBox _txtContent = null!;
     private ToolStripComboBox _cmbFont = null!;
     private NumericUpDown _nudFontSize = null!;
+    private ToolStripButton _btnBold = null!;
+    private ToolStripButton _btnItalic = null!;
 
     // Row 4 Controls
     private TrackBar _trkPathOffset = null!;
@@ -1086,6 +1084,12 @@ public partial class MainForm : Form
         _nudFontSize = new NumericUpDown { Width = 60, Minimum = 1, Maximum = 10000, DecimalPlaces = 1 };
         tsRow3.Items.Add(new ToolStripControlHost(_nudFontSize));
         
+        _btnBold = new ToolStripButton ("B") { CheckOnClick = true, Font = new Font(this.Font, FontStyle.Bold) };
+        tsRow3.Items.Add(_btnBold);
+        
+        _btnItalic = new ToolStripButton ("I") { CheckOnClick = true, Font = new Font(this.Font, FontStyle.Italic) };
+        tsRow3.Items.Add(_btnItalic);
+        
         // Row 4: Path Controls [NEW]
         var tsRow4 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
         
@@ -1176,12 +1180,7 @@ public partial class MainForm : Form
                 }
                 else
                 {
-                    using (var tmpBmp = new Bitmap(1, 1))
-                    using (var g = Graphics.FromImage(tmpBmp))
-                    using (var f = new Font(txt.FontName, txt.FontSize))
-                    {
-                         txt.Size = g.MeasureString(txt.Text, f);
-                    }
+                    txt.UpdateTextSize();
                 }
                 
                 _workbench.Invalidate();
@@ -1191,6 +1190,32 @@ public partial class MainForm : Form
         _txtContent.TextChanged += textChanged;
         _cmbFont.SelectedIndexChanged += textChanged;
         _nudFontSize.ValueChanged += textChanged;
+
+        _btnBold.Click += (s, e) => 
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                if (_btnBold.Checked) txt.FontStyle |= FontStyle.Bold;
+                else txt.FontStyle &= ~FontStyle.Bold;
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+            }
+        };
+
+        _btnItalic.Click += (s, e) => 
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                if (_btnItalic.Checked) txt.FontStyle |= FontStyle.Italic;
+                else txt.FontStyle &= ~FontStyle.Italic;
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+            }
+        };
 
         // Wire Path Logic
         _trkPathOffset.Scroll += (s, e) =>
@@ -1822,6 +1847,10 @@ public partial class MainForm : Form
                      _cmbFont.SelectedIndex = 0; 
                     
                 _nudFontSize.Value = (decimal)txt.FontSize;
+                _btnBold.Enabled = true;
+                _btnItalic.Enabled = true;
+                _btnBold.Checked = txt.FontStyle.HasFlag(FontStyle.Bold);
+                _btnItalic.Checked = txt.FontStyle.HasFlag(FontStyle.Italic);
 
                 // Path Controls [NEW]
                 _nudVerticalOffset.Enabled = true;
@@ -1866,6 +1895,10 @@ public partial class MainForm : Form
                 _txtContent.Enabled = false;
                 _cmbFont.Enabled = false;
                 _nudFontSize.Enabled = false;
+                _btnBold.Enabled = false;
+                _btnItalic.Enabled = false;
+                _btnBold.Checked = false;
+                _btnItalic.Checked = false;
                 _trkPathOffset.Enabled = false;
                 _nudVerticalOffset.Enabled = false;
                 _chkReversePath.Enabled = false;
@@ -1897,6 +1930,10 @@ public partial class MainForm : Form
             _txtContent.Enabled = false;
             _cmbFont.Enabled = false;
             _nudFontSize.Enabled = false;
+            _btnBold.Enabled = false;
+            _btnItalic.Enabled = false;
+            _btnBold.Checked = false;
+            _btnItalic.Checked = false;
             
             // Clear or set to 0? NUDs don't support empty string.
             // Just leaving enabled=false is visible enough.

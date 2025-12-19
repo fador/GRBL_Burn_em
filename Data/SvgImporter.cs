@@ -408,7 +408,8 @@ public class SvgImporter
             Name = elem.Attribute("id")?.Value ?? "Text",
             Text = txt,
             FontSize = fontSize,
-            FontName = fontFamily
+            FontName = fontFamily,
+            FontStyle = ParseFontStyle(elem)
         };
 
         var pts = new PointF[] { new PointF(x, y) };
@@ -419,7 +420,7 @@ public class SvgImporter
         // Measure size approx
         using (var tmpBmp = new Bitmap(1, 1))
         using (var g = Graphics.FromImage(tmpBmp))
-        using (var f = new Font(lText.FontName, lText.FontSize))
+        using (var f = new Font(lText.FontName, lText.FontSize, lText.FontStyle))
         {
              lText.Size = g.MeasureString(lText.Text, f);
         }
@@ -530,6 +531,7 @@ public class SvgImporter
             Text = txt,
             FontSize = fontSize,
             FontName = fontFamily,
+            FontStyle = ParseFontStyle(textElem),
             PathId = backbonePath.Id,
             IsEnabled = true
         };
@@ -576,10 +578,10 @@ public class SvgImporter
         // Create temporary text path
         using var tempTextGp = new GraphicsPath();
         var sf = StringFormat.GenericTypographic;
-        tempTextGp.AddString(txt, ffm, (int)FontStyle.Regular, fontSize, new PointF(0, 0), sf); 
+        tempTextGp.AddString(txt, ffm, (int)lText.FontStyle, fontSize, new PointF(0, 0), sf); 
         
-        float emHeight = ffm.GetEmHeight((int)FontStyle.Regular);
-        float cellAscent = ffm.GetCellAscent((int)FontStyle.Regular);
+        float emHeight = ffm.GetEmHeight(lText.FontStyle);
+        float cellAscent = ffm.GetCellAscent(lText.FontStyle);
         float baselineY = (fontSize * cellAscent) / emHeight;
 
         var mat = new Matrix();
@@ -621,7 +623,7 @@ public class SvgImporter
              // Accurate simulation matching LaserText.Draw
              using (var tmpBmp = new Bitmap(1, 1))
              using (var g = Graphics.FromImage(tmpBmp))
-             using (var f = new Font(ffm, fontSize, GraphicsUnit.World))
+             using (var f = new Font(ffm, fontSize, lText.FontStyle, GraphicsUnit.World))
              {
                  foreach (char ch in txt)
                  {
@@ -629,7 +631,7 @@ public class SvgImporter
                      string s = ch.ToString();
                      using (var charPath = new GraphicsPath())
                      {
-                         charPath.AddString(s, ffm, (int)FontStyle.Regular, fontSize, new PointF(0, 0), sf);
+                         charPath.AddString(s, ffm, (int)lText.FontStyle, fontSize, new PointF(0, 0), sf);
                          var bounds = charPath.GetBounds();
                          
                          float advance = g.MeasureString(s, f, 1000, sf).Width;
@@ -680,6 +682,21 @@ public class SvgImporter
         lText.Size = finalBounds.Size;
         
         list.Add(lText);
+    }
+    
+    private static FontStyle ParseFontStyle(XElement elem)
+    {
+        FontStyle style = FontStyle.Regular;
+        string weight = GetStyleOrAttribute(elem, "font-weight")?.ToLower();
+        string fstyle = GetStyleOrAttribute(elem, "font-style")?.ToLower();
+        
+        if (weight == "bold" || weight == "bolder" || weight == "700" || weight == "800" || weight == "900")
+            style |= FontStyle.Bold;
+        
+        if (fstyle == "italic" || fstyle == "oblique")
+            style |= FontStyle.Italic;
+            
+        return style;
     }
 
     private static void AddGraphicsPath(GraphicsPath gp, XElement elem, List<LaserObject> list, Matrix transform)

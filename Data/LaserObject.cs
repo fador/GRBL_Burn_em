@@ -47,6 +47,8 @@ public abstract class LaserObject
         return new RectangleF(Position, Size);
     }
 
+    public virtual void UpdateBounds() { }
+
     public abstract LaserObject Clone();
 
     protected RectangleF GetRotatedBoundsFromDef()
@@ -490,11 +492,33 @@ public class LaserText : LaserObject
     public bool ReversePath { get; set; } = false;
     public bool UpsideDown { get; set; } = false;
     public TextWarpMethod WarpMethod { get; set; } = TextWarpMethod.Stretch;
+    public FontStyle FontStyle { get; set; } = FontStyle.Regular;
 
     public LaserText()
     {
         Type = LaserObjectType.Text;
         Name = "Text";
+    }
+
+    public void UpdateTextSize()
+    {
+        if (PathId != Guid.Empty)
+        {
+            UpdateWarpedBounds();
+            return;
+        }
+
+        using (var gp = new GraphicsPath())
+        using (var family = new FontFamily(FontName))
+        {
+            float emSize = FontSize;
+            gp.AddString(Text, family, (int)FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
+            var b = gp.GetBounds();
+            
+            // Width: Use the maximum extent.
+            // Height: Use FontSize (Em-Height) to maintain consistent baseline alignment.
+            Size = new SizeF(b.Width + b.Left, FontSize);
+        }
     }
 
     public void UpdateWarpedBounds()
@@ -510,10 +534,10 @@ public class LaserText : LaserObject
         float emSize = FontSize;
 
         using var gp = new GraphicsPath();
-        gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
+        gp.AddString(Text, family, (int)FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
         
-        float cellAscent = family.GetCellAscent((int)FontStyle.Regular);
-        float emHeight = family.GetEmHeight((int)FontStyle.Regular);
+        float cellAscent = family.GetCellAscent(FontStyle);
+        float emHeight = family.GetEmHeight(FontStyle);
         float baselineY = emSize * cellAscent / emHeight;
 
         using (var m = new Matrix())
@@ -546,7 +570,7 @@ public class LaserText : LaserObject
 
             using (var tmpBmp = new Bitmap(1, 1))
             using (var g = Graphics.FromImage(tmpBmp))
-            using (var f = new Font(family, emSize, GraphicsUnit.World))
+            using (var f = new Font(family, emSize, FontStyle, GraphicsUnit.World))
             {
                 var sf = StringFormat.GenericTypographic;
                 foreach (char ch in Text)
@@ -555,7 +579,7 @@ public class LaserText : LaserObject
                     string s = ch.ToString();
                     using (var charPath = new GraphicsPath())
                     {
-                        charPath.AddString(s, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), sf);
+                        charPath.AddString(s, family, (int)FontStyle, emSize, new PointF(0, 0), sf);
                         float advance = g.MeasureString(s, f, 1000, sf).Width;
                         if (advance <= 0) advance = emSize * 0.3f;
                         if (char.IsWhiteSpace(ch)) { curX += advance; continue; }
@@ -658,11 +682,11 @@ public class LaserText : LaserObject
                      emSize = FontSize; 
 
                      var sf = StringFormat.GenericTypographic;
-                     gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), sf);
+                     gp.AddString(Text, family, (int)FontStyle, emSize, new PointF(0, 0), sf);
                      
                      // Fix Orientation: AddString is Top-Down. World is Y-Up.
-                     float emHeight = family.GetEmHeight((int)FontStyle.Regular);
-                     float cellAscent = family.GetCellAscent((int)FontStyle.Regular);
+                     float emHeight = family.GetEmHeight(FontStyle);
+                     float cellAscent = family.GetCellAscent(FontStyle);
                      
                      // Convert to World Units
                      float baselineY = (emSize * cellAscent) / emHeight;
@@ -733,7 +757,7 @@ public class LaserText : LaserObject
 
                              // Use a temporary Graphics to measure character advances correctly
                              // Note: In a real app we might cache this or use a global Graphics
-                             using var f = new Font(family, emSize, GraphicsUnit.World);
+                             using var f = new Font(family, emSize, FontStyle, GraphicsUnit.World);
 
                              foreach (char ch in Text)
                              {
@@ -747,7 +771,7 @@ public class LaserText : LaserObject
                                  
                                  using (var charPath = new GraphicsPath())
                                  {
-                                     charPath.AddString(s, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), sf);
+                                     charPath.AddString(s, family, (int)FontStyle, emSize, new PointF(0, 0), sf);
                                      var bounds = charPath.GetBounds();
                                      charWidth = bounds.Width;
                                      inkLeft = bounds.Left;
@@ -809,34 +833,28 @@ public class LaserText : LaserObject
             }
         }
 
-        // Position is Bottom-Left. We want to draw text starting there, but Graphics.DrawString draws Top-Down.
-        // And we have Y-Up world coordinates.
-        // We need to translate to Top-Left of the text box (Position.Y + Size.Height).
-        // Then flip Y to get Top-Down coordinates for DrawString.
-        
-        g.TranslateTransform(Position.X, Position.Y + Size.Height);
-        g.ScaleTransform(1, -1);
-        
-        // Apply Rotation for standard text? 
-        // Text "Position" is usually Top-Left (or Bottom-Left in World).
-        // If we rotate around Position:
-        if (Rotation != 0)
+        using (var gp = new GraphicsPath())
+        using (var family = new FontFamily(FontName))
         {
-             // This rotates around the top-left corner of the text block
-             // If we want center rotation, we need to know size.
-             // But Text alignment is usually Leading.
-             // Let's rotate around Origin (0,0 local) which is Pos.
-             g.RotateTransform(Rotation);
-        }
-        
-        using (var font = new Font(FontName, FontSize))
-        {
-            g.DrawString(Text, font, brush, 0, 0); // Local 0,0 is now Top-Left of text
-            
-            // Measure while font is alive
-            // We could optionally verify Bounds but changing Size here breaks manual resize.
-            // var size = g.MeasureString(Text, font);
-            // this.Size = size;
+            float emSize = FontSize;
+            gp.AddString(Text, family, (int)FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
+
+            // Use Append order for clarity: 
+            // 1. Move to local Top-Left anchor relative to center
+            // 2. Flip for Y-Up world
+            // 3. Rotate around center
+            // 4. Translate to world center
+            using (var m = new Matrix())
+            {
+                m.Translate(-Size.Width / 2f, Size.Height / 2f);
+                m.Scale(1, -1, MatrixOrder.Append);
+                if (Rotation != 0) m.Rotate(Rotation, MatrixOrder.Append);
+                m.Translate(Position.X + Size.Width / 2f, Position.Y + Size.Height / 2f, MatrixOrder.Append);
+                
+                gp.Transform(m);
+            }
+
+            g.FillPath(brush, gp);
         }
 
         g.Restore(state);
@@ -866,6 +884,7 @@ public class LaserText : LaserObject
             Text = this.Text,
             FontName = this.FontName,
             FontSize = this.FontSize,
+            FontStyle = this.FontStyle,
             PathId = this.PathId,
             PathOffset = this.PathOffset
         };

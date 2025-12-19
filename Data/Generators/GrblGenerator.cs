@@ -66,11 +66,11 @@ public class GrblGenerator : IGCodeGenerator
                 using (var gp = new GraphicsPath())
                 {
                     var family = new FontFamily(text.FontName);
-                    // Use scale 96/72 to match screen
-                    float emSize = text.FontSize * 96f / 72f; 
+                    // Use FontSize directly to match UI
+                    float emSize = text.FontSize; 
                     
-                    int style = (int)FontStyle.Regular;
-                    gp.AddString(text.Text, family, style, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+                    int style = (int)text.FontStyle;
+                    gp.AddString(text.Text, family, style, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
 
                     // Warp if needed
                     GraphicsPath workPath = gp;
@@ -94,21 +94,21 @@ public class GrblGenerator : IGCodeGenerator
                                 // We need a clone to not mess up the original gp for fallback
                                 using (var warpInput = (GraphicsPath)gp.Clone())
                                 {
-                                    float emHeight = family.GetEmHeight((FontStyle)style);
-                                    float cellAscent = family.GetCellAscent((FontStyle)style);
-                                    float cellDescent = family.GetCellDescent((FontStyle)style);
+                                    float emHeight = family.GetEmHeight(text.FontStyle);
+                                    float cellAscent = family.GetCellAscent(text.FontStyle);
+                                    float cellDescent = family.GetCellDescent(text.FontStyle);
                                     
                                     float ascent = (emSize * cellAscent) / emHeight;
                                     float descent = (emSize * cellDescent) / emHeight;
 
-                                    using (var m = new System.Drawing.Drawing2D.Matrix())
-                                    {
-                                        float totalHeight = ascent + descent;
-                                        float alignmentShift = -totalHeight;
-                                        float finalYShift = alignmentShift - text.VerticalOffset;
-
-                                        m.Translate(0, finalYShift);
-                                        m.Scale(1, -1);
+                                     using (var m = new System.Drawing.Drawing2D.Matrix())
+                                     {
+                                         // Match LaserText.Draw logic for baseline alignment
+                                         float baselineY = (emSize * cellAscent) / emHeight;
+                                         float finalYShift = -baselineY - text.VerticalOffset;
+ 
+                                         m.Translate(0, finalYShift);
+                                         m.Scale(1, -1);
 
                                         if (text.UpsideDown)
                                         {
@@ -129,15 +129,19 @@ public class GrblGenerator : IGCodeGenerator
                     
                     // Transform if NOT warped (Placement logic)
                     // If warped, position is defined by the backbone + offest.
-                    if (!checkWarp)
-                    {
-                         using (var matrix = new System.Drawing.Drawing2D.Matrix())
-                         {
-                              matrix.Translate(text.Position.X, text.Position.Y + text.Size.Height);
-                              matrix.Scale(1, -1);
-                              workPath.Transform(matrix);
-                         }
-                    }
+                  if (!checkWarp)
+                  {
+                       using (var matrix = new System.Drawing.Drawing2D.Matrix())
+                       {
+                             // Match LaserText.Draw logic exactly
+                             matrix.Translate(-text.Size.Width / 2f, text.Size.Height / 2f);
+                             matrix.Scale(1, -1, MatrixOrder.Append);
+                             if (text.Rotation != 0) matrix.Rotate(text.Rotation, MatrixOrder.Append);
+                             matrix.Translate(text.Position.X + text.Size.Width / 2f, text.Position.Y + text.Size.Height / 2f, MatrixOrder.Append);
+ 
+                             workPath.Transform(matrix);
+                       }
+                  }
                     
                     workPath.Flatten(null, 0.05f); // 0.05mm precision
                     
@@ -445,17 +449,17 @@ public class GrblGenerator : IGCodeGenerator
                 else if (obj is LaserText lt)
                 {
                     var family = new FontFamily(lt.FontName);
-                    float emSize = lt.FontSize * 96f / 72f; 
-                    path.AddString(lt.Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+                    float emSize = lt.FontSize; 
+                    path.AddString(lt.Text, family, (int)lt.FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
                     
                     using (var m = new System.Drawing.Drawing2D.Matrix())
                     {
-                        // Match LaserText.Draw logic for Normal Text
-                        // 1. Flip Y to match World Up
-                        m.Scale(1, -1);
-                        // 2. Translate to Top-Left in World (Position.Y + Height)
-                        m.Translate(lt.Position.X, lt.Position.Y + lt.Size.Height, MatrixOrder.Append);
-                        
+                        // Match LaserText.Draw logic exactly
+                        m.Translate(-lt.Size.Width / 2f, lt.Size.Height / 2f);
+                        m.Scale(1, -1, MatrixOrder.Append);
+                        if (lt.Rotation != 0) m.Rotate(lt.Rotation, MatrixOrder.Append);
+                        m.Translate(lt.Position.X + lt.Size.Width / 2f, lt.Position.Y + lt.Size.Height / 2f, MatrixOrder.Append);
+ 
                         path.Transform(m);
                     }
                     hasPath = true;
