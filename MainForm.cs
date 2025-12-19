@@ -14,6 +14,46 @@ public partial class MainForm : Form
     private static MainForm? _instance;
     public static MainForm Instance => _instance ??= new MainForm();
 
+    public void EditText(LaserText? textObj = null)
+    {
+        if (textObj == null)
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            textObj = sel.OfType<LaserText>().FirstOrDefault();
+        }
+
+        if (textObj != null)
+        {
+            using (var form = new TextEditorForm(textObj.Text, textObj.FontName, textObj.FontSize))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    textObj.Text = form.TextValue;
+                    textObj.FontName = form.FontName;
+                    textObj.FontSize = form.FontSize;
+
+                    // Recalc Size
+                    if (textObj.PathId != Guid.Empty)
+                    {
+                        textObj.UpdateWarpedBounds();
+                    }
+                    else
+                    {
+                        using (var tmpBmp = new Bitmap(1, 1))
+                        using (var g = Graphics.FromImage(tmpBmp))
+                        using (var f = new Font(textObj.FontName, textObj.FontSize))
+                        {
+                            textObj.Size = g.MeasureString(textObj.Text, f);
+                        }
+                    }
+
+                    _workbench.Invalidate();
+                    UpdateSelectedObjects();
+                }
+            }
+        }
+    }
+
     private WorkbenchControl _workbench = null!;
     private TabControl _rightTabControl = null!;
     private DataGridView _objectList = null!;
@@ -225,6 +265,8 @@ public partial class MainForm : Form
         menuStrip.Items.Add(fileMenu);
 
         var toolMenu = new ToolStripMenuItem("Tool");
+        toolMenu.DropDownItems.Add("Edit text", null, (s, e) => EditText());
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
         toolMenu.DropDownItems.Add("Mask Image with Shape", null, (s, e) => applyMask());
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         toolMenu.DropDownItems.Add("Camera Settings", null, (s, e) => 
@@ -368,12 +410,14 @@ public partial class MainForm : Form
 
         // Context Menu
         var ctxMenu = new ContextMenuStrip();
+        var itemEditText = new ToolStripMenuItem("Edit text");
         var itemMask = new ToolStripMenuItem("Mask Image with Shape");
         var itemGroup = new ToolStripMenuItem("Group");
         var itemUngroup = new ToolStripMenuItem("Ungroup");
         var itemAttach = new ToolStripMenuItem("Attach to Path");
         var itemDetach = new ToolStripMenuItem("Detach from Path");
 
+        itemEditText.Click += (s, e) => EditText();
         itemMask.Click += (s, e) => applyMask();
         itemGroup.Click += (s, e) => 
         {
@@ -411,11 +455,12 @@ public partial class MainForm : Form
              _workbench.Invalidate();
         };
 
-        ctxMenu.Items.AddRange(new ToolStripItem[] { itemMask, new ToolStripSeparator(), itemGroup, itemUngroup, new ToolStripSeparator(), itemAttach, itemDetach });
+        ctxMenu.Items.AddRange(new ToolStripItem[] { itemEditText, new ToolStripSeparator(), itemMask, new ToolStripSeparator(), itemGroup, itemUngroup, new ToolStripSeparator(), itemAttach, itemDetach });
 
         ctxMenu.Opening += (s, e) => 
         {
             var sel = _objectList.SelectedRows;
+            itemEditText.Enabled = ProjectState.Instance.SelectedObjects.Any(o => o is LaserText);
             itemMask.Enabled = false;
             if (sel.Count == 2)
             {

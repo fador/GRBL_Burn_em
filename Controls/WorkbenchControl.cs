@@ -1188,24 +1188,7 @@ public class WorkbenchControl : Control
 
         if (hitObj is LaserText textObj)
         {
-            using (var form = new TextEditorForm(textObj.Text, textObj.FontName, textObj.FontSize))
-            {
-                if (form.ShowDialog() == DialogResult.OK)
-                {
-                    textObj.Text = form.TextValue;
-                    textObj.FontName = form.FontName;
-                    textObj.FontSize = form.FontSize;
-
-                    using (var tmpBmp = new Bitmap(1, 1))
-                    using (var g = Graphics.FromImage(tmpBmp))
-                    using (var f = new Font(textObj.FontName, textObj.FontSize))
-                    {
-                         textObj.Size = g.MeasureString(textObj.Text, f);
-                    }
-
-                    Invalidate();
-                }
-            }
+            MainForm.Instance.EditText(textObj);
         }
     }
 
