@@ -575,10 +575,15 @@ public class SvgImporter
         
         // Create temporary text path
         using var tempTextGp = new GraphicsPath();
-        tempTextGp.AddString(txt, ffm, (int)FontStyle.Regular, fontSize, new PointF(0, -fontSize), StringFormat.GenericDefault); 
-        var btemp = tempTextGp.GetBounds();
+        var sf = StringFormat.GenericTypographic;
+        tempTextGp.AddString(txt, ffm, (int)FontStyle.Regular, fontSize, new PointF(0, 0), sf); 
+        
+        float emHeight = ffm.GetEmHeight((int)FontStyle.Regular);
+        float cellAscent = ffm.GetCellAscent((int)FontStyle.Regular);
+        float baselineY = (fontSize * cellAscent) / emHeight;
+
         var mat = new Matrix();
-        mat.Translate(0, -btemp.Bottom);
+        mat.Translate(0, -baselineY);
         tempTextGp.Transform(mat);
         
         RectangleF finalBounds = RectangleF.Empty;
@@ -618,7 +623,6 @@ public class SvgImporter
              using (var g = Graphics.FromImage(tmpBmp))
              using (var f = new Font(ffm, fontSize, GraphicsUnit.World))
              {
-                 var sf = StringFormat.GenericTypographic;
                  foreach (char ch in txt)
                  {
                      if (char.IsControl(ch)) continue;
@@ -641,10 +645,6 @@ public class SvgImporter
                          
                          using(var mChar = new Matrix())
                          {
-                             float cellAscent = ffm.GetCellAscent(FontStyle.Regular);
-                             float emHeight = ffm.GetEmHeight(FontStyle.Regular);
-                             float baselineY = fontSize * cellAscent / emHeight;
-                             
                              // 1. Center character cell on path point (matching Draw logic)
                              mChar.Translate(-(advance / 2f), -baselineY); 
                              mChar.Scale(1, -1, MatrixOrder.Append);

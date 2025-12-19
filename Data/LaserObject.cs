@@ -497,6 +497,103 @@ public class LaserText : LaserObject
         Name = "Text";
     }
 
+    public void UpdateWarpedBounds()
+    {
+        if (PathId == Guid.Empty) return;
+        var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == PathId);
+        if (pathObj == null) return;
+
+        var backbonePointsList = PathWarp.FlattenPath(pathObj);
+        if (backbonePointsList.Count < 2) return;
+
+        var family = new FontFamily(FontName);
+        float emSize = FontSize;
+
+        using var gp = new GraphicsPath();
+        gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
+        
+        float cellAscent = family.GetCellAscent((int)FontStyle.Regular);
+        float emHeight = family.GetEmHeight((int)FontStyle.Regular);
+        float baselineY = emSize * cellAscent / emHeight;
+
+        using (var m = new Matrix())
+        {
+            m.Translate(0, -baselineY - VerticalOffset);
+            m.Scale(1, -1, MatrixOrder.Append);
+            if (UpsideDown) m.Scale(1, -1, MatrixOrder.Append);
+            m.Rotate(Rotation, MatrixOrder.Append);
+            gp.Transform(m);
+        }
+
+        var effectiveBackbone = new List<PointF>(backbonePointsList);
+        if (ReversePath) effectiveBackbone.Reverse();
+
+        RectangleF bounds;
+        if (WarpMethod == TextWarpMethod.Stretch)
+        {
+            using var warped = PathWarp.CreateWarpedPath(gp, effectiveBackbone, PathOffset);
+            bounds = warped.GetBounds();
+        }
+        else // Align
+        {
+            // Simulate alignment layout
+            float curX = 0;
+            PathWarp.ComputeBackboneProperties(effectiveBackbone, out var lengths, out var normals);
+            float totalPathLen = lengths.Last();
+            
+            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            bool hasPoints = false;
+
+            using (var tmpBmp = new Bitmap(1, 1))
+            using (var g = Graphics.FromImage(tmpBmp))
+            using (var f = new Font(family, emSize, GraphicsUnit.World))
+            {
+                var sf = StringFormat.GenericTypographic;
+                foreach (char ch in Text)
+                {
+                    if (char.IsControl(ch)) continue;
+                    string s = ch.ToString();
+                    using (var charPath = new GraphicsPath())
+                    {
+                        charPath.AddString(s, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), sf);
+                        float advance = g.MeasureString(s, f, 1000, sf).Width;
+                        if (advance <= 0) advance = emSize * 0.3f;
+                        if (char.IsWhiteSpace(ch)) { curX += advance; continue; }
+
+                        float charMidX = curX + advance / 2f;
+                        float targetDist = charMidX + PathOffset;
+                        if (totalPathLen > 0.001f) targetDist = ((targetDist % totalPathLen) + totalPathLen) % totalPathLen;
+                        PathWarp.GetPointAndNormalAt(targetDist, effectiveBackbone, lengths, normals, out PointF origin, out PointF normal);
+
+                        using (var mChar = new Matrix())
+                        {
+                            mChar.Translate(-(advance / 2f), -baselineY);
+                            mChar.Scale(1, -1, MatrixOrder.Append);
+                            float rotAngle = (float)(Math.Atan2(-normal.X, normal.Y) * 180 / Math.PI);
+                            mChar.Rotate(rotAngle, MatrixOrder.Append);
+                            PointF finalPos = new PointF(origin.X + normal.X * VerticalOffset, origin.Y + normal.Y * VerticalOffset);
+                            mChar.Translate(finalPos.X, finalPos.Y, MatrixOrder.Append);
+                            charPath.Transform(mChar);
+
+                            var cb = charPath.GetBounds();
+                            if (cb.Left < minX) minX = cb.Left; if (cb.Top < minY) minY = cb.Top;
+                            if (cb.Right > maxX) maxX = cb.Right; if (cb.Bottom > maxY) maxY = cb.Bottom;
+                            hasPoints = true;
+                        }
+                        curX += advance;
+                    }
+                }
+            }
+            bounds = hasPoints ? RectangleF.FromLTRB(minX, minY, maxX, maxY) : RectangleF.Empty;
+        }
+
+        if (bounds != RectangleF.Empty)
+        {
+            Position = bounds.Location;
+            Size = bounds.Size;
+        }
+    }
+
     public override RectangleF GetBounds()
     {
         return GetRotatedBoundsFromDef();
@@ -557,31 +654,27 @@ public class LaserText : LaserObject
                      // Let's use 1.0 for now, user can resize.
                      
                      // Use FontSize directly (World Units)
+                     // Use FontSize directly (World Units)
                      emSize = FontSize; 
 
-                     gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
+                     var sf = StringFormat.GenericTypographic;
+                     gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), sf);
                      
                      // Fix Orientation: AddString is Top-Down. World is Y-Up.
                      float emHeight = family.GetEmHeight((int)FontStyle.Regular);
                      float cellAscent = family.GetCellAscent((int)FontStyle.Regular);
-                     float cellDescent = family.GetCellDescent((int)FontStyle.Regular);
                      
                      // Convert to World Units
-                     float ascent = (emSize * cellAscent) / emHeight;
-                     float descent = (emSize * cellDescent) / emHeight;
+                     float baselineY = (emSize * cellAscent) / emHeight;
                      
                      using (var m = new System.Drawing.Drawing2D.Matrix())
                      {
-                         // 1. Position the Bottom of the text at Y=0.
-                         // AddString puts Top at Y=0. Total height is (ascent + descent).
-                         // So Bottom is at Y = ascent + descent.
-                         // To get bottom to Y=0, we move by -(ascent + descent).
-                         
-                         float totalHeight = ascent + descent;
-                         float alignmentShift = -totalHeight;
+                         // 1. Position the Baseline of the text at Y=0.
+                         // AddString puts Top at Y=0. Baseline is at cellAscent.
+                         // To get baseline to Y=0, we move by -baselineY.
                          
                          // Apply VerticalOffset: Positive moves AWAY from path (Up in local space)
-                         float finalYShift = alignmentShift - VerticalOffset; 
+                         float finalYShift = -baselineY - VerticalOffset; 
                          
                          m.Translate(0, finalYShift);
                          
@@ -641,7 +734,6 @@ public class LaserText : LaserObject
                              // Use a temporary Graphics to measure character advances correctly
                              // Note: In a real app we might cache this or use a global Graphics
                              using var f = new Font(family, emSize, GraphicsUnit.World);
-                             var sf = StringFormat.GenericTypographic;
 
                              foreach (char ch in Text)
                              {
@@ -681,10 +773,8 @@ public class LaserText : LaserObject
                                      
                                      PathWarp.GetPointAndNormalAt(targetDist, effectiveBackbone, lengths, normals, out PointF origin, out PointF normal);
                                      
-                                     // Transform the charPath
                                      using(var mChar = new Matrix())
                                      {
-                                         float baselineY = emSize * cellAscent / emHeight;
                                          // 1. Center character cell on the path point
                                          // We align the baseline (Y=baselineY) and the center of the advance cell (X=advance/2)
                                          mChar.Translate(-(advance / 2f), -baselineY); 

@@ -58,6 +58,7 @@ public partial class MainForm : Form
     private NumericUpDown _nudVerticalOffset = null!;
     private CheckBox _chkReversePath = null!;
     private CheckBox _chkUpsideDown = null!;
+    private ToolStripComboBox _cmbWarpMethod = null!;
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -1057,6 +1058,11 @@ public partial class MainForm : Form
         _chkUpsideDown = new CheckBox { Text = "Flip", AutoSize = true };
         tsRow4.Items.Add(new ToolStripControlHost(_chkUpsideDown));
         
+        tsRow4.Items.Add(new ToolStripLabel("Method:"));
+        _cmbWarpMethod = new ToolStripComboBox { Width = 80, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cmbWarpMethod.Items.AddRange(new object[] { "Stretch", "Align" });
+        tsRow4.Items.Add(_cmbWarpMethod);
+        
         _topToolbarPanel.Controls.Add(tsRow4);
         
         this.Controls.Add(_topToolbarPanel); 
@@ -1119,12 +1125,19 @@ public partial class MainForm : Form
                 txt.FontSize = (float)_nudFontSize.Value;
                 
                 // Recalc Size
-                 using (var tmpBmp = new Bitmap(1, 1))
-                 using (var g = Graphics.FromImage(tmpBmp))
-                 using (var f = new Font(txt.FontName, txt.FontSize))
-                 {
-                      txt.Size = g.MeasureString(txt.Text, f);
-                 }
+                if (txt.PathId != Guid.Empty)
+                {
+                    txt.UpdateWarpedBounds();
+                }
+                else
+                {
+                    using (var tmpBmp = new Bitmap(1, 1))
+                    using (var g = Graphics.FromImage(tmpBmp))
+                    using (var f = new Font(txt.FontName, txt.FontSize))
+                    {
+                         txt.Size = g.MeasureString(txt.Text, f);
+                    }
+                }
                 
                 _workbench.Invalidate();
             }
@@ -1142,6 +1155,7 @@ public partial class MainForm : Form
             if (sel.Count == 1 && sel[0] is LaserText txt)
             {
                 txt.PathOffset = _trkPathOffset.Value / 10f; // Multiplier for precision
+                txt.UpdateWarpedBounds();
                 _workbench.Invalidate();
             }
         };
@@ -1153,6 +1167,7 @@ public partial class MainForm : Form
             if (sel.Count == 1 && sel[0] is LaserText txt)
             {
                 txt.VerticalOffset = (float)_nudVerticalOffset.Value;
+                txt.UpdateWarpedBounds();
                 _workbench.Invalidate();
             }
         };
@@ -1164,6 +1179,7 @@ public partial class MainForm : Form
             if (sel.Count == 1 && sel[0] is LaserText txt)
             {
                 txt.ReversePath = _chkReversePath.Checked;
+                txt.UpdateWarpedBounds();
                 _workbench.Invalidate();
             }
         };
@@ -1175,7 +1191,21 @@ public partial class MainForm : Form
             if (sel.Count == 1 && sel[0] is LaserText txt)
             {
                 txt.UpsideDown = _chkUpsideDown.Checked;
+                txt.UpdateWarpedBounds();
                 _workbench.Invalidate();
+            }
+        };
+
+        _cmbWarpMethod.SelectedIndexChanged += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.WarpMethod = (TextWarpMethod)_cmbWarpMethod.SelectedIndex;
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+                UpdateSelectedObjects(); // Bounds change
             }
         };
     }
@@ -1755,6 +1785,8 @@ public partial class MainForm : Form
                 _nudVerticalOffset.Value = (decimal)txt.VerticalOffset;
                 _chkReversePath.Checked = txt.ReversePath;
                 _chkUpsideDown.Checked = txt.UpsideDown;
+                _cmbWarpMethod.Enabled = true;
+                _cmbWarpMethod.SelectedIndex = (int)txt.WarpMethod;
 
                 if (txt.PathId != Guid.Empty)
                 {
@@ -1793,6 +1825,8 @@ public partial class MainForm : Form
                 _nudVerticalOffset.Enabled = false;
                 _chkReversePath.Enabled = false;
                 _chkUpsideDown.Enabled = false;
+                _cmbWarpMethod.Enabled = false;
+                _cmbWarpMethod.SelectedIndex = -1;
                 _txtContent.Text = "";
             }
 
