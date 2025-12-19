@@ -58,8 +58,80 @@ namespace laser_gui_test.Data
             flatText = subdivided;
 
             // 2. Pre-calculate backbone properties
-            float[] lengths = new float[backbone.Count];
-            PointF[] normals = new PointF[backbone.Count];
+            ComputeBackboneProperties(backbone, out float[] lengths, out PointF[] normals);
+
+            // 3. Transform Points
+            PointF[] points = flatText.PathPoints;
+            byte[] types = flatText.PathTypes;
+            float totalLen = lengths[lengths.Length - 1];
+
+            for (int i = 0; i < points.Length; i++)
+            {
+                float localX = points[i].X;
+                float localY = points[i].Y; 
+                float targetDist = localX + offsetDist;
+
+                // Path Looping
+                if (totalLen > 0.001f)
+                {
+                    // Handle negative modulo correctly for reversed paths or offsets
+                    targetDist = ((targetDist % totalLen) + totalLen) % totalLen;
+                }
+
+                GetPointAndNormalAt(targetDist, backbone, lengths, normals, out PointF origin, out PointF normal);
+
+                // Map Point
+                points[i] = new PointF(origin.X + normal.X * localY, origin.Y + normal.Y * localY);
+            }
+            
+            return new GraphicsPath(points, types);
+        }
+
+        public static void GetPointAndNormalAt(float distance, List<PointF> backbone, float[] lengths, PointF[] normals, out PointF position, out PointF normal)
+        {
+             // Find segment
+            int idx = Array.BinarySearch(lengths, distance);
+            if (idx < 0) idx = ~idx;
+
+            int i0 = idx - 1;
+            int i1 = idx;
+            
+            if (i0 < 0) { i0 = 0; i1 = 1; }
+            if (i1 >= backbone.Count) { i0 = backbone.Count - 2; i1 = backbone.Count - 1; }
+
+            float segLen = lengths[i1] - lengths[i0];
+            float t = (segLen > 0.0001f) ? (distance - lengths[i0]) / segLen : 0;
+            
+            // Position interpolation (linear)
+            float baseX = backbone[i0].X + (backbone[i1].X - backbone[i0].X) * t;
+            float baseY = backbone[i0].Y + (backbone[i1].Y - backbone[i0].Y) * t;
+            position = new PointF(baseX, baseY);
+
+            // Normal interpolation (linear between vertex normals)
+            float nx = normals[i0].X + (normals[i1].X - normals[i0].X) * t;
+            float ny = normals[i0].Y + (normals[i1].Y - normals[i0].Y) * t;
+            
+            // Re-normalize interpolated normal
+            float nLen = (float)Math.Sqrt(nx*nx + ny*ny);
+            if (nLen > 0.0001f) { nx /= nLen; ny /= nLen; }
+            normal = new PointF(nx, ny);
+        }
+
+        public static void ComputeBackboneProperties(List<PointF> backbone, out float[] lengths, out PointF[] normals)
+        {
+            lengths = new float[backbone.Count];
+            normals = new PointF[backbone.Count];
+            
+            if (backbone.Count < 2)
+            {
+                 if (backbone.Count > 0)
+                 {
+                     lengths[0] = 0;
+                     normals[0] = new PointF(0, -1);
+                 }
+                 return;
+            }
+
             PointF[] segmentNormals = new PointF[backbone.Count - 1];
             
             lengths[0] = 0;
@@ -76,7 +148,7 @@ namespace laser_gui_test.Data
                 }
                 else
                 {
-                    segmentNormals[i] = i > 0 ? segmentNormals[i-1] : new PointF(0, 1);
+                    segmentNormals[i] = i > 0 ? segmentNormals[i-1] : new PointF(0, -1);
                 }
             }
 
@@ -100,55 +172,6 @@ namespace laser_gui_test.Data
                     }
                 }
             }
-
-            // 3. Transform Points
-            PointF[] points = flatText.PathPoints;
-            byte[] types = flatText.PathTypes;
-            float totalLen = lengths[lengths.Length - 1];
-
-            for (int i = 0; i < points.Length; i++)
-            {
-                float localX = points[i].X;
-                float localY = points[i].Y; 
-                float targetDist = localX + offsetDist;
-
-                // Path Looping
-                if (totalLen > 0.001f)
-                {
-                    // Handle negative modulo correctly for reversed paths or offsets
-                    targetDist = ((targetDist % totalLen) + totalLen) % totalLen;
-                }
-
-                // Find segment
-                int idx = Array.BinarySearch(lengths, targetDist);
-                if (idx < 0) idx = ~idx;
-
-                int i0 = idx - 1;
-                int i1 = idx;
-                
-                if (i0 < 0) { i0 = 0; i1 = 1; }
-                if (i1 >= backbone.Count) { i0 = backbone.Count - 2; i1 = backbone.Count - 1; }
-
-                float segLen = lengths[i1] - lengths[i0];
-                float t = (segLen > 0.0001f) ? (targetDist - lengths[i0]) / segLen : 0;
-                
-                // Position interpolation (linear)
-                float baseX = backbone[i0].X + (backbone[i1].X - backbone[i0].X) * t;
-                float baseY = backbone[i0].Y + (backbone[i1].Y - backbone[i0].Y) * t;
-
-                // Normal interpolation (linear between vertex normals)
-                float nx = normals[i0].X + (normals[i1].X - normals[i0].X) * t;
-                float ny = normals[i0].Y + (normals[i1].Y - normals[i0].Y) * t;
-                
-                // Re-normalize interpolated normal
-                float nLen = (float)Math.Sqrt(nx*nx + ny*ny);
-                if (nLen > 0.0001f) { nx /= nLen; ny /= nLen; }
-
-                // Map Point
-                points[i] = new PointF(baseX + nx * localY, baseY + ny * localY);
-            }
-            
-            return new GraphicsPath(points, types);
         }
 
         public static float GetClosestOffset(LaserObject pathObj, PointF target)

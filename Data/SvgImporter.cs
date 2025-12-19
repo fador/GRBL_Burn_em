@@ -13,6 +13,9 @@ using System.Runtime.Versioning;
 namespace laser_gui_test.Data;
 
 [SupportedOSPlatform("windows")]
+#pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type.
+#pragma warning disable CS8602 // Dereference of a possibly null reference.
+#pragma warning disable CS8604 // Possible null reference argument.
 public class SvgImporter
 {
     public static List<LaserObject> Import(string filePath)
@@ -426,61 +429,29 @@ public class SvgImporter
     
     private static void ParseTextPath(XElement textElem, XElement textPathElem, List<LaserObject> list, Matrix transform)
     {
-        // Check xml:space
-        // xml:space is a namespaced attribute.
-        string xmlSpace = textElem.Attribute(XNamespace.Xml + "space")?.Value ?? 
-                          textPathElem.Attribute(XNamespace.Xml + "space")?.Value ?? 
-                          "default";
-        string rawTxt = textPathElem.Value ?? "";
-        
-        string txt;
-        if (xmlSpace == "preserve")
-        {
-            txt = rawTxt; // Keep as is, including newlines/tabs usually? Or maybe still convert newlines to space?
-            // SVG spec: "preserve" means only newlines are converted to spaces (if not already handled), 
-            // but we'll assume the string is largely what the user wants.
-            // Actually, we generally shouldn't trim.
-        }
-        else
-        {
-            // "default" behavior:
-            // - Remove all newline characters.
-            // - Reduce tab characters to space.
-            // - Strip leading and trailing whitespace.
-            // - Collapse multiple spaces into one.
-            
-            // Simple implementation:
-            txt = System.Text.RegularExpressions.Regex.Replace(rawTxt, @"\s+", " ").Trim();
-        }
-
-        if (string.IsNullOrEmpty(txt)) return;
-
-        // 1. Resolve Path
-        string pathData = textPathElem.Attribute("path")?.Value;
-        using var refTransform = new Matrix(); // Transform of the referenced path
+        // 1. Resolve Path Data & Transform
+        string pathData = textPathElem.Attribute("d")?.Value ?? textPathElem.Attribute("path")?.Value;
+        using var refTransform = new Matrix();
 
         if (string.IsNullOrEmpty(pathData))
         {
+            // Try href
             string href = textPathElem.Attribute("href")?.Value ?? 
                           textPathElem.Attribute(XNamespace.Get("http://www.w3.org/1999/xlink") + "href")?.Value;
             
             if (!string.IsNullOrEmpty(href))
             {
-                if (href.StartsWith("#")) href = href.Substring(1);
+                if (href!.StartsWith("#")) href = href.Substring(1);
                 var pathElem = GetElementById(textElem.Document, href);
                 if (pathElem != null)
                 {
-                    pathData = pathElem.Attribute("d")?.Value ?? pathElem.Attribute("path")?.Value;
+                    pathData = pathElem.Attribute("d")?.Value;
                     
-                    // Helper does not recurse parents, but local transform should be applied?
-                    // Usually textPath uses the geometry of the referenced path "conceptually".
-                    // The SVG spec says "The transform attribute on the referenced 'path' element... repesents a transformation... applied to the path geometry".
-                    // We only check the element itself for now.
+                    // Apply transform from referenced element
                     var tStr = pathElem.Attribute("transform")?.Value;
-                    
                     if (!string.IsNullOrEmpty(tStr))
                     {
-                        using var t = ParseTransform(tStr);
+                        using var t = ParseTransform(tStr!);
                         refTransform.Multiply(t);
                     }
                 }
@@ -489,69 +460,226 @@ public class SvgImporter
 
         if (string.IsNullOrEmpty(pathData)) return;
 
-        // 2. Parse Path to Backbone
-        using var backbonePath = ParsePathData(pathData);
-        if (!refTransform.IsIdentity)
+        // 2. Create the Backbone Path (LaserPath)
+        // Referenced path is usually not visible unless explicitly listed elsewhere.
+        // But for 'textPath', we might need to store the path if we want dynamic updates.
+        // We create a hidden LaserPath for the text to follow.
+        
+        var backbonePath = new LaserPath();
+        backbonePath.Name = (textElem.Attribute("id")?.Value ?? "TextPath") + "_Backbone";
+        backbonePath.IsEnabled = false; // Hidden/Support path
+        backbonePath.LayerId = Guid.Empty; // Or same layer?
+        
+        using (var gp = ParsePathData(pathData!))
         {
-            backbonePath.Transform(refTransform);
+            if (!refTransform.IsIdentity)
+            {
+                gp.Transform(refTransform);
+            }
+            
+            // Apply current transform (group transform) to the backbone?
+            // SVG spec: "The 'text' element's user coordinate system... is applied to the text... 
+            // The 'textPath' refers to a 'path'... The glyphs are rendered along the path..."
+            // Usually the path definition is in its own coordinate space. 
+            // If the path is referenced by href, it's usually defined in defs or elsewhere.
+            // The text element's transform applies to the whole result.
+            // BUT: We want the LaserPath to be in World Coordinates so that LaserText (which has its own position logic) can follow it.
+            // If we put the LaserPath in the list, we usually apply 'transform' to it (as done in AddGraphicsPath).
+            // So yes, we should apply 'transform' to the backbone so it sits incorrectly in the final world.
+            
+            gp.Transform(transform);
+            
+            // Flatten for our internal logic (points list)
+            gp.Flatten(null, AppConfiguration.Instance.SvgCurveQuality);
+            backbonePath.Points = new List<PointF>(gp.PathPoints);
+            backbonePath.UpdateBounds();
         }
         
-        // Flatten backbone for warping
-        backbonePath.Flatten(null, 0.1f);
-        var backbonePoints = backbonePath.PathPoints.ToList();
+        List<PointF> backbonePoints = backbonePath.Points;
+        
+        list.Add(backbonePath); // Add as hidden object
 
-        // Handle 'side' attribute
-        string side = textPathElem.Attribute("side")?.Value?.ToLower() ?? "left";
-        if (side == "right")
+        // 3. Create LaserText
+        // Check xml:space
+        string xmlSpace = textElem.Attribute(XNamespace.Xml + "space")?.Value ?? 
+                          textPathElem.Attribute(XNamespace.Xml + "space")?.Value ?? 
+                          "default";
+        
+        string rawTxt = textPathElem.Value ?? "";
+        string txt;
+        if (xmlSpace == "preserve")
         {
-            backbonePoints.Reverse();
+            txt = rawTxt; 
+        }
+        else
+        {
+            txt = System.Text.RegularExpressions.Regex.Replace(rawTxt, @"\s+", " ").Trim();
         }
 
-        // 3. Create Text Path
+        if (string.IsNullOrEmpty(txt)) return;
+
         float fontSize = ParseDimension(GetStyleOrAttribute(textElem, "font-size"), 12);
         string fontFamily = GetStyleOrAttribute(textElem, "font-family") ?? "Arial";
-        
-        using var textGp = new GraphicsPath();
         
         FontFamily ffm;
         try { ffm = new FontFamily(fontFamily); } catch { ffm = FontFamily.GenericSansSerif; }
         
-        // StartOffset
-        float startOffset = 0;
+        var lText = new LaserText()
+        {
+            Name = textElem.Attribute("id")?.Value ?? "TextPathObj",
+            Text = txt,
+            FontSize = fontSize,
+            FontName = fontFamily,
+            PathId = backbonePath.Id,
+            IsEnabled = true
+        };
+
+        // Attributes
         string startOffsetStr = textPathElem.Attribute("startOffset")?.Value;
         if (!string.IsNullOrEmpty(startOffsetStr))
         {
-            if (startOffsetStr.EndsWith("%"))
+            if (startOffsetStr!.EndsWith("%"))
             {
                  float pct = float.Parse(startOffsetStr.TrimEnd('%'), CultureInfo.InvariantCulture) / 100f;
+                 // Calculate length
                  float totalLen = 0;
-                 for(int i=0; i<backbonePoints.Count-1; i++) 
-                    totalLen += (float)Math.Sqrt(Math.Pow(backbonePoints[i+1].X - backbonePoints[i].X, 2) + Math.Pow(backbonePoints[i+1].Y - backbonePoints[i].Y, 2));
-                 startOffset = totalLen * pct;
+                 for(int i=0; i<backbonePath.Points.Count-1; i++) 
+                    totalLen += (float)Math.Sqrt(Math.Pow(backbonePath.Points[i+1].X - backbonePath.Points[i].X, 2) + Math.Pow(backbonePath.Points[i+1].Y - backbonePath.Points[i].Y, 2));
+                 lText.PathOffset = totalLen * pct;
             }
             else
             {
-                 startOffset = ParseDimension(startOffsetStr, 0);
+                 lText.PathOffset = ParseDimension(startOffsetStr, 0);
             }
         }
         
-        // AddString(string, FontFamily, int style, float emSize, Point origin, StringFormat)
-        textGp.AddString(txt, ffm, (int)FontStyle.Regular, fontSize, new PointF(0, -fontSize), StringFormat.GenericDefault); 
+        // Side
+        string side = textPathElem.Attribute("side")?.Value?.ToLower() ?? "left";
+        if (side == "right")
+        {
+            lText.ReversePath = true;
+        }
         
-        var bounds = textGp.GetBounds();
-        var shiftY = -bounds.Bottom; // Move bottom to 0
-        var mat = new Matrix();
-        mat.Translate(0, shiftY);
-        textGp.Transform(mat);
+        // Method
+        string method = textPathElem.Attribute("method")?.Value?.ToLower() ?? "align"; // Default is align per spec, stretch is distinct? 
+        // SVG 1.1 doesn't strictly have 'method' on textPath (it was proposed/SVG 2).
+        // Common Attributes: startOffset. 'method' is align | stretch.
+        // Default is 'align'.
+        if (method == "stretch") lText.WarpMethod = TextWarpMethod.Stretch;
+        else lText.WarpMethod = TextWarpMethod.Align;
 
-        // 4. Warp
-        using var warpedGp = PathWarp.CreateWarpedPath(textGp, backbonePoints, startOffset);
+        // Position/Size?
+        // LaserText attached to path derives position from path.
+        // But we might want initial bounds.
+        // To get accurate bounds, we need to simulate the warp.
         
-        // 5. Add to list (as LaserPath)
-        // Apply element transform
-        warpedGp.Transform(transform);
+        // Create temporary text path
+        using var tempTextGp = new GraphicsPath();
+        tempTextGp.AddString(txt, ffm, (int)FontStyle.Regular, fontSize, new PointF(0, -fontSize), StringFormat.GenericDefault); 
+        var btemp = tempTextGp.GetBounds();
+        var mat = new Matrix();
+        mat.Translate(0, -btemp.Bottom);
+        tempTextGp.Transform(mat);
         
-        AddGraphicsPath(warpedGp, textElem, list, new Matrix()); // Transform already applied
+        RectangleF finalBounds = RectangleF.Empty;
+        
+        var effectiveBackbone = new List<PointF>(backbonePoints);
+        if (lText.ReversePath)
+        {
+            effectiveBackbone.Reverse();
+        }
+
+        if (lText.WarpMethod == TextWarpMethod.Stretch)
+        {
+             // Debug
+             // throw new Exception($"DEBUG: STRETCH METHOD USED. Rev={lText.ReversePath}");
+
+             using var warpedGp = PathWarp.CreateWarpedPath(tempTextGp, effectiveBackbone, lText.PathOffset);
+             // Apply element transform (if any distinct from path? No, we applied transform to backbone).
+             // Backbone is in World space. Warped GP is in World Space.
+             finalBounds = warpedGp.GetBounds();
+        }
+        else
+        {
+            // Simulate Align Bounds
+            // Reuse logic from LaserText.Draw or simplified approximation?
+            // We should try to be somewhat accurate.
+            // Simplified: Iterate chars.
+             float curX = 0;
+             PathWarp.ComputeBackboneProperties(effectiveBackbone, out var lengths, out var normals);
+             float totalPathLen = lengths.Last();
+             
+             float minX = float.MaxValue, minY = float.MaxValue;
+             float maxX = float.MinValue, maxY = float.MinValue;
+             bool hasPoints = false;
+
+             // Accurate simulation matching LaserText.Draw
+             using (var tmpBmp = new Bitmap(1, 1))
+             using (var g = Graphics.FromImage(tmpBmp))
+             using (var f = new Font(ffm, fontSize, GraphicsUnit.World))
+             {
+                 var sf = StringFormat.GenericTypographic;
+                 foreach (char ch in txt)
+                 {
+                     if (char.IsControl(ch)) continue;
+                     string s = ch.ToString();
+                     using (var charPath = new GraphicsPath())
+                     {
+                         charPath.AddString(s, ffm, (int)FontStyle.Regular, fontSize, new PointF(0, 0), sf);
+                         var bounds = charPath.GetBounds();
+                         
+                         float advance = g.MeasureString(s, f, 1000, sf).Width;
+                         if (advance <= 0) advance = fontSize * 0.3f;
+                         
+                         if (char.IsWhiteSpace(ch)) { curX += advance; continue; }
+                         
+                         float charMidX = curX + advance / 2f;
+                         float targetDist = charMidX + lText.PathOffset;
+                         if (totalPathLen > 0.001f) targetDist = ((targetDist % totalPathLen) + totalPathLen) % totalPathLen;
+
+                         PathWarp.GetPointAndNormalAt(targetDist, effectiveBackbone, lengths, normals, out PointF origin, out PointF normal);
+                         
+                         using(var mChar = new Matrix())
+                         {
+                             float cellAscent = ffm.GetCellAscent(FontStyle.Regular);
+                             float emHeight = ffm.GetEmHeight(FontStyle.Regular);
+                             float baselineY = fontSize * cellAscent / emHeight;
+                             
+                             // 1. Center character cell on path point (matching Draw logic)
+                             mChar.Translate(-(advance / 2f), -baselineY); 
+                             mChar.Scale(1, -1, MatrixOrder.Append);
+                             
+                             float rotAngle = (float)(Math.Atan2(-normal.X, normal.Y) * 180 / Math.PI);
+                             mChar.Rotate(rotAngle, MatrixOrder.Append);
+                             
+                             // 2. Apply position + VerticalOffset
+                             PointF finalPos = new PointF(origin.X + normal.X * lText.VerticalOffset, origin.Y + normal.Y * lText.VerticalOffset);
+                             
+                             mChar.Translate(finalPos.X, finalPos.Y, MatrixOrder.Append);
+                             charPath.Transform(mChar);
+                             
+                             var cBounds = charPath.GetBounds();
+                             if (cBounds.Left < minX) minX = cBounds.Left;
+                             if (cBounds.Top < minY) minY = cBounds.Top;
+                             if (cBounds.Right > maxX) maxX = cBounds.Right;
+                             if (cBounds.Bottom > maxY) maxY = cBounds.Bottom;
+                             hasPoints = true;
+                         }
+                         curX += advance;
+                     }
+                 }
+             }
+             
+             if (hasPoints)
+                finalBounds = new RectangleF(minX, minY, maxX - minX, maxY - minY);
+             else
+                finalBounds = new RectangleF(backbonePath.Position, new SizeF(0,0));
+        }
+
+        lText.Position = finalBounds.Location;
+        lText.Size = finalBounds.Size;
+        
+        list.Add(lText);
     }
 
     private static void AddGraphicsPath(GraphicsPath gp, XElement elem, List<LaserObject> list, Matrix transform)

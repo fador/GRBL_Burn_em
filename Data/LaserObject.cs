@@ -19,6 +19,12 @@ public enum LaserObjectType
     Bezier
 }
 
+public enum TextWarpMethod
+{
+    Stretch,
+    Align
+}
+
 public abstract class LaserObject
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -483,6 +489,7 @@ public class LaserText : LaserObject
     public float VerticalOffset { get; set; } = 0f;
     public bool ReversePath { get; set; } = false;
     public bool UpsideDown { get; set; } = false;
+    public TextWarpMethod WarpMethod { get; set; } = TextWarpMethod.Stretch;
 
     public LaserText()
     {
@@ -549,8 +556,8 @@ public class LaserText : LaserObject
                      // We need conversion factor.
                      // Let's use 1.0 for now, user can resize.
                      
-                     // Use the same scale as GrblGenerator logic: 96/72?
-                     emSize = FontSize * 96f / 72f; 
+                     // Use FontSize directly (World Units)
+                     emSize = FontSize; 
 
                      gp.AddString(Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
                      
@@ -597,28 +604,115 @@ public class LaserText : LaserObject
                      }
                      
                      // Get backbone
-                     var backbone = PathWarp.FlattenPath(pathObj);
-                     if (backbone.Count > 1)
+                     var backbonePointsList = PathWarp.FlattenPath(pathObj);
+                     if (backbonePointsList.Count > 1)
                      {
+                         // Create a local copy to avoid corrupting shared backbone
+                         var effectiveBackbone = new List<PointF>(backbonePointsList);
                          // Reverse if requested
                          if (ReversePath)
                          {
-                             backbone.Reverse();
+                             effectiveBackbone.Reverse();
                          }
 
-                         using (var warped = PathWarp.CreateWarpedPath(gp, backbone, PathOffset))
+                         if (WarpMethod == TextWarpMethod.Stretch)
                          {
-                             // Warped path is in World Coordinates (derived from backbone).
-                             // So we draw it directly.
-                             using (var p = new Pen(c, 1.0f / scale))
+                             using (var warped = PathWarp.CreateWarpedPath(gp, effectiveBackbone, PathOffset))
                              {
-                                 // Fill?
-                                 if (scale > 0.5f) g.FillPath(brush, warped);
-                                 // And/Or Outline?
-                                // g.DrawPath(p, warped);
+                                 // Warped path is in World Coordinates (derived from backbone).
+                                 // So we draw it directly.
+                                 using (var p = new Pen(c, 1.0f / scale))
+                                 {
+                                     // Fill?
+                                     if (scale > 0.5f) g.FillPath(brush, warped);
+                                     // And/Or Outline?
+                                    // g.DrawPath(p, warped);
+                                 }
+                             }
+                         }
+                         else // Align
+                         {
+                             float curX = 0;
+                             PathWarp.ComputeBackboneProperties(effectiveBackbone, out var lengths, out var normals);
+                             
+                             // Total Length to handle looping
+                             float totalPathLen = lengths.Last();
+
+                             // Use a temporary Graphics to measure character advances correctly
+                             // Note: In a real app we might cache this or use a global Graphics
+                             using var f = new Font(family, emSize, GraphicsUnit.World);
+                             var sf = StringFormat.GenericTypographic;
+
+                             foreach (char ch in Text)
+                             {
+                                 string s = ch.ToString();
+                                 if (char.IsControl(ch)) continue; 
+                                 
+                                 // Measure character advance and ink bounds
+                                 float advance;
+                                 float charWidth;
+                                 float inkLeft;
+                                 
+                                 using (var charPath = new GraphicsPath())
+                                 {
+                                     charPath.AddString(s, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), sf);
+                                     var bounds = charPath.GetBounds();
+                                     charWidth = bounds.Width;
+                                     inkLeft = bounds.Left;
+                                     
+                                     // Advance logic: Use MeasureString for accurate kerning/spacing
+                                     advance = g.MeasureString(s, f, 1000, sf).Width;
+                                     // Fallback for whitespace or empty glyphs
+                                     if (advance <= 0) advance = emSize * 0.3f;
+                                     
+                                     if (char.IsWhiteSpace(ch))
+                                     {
+                                          curX += advance; 
+                                          continue;
+                                     }
+
+                                     // Center of the character advance cell horizontally
+                                     float charMidX = curX + advance / 2f;
+                                     
+                                     // Find position on path
+                                     float targetDist = charMidX + PathOffset;
+                                     if (totalPathLen > 0.001f)
+                                         targetDist = ((targetDist % totalPathLen) + totalPathLen) % totalPathLen;
+                                     
+                                     PathWarp.GetPointAndNormalAt(targetDist, effectiveBackbone, lengths, normals, out PointF origin, out PointF normal);
+                                     
+                                     // Transform the charPath
+                                     using(var mChar = new Matrix())
+                                     {
+                                         float baselineY = emSize * cellAscent / emHeight;
+                                         // 1. Center character cell on the path point
+                                         // We align the baseline (Y=baselineY) and the center of the advance cell (X=advance/2)
+                                         mChar.Translate(-(advance / 2f), -baselineY); 
+                                         
+                                         // 2. Flip Y
+                                         mChar.Scale(1, -1, MatrixOrder.Append);
+                                         
+                                         // 3. Rotate to match path tangent
+                                         float rotAngle = (float)(Math.Atan2(-normal.X, normal.Y) * 180 / Math.PI);
+                                         mChar.Rotate(rotAngle, MatrixOrder.Append);
+
+                                         // 4. Translate to Origin + Vertical Offset
+                                         PointF finalPos = new PointF(origin.X + normal.X * VerticalOffset, origin.Y + normal.Y * VerticalOffset);
+                                         
+                                         mChar.Translate(finalPos.X, finalPos.Y, MatrixOrder.Append);
+                                         
+                                         charPath.Transform(mChar);
+                                     } 
+                                     
+                                     // Draw
+                                     if (scale > 0.5f) g.FillPath(brush, charPath);
+                                     
+                                     curX += advance;
+                                 }
                              }
                          }
                      }
+
                  }
                  g.Restore(state);
                  return;
