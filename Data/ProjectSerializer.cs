@@ -21,6 +21,7 @@ public class ProjectDataDto
 {
     public List<LaserObjectDto> Objects { get; set; } = new();
     public List<LayerDto> Layers { get; set; } = new();
+    public List<string> ImageLibrary { get; set; } = new();
 }
 
 [JsonDerivedType(typeof(LaserPathDto), typeDiscriminator: "Path")]
@@ -57,6 +58,7 @@ public class LaserImageDto : LaserObjectDto
 {
     public string ImagePath { get; set; } = "";
     public string Base64Data { get; set; } = "";
+    public int? ImageLibraryIndex { get; set; }
     public Guid MaskId { get; set; }
 }
 
@@ -127,23 +129,35 @@ public static class ProjectSerializer
                 
                 if (AppConfiguration.Instance.EmbedImagesInProject)
                 {
+                    string? base64 = null;
                     try
                     {
                         if (File.Exists(i.ImagePath))
                         {
                             var bytes = File.ReadAllBytes(i.ImagePath);
-                            imgDto.Base64Data = Convert.ToBase64String(bytes);
+                            base64 = Convert.ToBase64String(bytes);
                         }
                         else if (i.Image != null)
                         {
                             using var ms = new MemoryStream();
                             i.Image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-                            imgDto.Base64Data = Convert.ToBase64String(ms.ToArray());
+                            base64 = Convert.ToBase64String(ms.ToArray());
                         }
                     }
                     catch (Exception ex)
                     {
                         System.Diagnostics.Debug.WriteLine($"Failed to embed image: {ex.Message}");
+                    }
+
+                    if (base64 != null)
+                    {
+                        int index = dto.ImageLibrary.IndexOf(base64);
+                        if (index == -1)
+                        {
+                            index = dto.ImageLibrary.Count;
+                            dto.ImageLibrary.Add(base64);
+                        }
+                        imgDto.ImageLibraryIndex = index;
                     }
                 }
                 
@@ -232,14 +246,24 @@ public static class ProjectSerializer
             {
                 var imgObj = new LaserImage { ImagePath = i.ImagePath, MaskId = i.MaskId };
                 
-                if (!string.IsNullOrEmpty(i.Base64Data))
+                string? base64Data = null;
+                if (i.ImageLibraryIndex.HasValue && dto.ImageLibrary != null && i.ImageLibraryIndex.Value < dto.ImageLibrary.Count)
+                {
+                    base64Data = dto.ImageLibrary[i.ImageLibraryIndex.Value];
+                }
+                else if (!string.IsNullOrEmpty(i.Base64Data))
+                {
+                    base64Data = i.Base64Data;
+                }
+
+                if (!string.IsNullOrEmpty(base64Data))
                 {
                     try
                     {
-                        var bytes = Convert.FromBase64String(i.Base64Data);
+                        var bytes = Convert.FromBase64String(base64Data);
                         using var ms = new MemoryStream(bytes);
-                        imgObj.Image = new Bitmap(ms); 
-                        var temp = new Bitmap(ms);
+                        // Load bitmap safely by cloning so we don't keep stream open
+                        using var temp = new Bitmap(ms);
                         imgObj.Image = new Bitmap(temp);
                     }
                     catch (Exception ex)

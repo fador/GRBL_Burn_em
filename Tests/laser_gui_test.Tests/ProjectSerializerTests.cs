@@ -5,6 +5,7 @@ using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using System;
+using System.Text.Json;
 
 namespace laser_gui_test.Tests;
 
@@ -122,5 +123,60 @@ public class ProjectSerializerTests : IDisposable
         Assert.NotNull(loadedImg.Image);
         Assert.Equal(10, loadedImg.Image.Width);
         Assert.Equal(Color.Blue.ToArgb(), loadedImg.Image.GetPixel(5, 5).ToArgb());
+    }
+
+    [Fact]
+    public void TestImageDeduplication()
+    {
+        ProjectState.Instance.Objects.Clear();
+        ProjectState.Instance.Layers.Clear();
+        AppConfiguration.Instance.EmbedImagesInProject = true;
+
+        using var bmp = new Bitmap(20, 20);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.Green);
+        }
+
+        // Add two image objects using the same bitmap source
+        var img1 = new LaserImage
+        {
+            Name = "Image 1",
+            Image = bmp,
+            Position = new PointF(0, 0),
+            Size = new SizeF(20, 20)
+        };
+        var img2 = new LaserImage
+        {
+            Name = "Image 2",
+            Image = bmp,
+            Position = new PointF(30, 0),
+            Size = new SizeF(20, 20)
+        };
+        ProjectState.Instance.AddObject(img1);
+        ProjectState.Instance.AddObject(img2);
+
+        // Save
+        ProjectSerializer.Save(_tempPath);
+
+        // Verify JSON content (should have only 1 item in ImageLibrary)
+        var json = File.ReadAllText(_tempPath);
+        var dto = JsonSerializer.Deserialize<ProjectDataDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        
+        Assert.NotNull(dto);
+        Assert.NotNull(dto!.ImageLibrary);
+        Assert.Single(dto.ImageLibrary); // Deduplication check
+
+        // Clear and Load
+        ProjectState.Instance.Objects.Clear();
+        ProjectSerializer.Load(_tempPath);
+
+        // Verify both images are restored correctly
+        var images = ProjectState.Instance.Objects.OfType<LaserImage>().ToList();
+        Assert.Equal(2, images.Count);
+        Assert.NotNull(images[0].Image);
+        Assert.NotNull(images[1].Image);
+        Assert.Equal(Color.Green.ToArgb(), images[0].Image!.GetPixel(10, 10).ToArgb());
+        Assert.Equal(Color.Green.ToArgb(), images[1].Image!.GetPixel(10, 10).ToArgb());
     }
 }
