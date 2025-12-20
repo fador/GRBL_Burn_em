@@ -765,7 +765,10 @@ public class LaserText : LaserObject
 
             using (var m = new Matrix())
             {
-                m.Translate(-Size.Width / 2f, Size.Height / 2f);
+                // Center the text at (0,0) before flipping/rotating.
+                // Text bounds are (0,0) to (W, H) [GDI coordinates, Y down]
+                // To center: Translate(-W/2, -H/2)
+                m.Translate(-Size.Width / 2f, -Size.Height / 2f);
                 m.Scale(1, -1, MatrixOrder.Append);
                 if (Rotation != 0) m.Rotate(Rotation, MatrixOrder.Append);
                 m.Translate(Position.X + Size.Width / 2f, Position.Y + Size.Height / 2f, MatrixOrder.Append);

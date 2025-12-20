@@ -512,6 +512,8 @@ namespace laser_gui_test.Data.Pdf
             if (string.IsNullOrEmpty(text)) return;
             
             // Calculate Position: (0, TextRise) in Text Space -> Transformed by Tm -> Transformed by CTM
+            // Reverting Top-Left Shift: LaserText implementation will be fixed to align Text within the Box
+            // starting from the Baseline/Position.
             PointF[] pts = new PointF[] { new PointF(0, _state.TextRise) };
             _textMatrix.TransformPoints(pts);
             _state.CTM.TransformPoints(pts);

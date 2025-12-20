@@ -192,6 +192,8 @@ namespace laser_gui_test.Tests
                     
                     double scale = 25.4 / 72.0;
                     Assert.Equal(10 * scale, lt.Position.X, 1);
+                    // Updated Expectation: Position is back to Baseline.
+                    // LaserText.Draw logic has been fixed to draw text UP from Baseline (inside the box).
                     Assert.Equal(20 * scale, lt.Position.Y, 1);
                     Assert.Equal(12 * scale, lt.FontSize, 1); // Check scaled font size
                 }
