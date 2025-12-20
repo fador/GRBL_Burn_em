@@ -30,7 +30,9 @@ namespace laser_gui_test.Data.Pdf
             public float TextHScale { get; set; } = 100;
             public PdfName? FontName { get; set; }
             public float FontSize { get; set; } = 12;
-            public int RenderMode { get; set; } = 0; // 0=Fill, 1=Stroke, 2=Fill+Stroke, 3=Invisible, etc.
+            public int RenderMode { get; set; } = 0; 
+            public float FillAlpha { get; set; } = 1.0f;
+            public float StrokeAlpha { get; set; } = 1.0f;
             
             public GraphicsState Clone()
             {
@@ -47,7 +49,9 @@ namespace laser_gui_test.Data.Pdf
                     TextHScale = TextHScale,
                     FontName = FontName,
                     FontSize = FontSize,
-                    RenderMode = RenderMode
+                    RenderMode = RenderMode,
+                    FillAlpha = FillAlpha,
+                    StrokeAlpha = StrokeAlpha
                 };
                 return clone;
             }
@@ -300,6 +304,14 @@ namespace laser_gui_test.Data.Pdf
                     }
                     break;
                     
+
+                case "gs": // Set Graphics State (Transparency etc.)
+                    if (operands.Count == 1 && operands[0] is PdfName gsName)
+                    {
+                        ProcessExtGState(gsName);
+                    }
+                    break;
+
                 // --- Images / XObjects ---
                 case "Do":
                     if (operands.Count == 1 && operands[0] is PdfName name)
@@ -476,6 +488,18 @@ namespace laser_gui_test.Data.Pdf
             // But if text is invisible, we skip it anyway.
             
             if (_state.RenderMode == 3) return; // Invisible Text
+            
+            // Check Transparency (Alpha)
+            // If Text is Filled (Mode 0, 2, 4...) check FillAlpha.
+            // If Text is Stroked (Mode 1, 2, 5...) check StrokeAlpha.
+            // Common case: 0 (Fill).
+            bool isFilled = (_state.RenderMode == 0 || _state.RenderMode == 2 || _state.RenderMode == 4 || _state.RenderMode == 6);
+            bool isStroked = (_state.RenderMode == 1 || _state.RenderMode == 2 || _state.RenderMode == 5 || _state.RenderMode == 6);
+            
+            if (isFilled && _state.FillAlpha < 0.05f) return; // Effectively transparent
+            if (isStroked && !isFilled && _state.StrokeAlpha < 0.05f) return; // Stroked only and transparent
+            
+            // Font Size scaling
             
             // Font Size scaling
             // Text Matrix scale * CTM scale * FontSize
@@ -774,6 +798,30 @@ namespace laser_gui_test.Data.Pdf
                  {
                      Warnings.Add($"Skipped XObject '{name.Name}' of unknown subtype '{(subtype?.Name ?? "null")}'.");
                  }
+            }
+        }
+
+        private void ProcessExtGState(PdfName name)
+        {
+            if (_resources == null) return;
+            var extGState = _reader.Resolve(_resources.Get("ExtGState")) as PdfDictionary;
+            if (extGState == null) return;
+            
+            var dictionary = _reader.Resolve(extGState.Get(name.Name)) as PdfDictionary;
+            if (dictionary == null) return;
+            
+            // Handle Alpha
+            // ca = Non-Stroking Alpha (Fill)
+            // CA = Stroking Alpha
+            if (dictionary.ContainsKey("ca"))
+            {
+                var ca = _reader.Resolve(dictionary.Get("ca")) as PdfNumber;
+                if (ca != null) _state.FillAlpha = (float)ca.RealValue;
+            }
+            if (dictionary.ContainsKey("CA"))
+            {
+                var CA = _reader.Resolve(dictionary.Get("CA")) as PdfNumber;
+                if (CA != null) _state.StrokeAlpha = (float)CA.RealValue;
             }
         }
 
