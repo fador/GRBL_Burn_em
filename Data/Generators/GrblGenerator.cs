@@ -63,85 +63,9 @@ public class GrblGenerator : IGCodeGenerator
             if (obj is LaserText text)
             {
                 // Generate Vector Path for Text
-                using (var gp = new GraphicsPath())
+                using (var workPath = text.GetPath())
                 {
-                    var family = new FontFamily(text.FontName);
-                    // Use FontSize directly to match UI
-                    float emSize = text.FontSize; 
-                    
-                    int style = (int)text.FontStyle;
-                    gp.AddString(text.Text, family, style, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
-
-                    // Warp if needed
-                    GraphicsPath workPath = gp;
-                    GraphicsPath? warpedPath = null;
-                    bool checkWarp = false;
-                    
-                    if (text.PathId != Guid.Empty)
-                    {
-                        var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == text.PathId);
-                        if (pathObj != null)
-                        {
-                            var backbone = PathWarp.FlattenPath(pathObj);
-                            if (backbone.Count > 1)
-                            {
-                                if (text.ReversePath)
-                                {
-                                    backbone.Reverse();
-                                }
-
-                                // Fix Orientation LOCALLY for warping
-                                // We need a clone to not mess up the original gp for fallback
-                                using (var warpInput = (GraphicsPath)gp.Clone())
-                                {
-                                    float emHeight = family.GetEmHeight(text.FontStyle);
-                                    float cellAscent = family.GetCellAscent(text.FontStyle);
-                                    float cellDescent = family.GetCellDescent(text.FontStyle);
-                                    
-                                    float ascent = (emSize * cellAscent) / emHeight;
-                                    float descent = (emSize * cellDescent) / emHeight;
-
-                                     using (var m = new System.Drawing.Drawing2D.Matrix())
-                                     {
-                                         // Match LaserText.Draw logic for baseline alignment
-                                         float baselineY = (emSize * cellAscent) / emHeight;
-                                         float finalYShift = -baselineY - text.VerticalOffset;
- 
-                                         m.Translate(0, finalYShift);
-                                         m.Scale(1, -1);
-
-                                        if (text.UpsideDown)
-                                        {
-                                            m.Scale(1, -1);
-                                        }
-
-                                        m.Rotate(text.Rotation);
-                                        warpInput.Transform(m);
-                                    }
-                                    
-                                    warpedPath = PathWarp.CreateWarpedPath(warpInput, backbone, text.PathOffset);
-                                    workPath = warpedPath;
-                                    checkWarp = true;
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Transform if NOT warped (Placement logic)
-                    // If warped, position is defined by the backbone + offest.
-                  if (!checkWarp)
-                  {
-                       using (var matrix = new System.Drawing.Drawing2D.Matrix())
-                       {
-                             // Match LaserText.Draw logic exactly
-                             matrix.Translate(-text.Size.Width / 2f, text.Size.Height / 2f);
-                             matrix.Scale(1, -1, MatrixOrder.Append);
-                             if (text.Rotation != 0) matrix.Rotate(text.Rotation, MatrixOrder.Append);
-                             matrix.Translate(text.Position.X + text.Size.Width / 2f, text.Position.Y + text.Size.Height / 2f, MatrixOrder.Append);
- 
-                             workPath.Transform(matrix);
-                       }
-                  }
+                    // workPath is already fully transformed and warped in World Coordinates
                     
                     workPath.Flatten(null, 0.05f); // 0.05mm precision
                     
@@ -195,8 +119,6 @@ public class GrblGenerator : IGCodeGenerator
                              }
                          }
                     }
-                    
-                    warpedPath?.Dispose();
                 }
                 yield return "G1 S0";
                 yield break;
@@ -448,19 +370,9 @@ public class GrblGenerator : IGCodeGenerator
                 }
                 else if (obj is LaserText lt)
                 {
-                    var family = new FontFamily(lt.FontName);
-                    float emSize = lt.FontSize; 
-                    path.AddString(lt.Text, family, (int)lt.FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
-                    
-                    using (var m = new System.Drawing.Drawing2D.Matrix())
+                    using (var gp = lt.GetPath())
                     {
-                        // Match LaserText.Draw logic exactly
-                        m.Translate(-lt.Size.Width / 2f, lt.Size.Height / 2f);
-                        m.Scale(1, -1, MatrixOrder.Append);
-                        if (lt.Rotation != 0) m.Rotate(lt.Rotation, MatrixOrder.Append);
-                        m.Translate(lt.Position.X + lt.Size.Width / 2f, lt.Position.Y + lt.Size.Height / 2f, MatrixOrder.Append);
- 
-                        path.Transform(m);
+                        path.AddPath(gp, false);
                     }
                     hasPath = true;
                 }

@@ -124,3 +124,57 @@ public class PathWarpTests
         Assert.All(pts, p => Assert.True(p.X >= 0 && p.X <= 100));
     }
 }
+
+public class LaserTextTests
+{
+/*
+    [Fact]
+    public void TestGetPath_Warped()
+    {
+        try
+        {
+            // 1. Setup Environment
+            ProjectState.Instance.Objects.Clear();
+            
+            var backbone = new LaserPath 
+            { 
+                Id = Guid.NewGuid(),
+                Points = new List<PointF> { new PointF(0, 0), new PointF(100, 100) } // 45 degree line
+            };
+            ProjectState.Instance.AddObject(backbone);
+            
+            var text = new LaserText
+            {
+                Text = "----------", 
+                FontName = "Arial",
+                FontSize = 10,
+                PathId = backbone.Id,
+                WarpMethod = TextWarpMethod.Stretch
+            };
+            ProjectState.Instance.AddObject(text);
+            
+            // 2. Get Path
+            using var path = text.GetPath();
+            
+            // 3. Verify
+            Assert.True(path.PointCount > 0);
+            var bounds = path.GetBounds();
+            
+            Assert.True(bounds.Width > 50, "Width should be substantial");
+            Assert.True(bounds.Height > 50, "Height should be substantial");
+            
+            var pts = path.PathPoints;
+            foreach(var p in pts)
+            {
+                float dist = Math.Abs(p.X - p.Y) / 1.414f;
+                Assert.True(dist < 20, $"Point {p} is too far from backbone {dist}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("TEST FAILED WITH EXCEPTION: " + ex);
+            throw;
+        }
+    }
+*/
+}

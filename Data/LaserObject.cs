@@ -191,7 +191,7 @@ public class LaserPath : LaserObject
         Type = LaserObjectType.Path;
     }
 
-    public void UpdateBounds()
+    public override void UpdateBounds()
     {
         if (Points.Count == 0) return;
         float minX = Points.Min(p => p.X);
@@ -618,68 +618,20 @@ public class LaserText : LaserObject
         }
     }
 
-    public override RectangleF GetBounds()
+    // Re-calculated on property change?
+    // Optimization is possible but let's stick to functional first.
+    public GraphicsPath GetPath()
     {
-        return GetRotatedBoundsFromDef();
-    }
-
-    public override void Draw(Graphics g, float scale)
-    {
-        var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
-                    ?? ProjectState.Instance.Layers.FirstOrDefault();
-        Color c = layer?.Color ?? Color.Black;
-
-        using var brush = new SolidBrush(c);
-        // Simple scale handling for font: create font of appropriate size? 
-        // Or transform graphics? Graphics is already transformed. 
-        // Font size is in em/points usually. 
-        // If we want WYSIWYG, we need to handle size carefully.
-        // For now, assume FontSize is in world units (mm or whatever).
-        // Standard GDI+ Font size is in Point (1/72 inch). 
-        // 1 pt = 0.3527 mm.
-        // If we want FontSize 10mm ~ 28pt.
-        
-        // Let's assume FontSize is in POINTS for generic text.
-        // But if we resize via 'Size' property we might want to scale it.
-        // For simple MVP usage: DrawString uses Font Size.
-        
-        // Text drawing needs unflip
-        var state = g.Save();
-        
-        if (PathId != Guid.Empty)
-        {
+         if (PathId != Guid.Empty)
+         {
             var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == PathId);
             if (pathObj != null)
             {
                  // Create Text Path at 0,0 locally
-                 using (var gp = new GraphicsPath())
-                 {
+                 var gp = new GraphicsPath();
+                 
                      var family = new FontFamily(FontName);
-                     // Conversion: FontSize (Points) -> EmSize (World)
-                     // Assuming display is roughly 96 DPI for "Points" meaning...
-                     // 1 Pt = 1/72 inch.
-                     // EmSize in AddString is in World Coordinates.
-                     // If 1 World Unit = 1 mm.
-                     // 1 Pt = 0.35277 mm.
-                     float emSize = FontSize * 0.35277f;
-                     // But previously we used Graphics.DrawString which takes Points.
-                     // We need to match visual size.
-                     // Graphics.DrawString(..., 20pt) draws 20pt text.
-                     // If World Scale is 1mm.
-                     // We probably want to keep consistency.
-                     // Let's stick to the multiplier used in GrblGenerator if possible,
-                     // or derive it.
-                     // 20pt at 96dpi = 20 * 96/72 pixels = 26.6 pixels.
-                     // If 1 pixel = 1mm (unlikely, usually 1px = screen px).
-                     // But our View is Scalable.
-                     // Let's assume EmSize ~ FontSize for now, or tune it.
-                     // Actually, Font(Size) uses Points. AddString uses EmHeight in World Units.
-                     // We need conversion factor.
-                     // Let's use 1.0 for now, user can resize.
-                     
-                     // Use FontSize directly (World Units)
-                     // Use FontSize directly (World Units)
-                     emSize = FontSize; 
+                     float emSize = FontSize; 
 
                      var sf = StringFormat.GenericTypographic;
                      gp.AddString(Text, family, (int)FontStyle, emSize, new PointF(0, 0), sf);
@@ -693,30 +645,11 @@ public class LaserText : LaserObject
                      
                      using (var m = new System.Drawing.Drawing2D.Matrix())
                      {
-                         // 1. Position the Baseline of the text at Y=0.
-                         // AddString puts Top at Y=0. Baseline is at cellAscent.
-                         // To get baseline to Y=0, we move by -baselineY.
-                         
-                         // Apply VerticalOffset: Positive moves AWAY from path (Up in local space)
                          float finalYShift = -baselineY - VerticalOffset; 
-                         
                          m.Translate(0, finalYShift);
-                         
-                         // 2. Flip Y so Up is Positive
                          m.Scale(1, -1);
-                         
-                         // 3. Upside Down flip (if requested)
-                         if (UpsideDown)
-                         {
-                             // Flip around the middle of the text height ideally, 
-                             // but user might want it flipped across the path.
-                             // Flipping across the path (Y=0) is simplest.
-                             m.Scale(1, -1);
-                         }
-
-                         // 4. Apply Object Rotation (around Baseline/Path point)
+                         if (UpsideDown) m.Scale(1, -1);
                          m.Rotate(Rotation);
-                         
                          gp.Transform(m);
                      }
                      
@@ -726,124 +659,95 @@ public class LaserText : LaserObject
                      {
                          // Create a local copy to avoid corrupting shared backbone
                          var effectiveBackbone = new List<PointF>(backbonePointsList);
-                         // Reverse if requested
-                         if (ReversePath)
-                         {
-                             effectiveBackbone.Reverse();
-                         }
+                         if (ReversePath) effectiveBackbone.Reverse();
 
                          if (WarpMethod == TextWarpMethod.Stretch)
                          {
-                             using (var warped = PathWarp.CreateWarpedPath(gp, effectiveBackbone, PathOffset))
-                             {
-                                 // Warped path is in World Coordinates (derived from backbone).
-                                 // So we draw it directly.
-                                 using (var p = new Pen(c, 1.0f / scale))
-                                 {
-                                     // Fill?
-                                     if (scale > 0.5f) g.FillPath(brush, warped);
-                                     // And/Or Outline?
-                                    // g.DrawPath(p, warped);
-                                 }
-                             }
+                             var warped = PathWarp.CreateWarpedPath(gp, effectiveBackbone, PathOffset);
+                             gp.Dispose();
+                             return warped;
                          }
                          else // Align
                          {
+                             gp.Dispose();
+                             gp = new GraphicsPath();
+
                              float curX = 0;
                              PathWarp.ComputeBackboneProperties(effectiveBackbone, out var lengths, out var normals);
                              
-                             // Total Length to handle looping
                              float totalPathLen = lengths.Last();
 
-                             // Use a temporary Graphics to measure character advances correctly
-                             // Note: In a real app we might cache this or use a global Graphics
-                             using var f = new Font(family, emSize, FontStyle, GraphicsUnit.World);
-
-                             foreach (char ch in Text)
+                             using (var f = new Font(family, emSize, FontStyle, GraphicsUnit.World))
                              {
-                                 string s = ch.ToString();
-                                 if (char.IsControl(ch)) continue; 
-                                 
-                                 // Measure character advance and ink bounds
-                                 float advance;
-                                 float charWidth;
-                                 float inkLeft;
-                                 
-                                 using (var charPath = new GraphicsPath())
+                                 foreach (char ch in Text)
                                  {
-                                     charPath.AddString(s, family, (int)FontStyle, emSize, new PointF(0, 0), sf);
-                                     var bounds = charPath.GetBounds();
-                                     charWidth = bounds.Width;
-                                     inkLeft = bounds.Left;
+                                     string s = ch.ToString();
+                                     if (char.IsControl(ch)) continue; 
                                      
-                                     // Advance logic: Use MeasureString for accurate kerning/spacing
-                                     advance = g.MeasureString(s, f, 1000, sf).Width;
-                                     // Fallback for whitespace or empty glyphs
-                                     if (advance <= 0) advance = emSize * 0.3f;
-                                     
-                                     if (char.IsWhiteSpace(ch))
+                                     float advance;
+                                     using (var charPath = new GraphicsPath())
                                      {
-                                          curX += advance; 
-                                          continue;
-                                     }
+                                         charPath.AddString(s, family, (int)FontStyle, emSize, new PointF(0, 0), sf);
+                                         
+                                         // Advance logic
+                                         // Optimization: If we could pass 'g' here it would be better, but we are in Data model.
+                                         // We'll create a temp bitmap 1x1 just for measurement if needed, OR use simple approximation?
+                                         // But GenericTypographic should be okay without context? 
+                                         // Actually MeasureString needs Graphics context.
+                                          // Note: This matches Draw method logic.
+                                         // In GetPath we don't have G. 
+                                         // Let's create a temp static or dispose it.
+                                         using (var bmp = new Bitmap(1,1))
+                                         using (var gCtx = Graphics.FromImage(bmp))
+                                         {
+                                              advance = gCtx.MeasureString(s, f, 1000, sf).Width;
+                                         }
+                                         
+                                         if (advance <= 0) advance = emSize * 0.3f;
+                                         
+                                         if (char.IsWhiteSpace(ch))
+                                         {
+                                              curX += advance; 
+                                              continue;
+                                         }
 
-                                     // Center of the character advance cell horizontally
-                                     float charMidX = curX + advance / 2f;
-                                     
-                                     // Find position on path
-                                     float targetDist = charMidX + PathOffset;
-                                     if (totalPathLen > 0.001f)
-                                         targetDist = ((targetDist % totalPathLen) + totalPathLen) % totalPathLen;
-                                     
-                                     PathWarp.GetPointAndNormalAt(targetDist, effectiveBackbone, lengths, normals, out PointF origin, out PointF normal);
-                                     
-                                     using(var mChar = new Matrix())
-                                     {
-                                         // 1. Center character cell on the path point
-                                         // We align the baseline (Y=baselineY) and the center of the advance cell (X=advance/2)
-                                         mChar.Translate(-(advance / 2f), -baselineY); 
+                                         float charMidX = curX + advance / 2f;
+                                         float targetDist = charMidX + PathOffset;
+                                         if (totalPathLen > 0.001f)
+                                             targetDist = ((targetDist % totalPathLen) + totalPathLen) % totalPathLen;
                                          
-                                         // 2. Flip Y
-                                         mChar.Scale(1, -1, MatrixOrder.Append);
+                                         PathWarp.GetPointAndNormalAt(targetDist, effectiveBackbone, lengths, normals, out PointF origin, out PointF normal);
                                          
-                                         // 3. Rotate to match path tangent
-                                         float rotAngle = (float)(Math.Atan2(-normal.X, normal.Y) * 180 / Math.PI);
-                                         mChar.Rotate(rotAngle, MatrixOrder.Append);
-
-                                         // 4. Translate to Origin + Vertical Offset
-                                         PointF finalPos = new PointF(origin.X + normal.X * VerticalOffset, origin.Y + normal.Y * VerticalOffset);
+                                         using(var mChar = new Matrix())
+                                         {
+                                             mChar.Translate(-(advance / 2f), -baselineY); 
+                                             mChar.Scale(1, -1, MatrixOrder.Append);
+                                             float rotAngle = (float)(Math.Atan2(-normal.X, normal.Y) * 180 / Math.PI);
+                                             mChar.Rotate(rotAngle, MatrixOrder.Append);
+                                             PointF finalPos = new PointF(origin.X + normal.X * VerticalOffset, origin.Y + normal.Y * VerticalOffset);
+                                             mChar.Translate(finalPos.X, finalPos.Y, MatrixOrder.Append);
+                                             charPath.Transform(mChar);
+                                         } 
                                          
-                                         mChar.Translate(finalPos.X, finalPos.Y, MatrixOrder.Append);
-                                         
-                                         charPath.Transform(mChar);
-                                     } 
-                                     
-                                     // Draw
-                                     if (scale > 0.5f) g.FillPath(brush, charPath);
-                                     
-                                     curX += advance;
-                                 }
-                             }
+                                         gp.AddPath(charPath, false);
+                                         curX += advance;
+                                     } // End Using CharPath
+                                 } // End Foreach
+                             } // End Using Font
+                             return gp;
                          }
                      }
-
-                 }
-                 g.Restore(state);
-                 return;
+                     return gp; // Fallback if backbone invalid
             }
-        }
+         }
 
-        using (var gp = new GraphicsPath())
-        using (var family = new FontFamily(FontName))
-        {
+         // Unwarped
+         var gpNormal = new GraphicsPath();
+         using (var family = new FontFamily(FontName))
+         {
             float emSize = FontSize;
-            gp.AddString(Text, family, (int)FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
+            gpNormal.AddString(Text, family, (int)FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
 
-            // Use Append order for clarity: 
-            // 1. Move to local Top-Left anchor relative to center
-            // 2. Flip for Y-Up world
-            // 3. Rotate around center
-            // 4. Translate to world center
             using (var m = new Matrix())
             {
                 m.Translate(-Size.Width / 2f, Size.Height / 2f);
@@ -851,13 +755,36 @@ public class LaserText : LaserObject
                 if (Rotation != 0) m.Rotate(Rotation, MatrixOrder.Append);
                 m.Translate(Position.X + Size.Width / 2f, Position.Y + Size.Height / 2f, MatrixOrder.Append);
                 
-                gp.Transform(m);
+                gpNormal.Transform(m);
             }
+         }
+         return gpNormal;
+    }
 
-            g.FillPath(brush, gp);
+    public override RectangleF GetBounds()
+    {
+        return GetRotatedBoundsFromDef();
+    }
+
+    public override void Draw(Graphics g, float scale)
+    {
+        var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == LayerId) 
+                    ?? ProjectState.Instance.Layers.FirstOrDefault();
+        Color c = layer?.Color ?? Color.Black;
+
+        using var brush = new SolidBrush(c);
+        
+        // Use central GetPath
+        using var path = GetPath();
+        if (scale > 0.5f) 
+        {
+            g.FillPath(brush, path);
         }
-
-        g.Restore(state);
+        else
+        {
+            // Optimization for zoomed out??
+            g.FillPath(brush, path);
+        }
     }
 
     public override bool HitTest(PointF point, float tolerance)
@@ -917,7 +844,7 @@ public class LaserBezier : LaserObject
         return GetRotatedBoundsFromDef();
     }
 
-    public void UpdateBounds()
+    public override void UpdateBounds()
     {
         if (Points.Count == 0) return;
         
