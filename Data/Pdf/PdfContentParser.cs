@@ -303,7 +303,26 @@ namespace laser_gui_test.Data.Pdf
                         AddTextObject(sb.ToString(), objects);
                     }
                     break;
-                    
+                
+                // --- Color Operators ---
+                case "g": // Set non-stroking gray
+                    if (operands.Count == 1) SetColor(operands, false, "Gray");
+                    break;
+                case "G": // Set stroking gray
+                    if (operands.Count == 1) SetColor(operands, true, "Gray");
+                    break;
+                case "rg": // Set non-stroking RGB
+                    if (operands.Count == 3) SetColor(operands, false, "RGB");
+                    break;
+                case "RG": // Set stroking RGB
+                    if (operands.Count == 3) SetColor(operands, true, "RGB");
+                    break;
+                case "k": // Set non-stroking CMYK
+                    if (operands.Count == 4) SetColor(operands, false, "CMYK");
+                    break;
+                case "K": // Set stroking CMYK
+                    if (operands.Count == 4) SetColor(operands, true, "CMYK");
+                    break;
 
                 case "gs": // Set Graphics State (Transparency etc.)
                     if (operands.Count == 1 && operands[0] is PdfName gsName)
@@ -326,11 +345,6 @@ namespace laser_gui_test.Data.Pdf
                     // Warnings for everything might be noisy but safer for "No output" debugging.
                     // Let's filter common state operators we ignore.
                     if (IsIgnoredStateOperator(op)) { }
-                    else if (op == "g" || op == "G" || op == "rg" || op == "RG" || op == "k" || op == "K") 
-                    {
-                        // Color operations - Ignored for now to reduce noise. 
-                        // TODO: Implement color mapping to Layer Color.
-                    }
                     else if (op == "q" || op == "Q" || op == "cm")
                     {
                         // These should be handled! Why are they falling through?
@@ -351,7 +365,11 @@ namespace laser_gui_test.Data.Pdf
         {
             if (_currentPath.PointCount == 0) return;
             
-            // Transform path by CTM first
+            // Filter by Color (White Geometry = Invisible/Mask usually)
+            // If Filled: Check FillColor
+            if (filled && IsWhite(_state.FillColor)) return;
+            // If Stroked (not filled): Check StrokeColor
+            if (!filled && IsWhite(_state.StrokeColor)) return;
             using var transformedPath = (GraphicsPath)_currentPath.Clone();
             transformedPath.Transform(_state.CTM);
             // Flatten to convert curves to lines for simple LaserPath processing
@@ -487,7 +505,8 @@ namespace laser_gui_test.Data.Pdf
             // If user sees "two numbers" maybe they mean the font name or something else?
             // But if text is invisible, we skip it anyway.
             
-            if (_state.RenderMode == 3) return; // Invisible Text
+            if (_state.RenderMode == 3) return; // Invisible
+            if (_state.RenderMode == 7) return; // Clip Only (Invisible)
             
             // Check Transparency (Alpha)
             // If Text is Filled (Mode 0, 2, 4...) check FillAlpha.
@@ -498,6 +517,10 @@ namespace laser_gui_test.Data.Pdf
             
             if (isFilled && _state.FillAlpha < 0.05f) return; // Effectively transparent
             if (isStroked && !isFilled && _state.StrokeAlpha < 0.05f) return; // Stroked only and transparent
+            
+            // Check Color (White = Ignore)
+            if (isFilled && IsWhite(_state.FillColor)) return;
+            if (isStroked && !isFilled && IsWhite(_state.StrokeColor)) return;
             
             // Font Size scaling
             
@@ -845,6 +868,46 @@ namespace laser_gui_test.Data.Pdf
         {
             if (obj is PdfNumber n) return n.RealValue;
             return 0;
+        }
+
+        private void SetColor(List<PdfObject> operands, bool stroke, string space)
+        {
+            float[] vals = operands.Select(o => (float)GetNum(o)).ToArray();
+            Color c = Color.Black;
+            
+            if (space == "Gray" && vals.Length >= 1)
+            {
+                int v = (int)(vals[0] * 255);
+                v = Math.Clamp(v, 0, 255);
+                c = Color.FromArgb(v, v, v);
+            }
+            else if (space == "RGB" && vals.Length >= 3)
+            {
+                int r = (int)(vals[0] * 255);
+                int g = (int)(vals[1] * 255);
+                int b = (int)(vals[2] * 255);
+                c = Color.FromArgb(Math.Clamp(r,0,255), Math.Clamp(g,0,255), Math.Clamp(b,0,255));
+            }
+            else if (space == "CMYK" && vals.Length >= 4)
+            {
+                float C = vals[0];
+                float M = vals[1];
+                float Y = vals[2];
+                float K = vals[3];
+                // Simple CMYK to RGB
+                int r = (int)(255 * (1 - C) * (1 - K));
+                int g = (int)(255 * (1 - M) * (1 - K));
+                int b = (int)(255 * (1 - Y) * (1 - K));
+                 c = Color.FromArgb(Math.Clamp(r,0,255), Math.Clamp(g,0,255), Math.Clamp(b,0,255));
+            }
+            
+            if (stroke) _state.StrokeColor = c;
+            else _state.FillColor = c;
+        }
+        
+        private bool IsWhite(Color c)
+        {
+            return c.R > 250 && c.G > 250 && c.B > 250; // Near White
         }
     }
 }
