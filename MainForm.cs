@@ -6,6 +6,7 @@ using laser_gui_test.Data.Commands;
 using System.Linq;
 using laser_gui_test.Forms;
 using laser_gui_test.Data.Generators;
+using laser_gui_test.Data.Pdf;
 
 namespace laser_gui_test;
 
@@ -1736,7 +1737,7 @@ public partial class MainForm : Form
     private void ImportFile()
     {
         using var ofd = new OpenFileDialog();
-        ofd.Filter = "Supported Files|*.bmp;*.jpg;*.jpeg;*.png;*.svg|Images|*.bmp;*.jpg;*.jpeg;*.png|Scalable Vector Graphics|*.svg|All Files|*.*";
+        ofd.Filter = "Supported Files|*.bmp;*.jpg;*.jpeg;*.png;*.svg;*.pdf|Images|*.bmp;*.jpg;*.jpeg;*.png|Scalable Vector Graphics|*.svg|PDF Documents|*.pdf|All Files|*.*";
         if (ofd.ShowDialog() == DialogResult.OK)
         {
             string ext = Path.GetExtension(ofd.FileName).ToLower();
@@ -1758,6 +1759,25 @@ public partial class MainForm : Form
                 catch (Exception ex)
                 {
                     MessageBox.Show($"Failed to import SVG: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else if (ext == ".pdf")
+            {
+                try 
+                {
+                    var objects = PdfImporter.Import(ofd.FileName);
+                    var cmd = new AddObjectCommand(objects);
+                    
+                    foreach(var obj in objects)
+                    {
+                        if (ProjectState.Instance.ActiveLayer != null)
+                             obj.LayerId = ProjectState.Instance.ActiveLayer.Id;
+                    }
+                    CommandManager.Instance.Execute(cmd);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to import PDF: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             else

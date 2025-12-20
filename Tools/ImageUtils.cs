@@ -46,32 +46,30 @@ namespace laser_gui_test.Tools
                 double totalWeight = 0;
 
                 int stride = data.Stride;
-                IntPtr ptr = data.Scan0;
+                int byteCount = stride * h;
+                byte[] pixels = new byte[byteCount];
+                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, pixels, 0, byteCount);
 
-                unsafe
+                for (int y = 0; y < h; y++)
                 {
-                    byte* p = (byte*)ptr;
-
-                    for (int y = 0; y < h; y++)
+                    int rowOffset = y * stride;
+                    for (int x = 0; x < w; x++)
                     {
-                        for (int x = 0; x < w; x++)
+                        int idx = rowOffset + x * 3;
+                        byte b = pixels[idx];
+                        byte g = pixels[idx + 1];
+                        byte r = pixels[idx + 2];
+
+                        // Simple average luminance
+                        int lum = (r + g + b) / 3;
+
+                        if (lum < threshold)
                         {
-                            int idx = y * stride + x * 3;
-                            byte b = p[idx];
-                            byte g = p[idx + 1];
-                            byte r = p[idx + 2];
-
-                            // Simple average luminance
-                            int lum = (r + g + b) / 3;
-
-                            if (lum < threshold)
-                            {
-                                // Weight by darkness (inverted)
-                                double weight = (255 - lum);
-                                sumX += x * weight;
-                                sumY += y * weight;
-                                totalWeight += weight;
-                            }
+                            // Weight by darkness (inverted)
+                            double weight = (255 - lum);
+                            sumX += x * weight;
+                            sumY += y * weight;
+                            totalWeight += weight;
                         }
                     }
                 }
