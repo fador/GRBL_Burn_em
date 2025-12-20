@@ -33,7 +33,8 @@ namespace laser_gui_test.Data.Pdf
             public int RenderMode { get; set; } = 0; 
             public float FillAlpha { get; set; } = 1.0f;
             public float StrokeAlpha { get; set; } = 1.0f;
-            public RectangleF? ClipBounds { get; set; } = null; // Null means infinite? Or use MediaBox as baseline.
+            public Region ClipRegion { get; set; } = null; // Region supports complex shapes
+
             
             public GraphicsState Clone()
             {
@@ -53,7 +54,7 @@ namespace laser_gui_test.Data.Pdf
                     RenderMode = RenderMode,
                     FillAlpha = FillAlpha,
                     StrokeAlpha = StrokeAlpha,
-                    ClipBounds = ClipBounds
+                    ClipRegion = ClipRegion?.Clone() // Deep clone required for Regions
                 };
                 return clone;
             }
@@ -76,7 +77,10 @@ namespace laser_gui_test.Data.Pdf
             _reader = reader;
             _resources = resources;
             _state = new GraphicsState();
-            if (mediaBox.Width > 0 && mediaBox.Height > 0) _state.ClipBounds = mediaBox;
+            if (mediaBox.Width > 0 && mediaBox.Height > 0) 
+            {
+                _state.ClipRegion = new Region(mediaBox);
+            }
             
             _ctm = new Matrix(); // Identity
             _currentPath = new GraphicsPath();
@@ -240,9 +244,11 @@ namespace laser_gui_test.Data.Pdf
                     break;
                 case "W": // Set Clipping Path (Non-zero winding)
                     _isClipping = true;
+                    _currentPath.FillMode = FillMode.Winding;
                     break;
                 case "W*": // Set Clipping Path (Even-Odd)
                     _isClipping = true;
+                    _currentPath.FillMode = FillMode.Alternate;
                     break;
                     
                 case "n": // End path no op
@@ -389,10 +395,10 @@ namespace laser_gui_test.Data.Pdf
             transformedPath.Transform(_state.CTM);
 
             // Check Clipping
-            if (_state.ClipBounds != null)
+            if (_state.ClipRegion != null)
             {
                 RectangleF bounds = transformedPath.GetBounds();
-                if (!_state.ClipBounds.Value.IntersectsWith(bounds)) return; // Completely outside
+                if (!_state.ClipRegion.IsVisible(bounds)) return; // Completely outside region
             }
 
             // Flatten to convert curves to lines for simple LaserPath processing
@@ -548,16 +554,11 @@ namespace laser_gui_test.Data.Pdf
             // Font Size scaling
             
             // Check Scale/Visibility (Bounds)
-            if (_state.ClipBounds != null)
+            if (_state.ClipRegion != null)
             {
-                 // Calculate estimated bounds of text
-                 // Position is pts[0]. Size is effectiveFontSize (approx height). Width approx len * size/2?
-                 // Simple Point Check first: Is the Anchor Point inside the Clip?
-                 if (!_state.ClipBounds.Value.Contains(pts[0]))
+                 // Check if the text anchor point is visible
+                 if (!_state.ClipRegion.IsVisible(pts[0]))
                  {
-                      // Strict check might be too aggressive if point is on edge?
-                      // But effectively invisible text usually is WAY outside.
-                      // Let's assume if anchor is outside, it's clipped.
                       return; 
                  }
             }
@@ -890,18 +891,17 @@ namespace laser_gui_test.Data.Pdf
         {
              if (_currentPath.PointCount == 0) return;
              
-             // Transform path to device space (user space) calculate bounds, intersect with current clip
+             // Transform path to device space
              using var tempPath = (GraphicsPath)_currentPath.Clone();
              tempPath.Transform(_state.CTM);
-             RectangleF pathBounds = tempPath.GetBounds();
              
-             if (_state.ClipBounds == null)
+             if (_state.ClipRegion == null)
              {
-                 _state.ClipBounds = pathBounds;
+                 _state.ClipRegion = new Region(tempPath);
              }
              else
              {
-                 _state.ClipBounds = RectangleF.Intersect(_state.ClipBounds.Value, pathBounds);
+                 _state.ClipRegion.Intersect(tempPath);
              }
              _isClipping = false;
         }
