@@ -277,24 +277,9 @@ namespace laser_gui_test.Data.Pdf
                     {
                         float tx = (float)GetNum(operands[0]);
                         float ty = (float)GetNum(operands[1]);
-                        // Td moves relative to start of PREVIOUS line (Tlm)
-                        // Tlm = [ 1 0 0 1 tx ty ] x Tlm_old
-                        // In GDI+, Matrix.Multiply(Trans, Order.Prepend) ? 
-                        // Actually simplistic: Tlm.Translate(tx, ty) typically does M * Trans or Trans * M?
-                        // Matrix.Translate(tx, ty) -> M = M * Trans (Append) by default?
-                        // PDF Spec: Tlm = [1 0 0 1 tx ty] times Tlm_old.
-                        // So we want Prepend logic if we view it as standard transformations from root?
-                        // Actually, just translating the Tlm is standard.
-                        // We need to ensuring we don't accumulate incorrectly. 
-                        // It is a RELATIVE move from previous line start.
-                        // If Tlm was Identity, new is Translate(tx,ty).
-                        // If Tlm was Shifted, new is Shifted * Translate?
-                        // No, "Moves tlm to Tlm * [1 0 0 1 tx ty]".
-                        // So in GDI+: _textLineMatrix.Translate(tx, ty, MatrixOrder.Prepend); (If using row vectors v*M) -> v * T * M
-                        // Wait, PDF is v * M.
-                        // Tlm_new = T * Tlm_old. (No, [1 0 0 1 tx ty] x Tlm).
-                        // So simply Translate matches.
-                        _textLineMatrix.Translate(tx, ty); 
+                        // PDF Spec: Tm = [1 0 0 1 tx ty] x Tlm_old
+                        // This corresponds to Prepend in GDI+ (Translation * Matrix)
+                        _textLineMatrix.Translate(tx, ty, MatrixOrder.Prepend); 
                         _textMatrix = _textLineMatrix.Clone();
                     }
                     break;
@@ -304,12 +289,13 @@ namespace laser_gui_test.Data.Pdf
                         float tx = (float)GetNum(operands[0]);
                         float ty = (float)GetNum(operands[1]);
                         _state.TextLeading = -ty; // TD sets TL to -ty
-                        _textLineMatrix.Translate(tx, ty);
+                        _textLineMatrix.Translate(tx, ty, MatrixOrder.Prepend);
                         _textMatrix = _textLineMatrix.Clone();
                     }
                     break;
                 case "T*": // Move to Next Line
-                    _textLineMatrix.Translate(0, -_state.TextLeading);
+                    // Move by (0, -Tl)
+                    _textLineMatrix.Translate(0, -_state.TextLeading, MatrixOrder.Prepend);
                     _textMatrix = _textLineMatrix.Clone();
                     break;
                 case "Ts": // Set Text Rise
@@ -320,8 +306,8 @@ namespace laser_gui_test.Data.Pdf
                      {
                          _state.TextWordSpacing = (float)GetNum(operands[0]);
                          _state.TextCharSpacing = (float)GetNum(operands[1]);
-                         // Then same as '
-                         _textLineMatrix.Translate(0, -_state.TextLeading);
+                         // Move by (0, -Tl)
+                         _textLineMatrix.Translate(0, -_state.TextLeading, MatrixOrder.Prepend);
                          _textMatrix = _textLineMatrix.Clone();
                          if (operands[2] is PdfString s) AddTextObject(s.Value, objects);
                      }
@@ -329,7 +315,7 @@ namespace laser_gui_test.Data.Pdf
                  case "'": // Move to next line, show text
                      if (operands.Count == 1 && operands[0] is PdfString s2)
                      {
-                         _textLineMatrix.Translate(0, -_state.TextLeading);
+                         _textLineMatrix.Translate(0, -_state.TextLeading, MatrixOrder.Prepend);
                          _textMatrix = _textLineMatrix.Clone();
                          AddTextObject(s2.Value, objects);
                      }
