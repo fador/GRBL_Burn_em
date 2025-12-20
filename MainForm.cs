@@ -1765,15 +1765,32 @@ public partial class MainForm : Form
             {
                 try 
                 {
-                    var objects = PdfImporter.Import(ofd.FileName);
-                    var cmd = new AddObjectCommand(objects);
+                    var result = PdfImporter.Import(ofd.FileName);
                     
-                    foreach(var obj in objects)
+                    if (result.Warnings.Count > 0)
                     {
-                        if (ProjectState.Instance.ActiveLayer != null)
-                             obj.LayerId = ProjectState.Instance.ActiveLayer.Id;
+                        string msg = "Import completed with warnings:\n\n" + string.Join("\n", result.Warnings.Take(10));
+                        if (result.Warnings.Count > 10) msg += $"\n...and {result.Warnings.Count - 10} more.";
+                        
+                        MessageBox.Show(msg, "PDF Import Warnings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
-                    CommandManager.Instance.Execute(cmd);
+
+                    if (result.Objects.Count == 0)
+                    {
+                        if (result.Warnings.Count == 0) // Only show generic if we didn't show specific warnings?
+                            MessageBox.Show("No supported objects found in PDF.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    else
+                    {
+                        var cmd = new AddObjectCommand(result.Objects);
+                        
+                        foreach(var obj in result.Objects)
+                        {
+                            if (ProjectState.Instance.ActiveLayer != null)
+                                 obj.LayerId = ProjectState.Instance.ActiveLayer.Id;
+                        }
+                        CommandManager.Instance.Execute(cmd);
+                    }
                 }
                 catch (Exception ex)
                 {

@@ -12,6 +12,7 @@ namespace laser_gui_test.Data.Pdf
         private readonly PdfReader _reader;
         private readonly PdfDictionary _resources;
         private Matrix _ctm;
+        public List<string> Warnings { get; } = new List<string>();
         
         // Graphics State
         private class GraphicsState
@@ -286,6 +287,25 @@ namespace laser_gui_test.Data.Pdf
                         ProcessXObject(name, objects);
                     }
                     break;
+
+                default:
+                    // Only warn for significant operators? 
+                    // Many are state operators (gs, cs, CS, w, J, j, M, d, ri, i...) 
+                    // Warnings for everything might be noisy but safer for "No output" debugging.
+                    // Let's filter common state operators we ignore.
+                    if (IsIgnoredStateOperator(op)) { }
+                    else if (op == "g" || op == "G" || op == "rg" || op == "RG" || op == "k" || op == "K") 
+                    {
+                        // Color operators, maybe warn once? "Color not supported"
+                        // Or just ignore silently for MVP?
+                        // User sees "No supported objects", so seeing "Color operator ignored" is helpful context.
+                         Warnings.Add($"Ignored Color/State operator: {op}");
+                    }
+                    else
+                    {
+                         Warnings.Add($"Unhandled operator: {op}");
+                    }
+                    break;
             }
         }
 
@@ -420,34 +440,45 @@ namespace laser_gui_test.Data.Pdf
                  {
                       // Recursion! Form XObject has its own Stream content.
                       // Push State (q)
-                      _graphicsStack.Push(_state.Clone());
+                      // _graphicsStack.Push(_state.Clone());
                       
                       // Update Matrix (Form Matrix * CTM)
-                      var matrixObj = _reader.Resolve(stream.Dictionary.Get("Matrix")) as PdfArray;
-                      if (matrixObj != null && matrixObj.Items.Count == 6)
-                      {
-                           // Parse and apply
-                      }
+                      // var matrixObj = _reader.Resolve(stream.Dictionary.Get("Matrix")) as PdfArray;
+                      // if (matrixObj != null && matrixObj.Items.Count == 6) { ... }
                       
                       // Extract Resources (Form Resources)
-                      var res = _reader.Resolve(stream.Dictionary.Get("Resources")) as PdfDictionary ?? _resources;
+                      // var res = _reader.Resolve(stream.Dictionary.Get("Resources")) as PdfDictionary ?? _resources;
                       
-                      var subParser = new PdfContentParser(_reader, res);
-                      var subObjects = subParser.Parse(stream.Data);
+                      // var subParser = new PdfContentParser(_reader, res);
+                      // var subObjects = subParser.Parse(stream.Data);
                       
                       // Add them to our list (transformed)
-                      // Issue: subParser uses its own CTM/State.
-                      // We need to apply OUR current CTM to them?
-                      // Wait, subParser starts with Identity CTM.
-                      // We can assume they are in Form Space.
-                      // The Form is then Placed on Page using CTM.
-                      // This is complex.
-                      // For MVP: Skip Form XObjects in XObject handling?
-                      // Or implement if vital.
+                      
+                      // For MVP: Skip Form XObjects
+                      Warnings.Add($"Skipped Form XObject '{name.Name}' (recursion/forms not fully supported yet).");
+                 }
+                 else
+                 {
+                     Warnings.Add($"Skipped XObject '{name.Name}' of unknown subtype '{(subtype?.Name ?? "null")}'.");
                  }
             }
         }
 
+        private bool IsIgnoredStateOperator(string op)
+        {
+            // Common state operators that don't affect shape geometry directly for MVP
+            // w = line width (we track it but ignoring it here is fine as we don't warn)
+            // J, j = line cap/join
+            // M = miter limit
+            // d = dash pattern
+            // ri = rendering intent
+            // i = flatness
+            // gs = graphics state dictionary (ext state)
+            // cs, CS = color space
+            return op == "w" || op == "J" || op == "j" || op == "M" || op == "d" || op == "ri" || op == "i" || op == "gs" || op == "cs" || op == "CS"
+                   || op == "BDC" || op == "EMC" || op == "BMC" || op == "DP" || op == "MP";
+        }
+        
         private double GetNum(PdfObject obj)
         {
             if (obj is PdfNumber n) return n.RealValue;

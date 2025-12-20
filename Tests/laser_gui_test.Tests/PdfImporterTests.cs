@@ -115,10 +115,10 @@ namespace laser_gui_test.Tests
 
                 try
                 {
-                    var objects = PdfImporter.Import(pdfPath);
+                    var result = PdfImporter.Import(pdfPath);
                     
-                    Assert.Single(objects);
-                    var lp = objects[0] as LaserPath;
+                    Assert.Single(result.Objects);
+                    var lp = result.Objects[0] as LaserPath;
                     Assert.NotNull(lp);
                     
                     Assert.Equal(50, lp.Position.X, 1);
@@ -181,10 +181,10 @@ namespace laser_gui_test.Tests
 
                 try
                 {
-                    var objects = PdfImporter.Import(pdfPath);
+                    var result = PdfImporter.Import(pdfPath);
                     
-                    Assert.Single(objects);
-                    var lt = objects[0] as LaserText;
+                    Assert.Single(result.Objects);
+                    var lt = result.Objects[0] as LaserText;
                     Assert.NotNull(lt);
                     Assert.Equal("Hello", lt.Text);
                     Assert.Equal(10, lt.Position.X, 1);

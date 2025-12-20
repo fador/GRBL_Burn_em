@@ -11,14 +11,26 @@ using System.Drawing.Drawing2D; // For Matrix
 
 namespace laser_gui_test.Data.Pdf
 {
+    public class PdfImportResult
+    {
+        public List<LaserObject> Objects { get; set; } = new List<LaserObject>();
+        public List<string> Warnings { get; set; } = new List<string>();
+        public bool Success => Objects.Count > 0;
+    }
+
     public class PdfImporter
     {
-        public static List<LaserObject> Import(string filePath)
+        public static PdfImportResult Import(string filePath)
         {
+            var result = new PdfImportResult();
+            var reader = new PdfReader(filePath);
             var objects = new List<LaserObject>();
-            try
+            
+            // Collect reader warnings if any (Reader needs to expose them)
+            result.Warnings.AddRange(reader.Warnings); 
+
+            try 
             {
-                var reader = new PdfReader(filePath);
                 var pages = reader.GetPages();
 
                 foreach (var pageObj in pages)
@@ -26,8 +38,14 @@ namespace laser_gui_test.Data.Pdf
                     if (pageObj is PdfDictionary page)
                     {
                         // Get Content
-                        byte[] contentData = GetPageContent(reader, page);
-                        if (contentData == null || contentData.Length == 0) continue;
+                        byte[] contentData = GetPageContent(reader, page, result.Warnings);
+                        if (contentData == null || contentData.Length == 0) 
+                        {
+                            // Already warned in GetPageContent if unexpected type, but if just empty:
+                            // continue
+                            // Warning is added inside GetPageContent
+                            continue;
+                        }
 
                         // Get Resources
                         var resources = reader.Resolve(page.Get("Resources")) as PdfDictionary ?? new PdfDictionary();
@@ -35,31 +53,34 @@ namespace laser_gui_test.Data.Pdf
                         // Parse Content
                         var parser = new PdfContentParser(reader, resources);
                         var pageObjects = parser.Parse(contentData);
+                        
+                        // Collect parser warnings
+                        result.Warnings.AddRange(parser.Warnings);
 
-                        // Apply Page MediaBox / offset?
-                        // Usually parsing returns objects in Page Space (User Space).
-                        // If we want to stack pages or just import all?
-                        // Import all into same list.
-                        
-                        // CropBox / MediaBox
-                        // If MediaBox is [0 0 595 842], content is usually there.
-                        // We assume default origin.
-                        
                         objects.AddRange(pageObjects);
                     }
                 }
             }
-            catch (Exception ex)
+            catch(Exception ex)
             {
-                Console.WriteLine($"Error importing PDF: {ex.Message}");
-                // In production might want to throw or log
+                result.Warnings.Add($"Critical error during import: {ex.Message}");
             }
-            return objects;
+            
+            result.Objects = objects;
+            return result;
         }
 
-        private static byte[] GetPageContent(PdfReader reader, PdfDictionary page)
+        private static byte[] GetPageContent(PdfReader reader, PdfDictionary page, List<string> warnings)
         {
-            var contents = reader.Resolve(page.Get("Contents"));
+            var contentsRef = page.Get("Contents");
+            if (contentsRef == null)
+            {
+                 // Empty page is valid but worth noting if debugging
+                 // warnings.Add("Page has no Contents.");
+                 return new byte[0];
+            }
+
+            var contents = reader.Resolve(contentsRef);
             
             if (contents is PdfStream stream)
             {
@@ -78,9 +99,15 @@ namespace laser_gui_test.Data.Pdf
                         // Add whitespace separator safe measure
                         combined.Add((byte)' '); 
                     }
+                    else
+                    {
+                        warnings.Add($"Page Content array item was not a stream: {part?.GetType().Name}");
+                    }
                 }
                 return combined.ToArray();
             }
+            
+            warnings.Add($"Page Contents was neither Stream nor Array: {contents?.GetType().Name}");
             return new byte[0];
         }
     }
