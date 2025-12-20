@@ -222,6 +222,20 @@ public partial class MainForm : Form
             }
         };
 
+        Action unmaskAction = () =>
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            var images = sel.OfType<LaserImage>().Where(i => i.MaskId != Guid.Empty).ToList();
+            if (images.Count > 0)
+            {
+                foreach (var img in images)
+                {
+                    img.MaskId = Guid.Empty;
+                }
+                _workbench.Invalidate();
+            }
+        };
+
         
         fileMenu.DropDownItems.Add("New", null, (s, e) => 
         {
@@ -266,6 +280,7 @@ public partial class MainForm : Form
         toolMenu.DropDownItems.Add("Edit text", null, (s, e) => EditText());
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         toolMenu.DropDownItems.Add("Mask Image with Shape", null, (s, e) => applyMask());
+        toolMenu.DropDownItems.Add("Unmask Image", null, (s, e) => unmaskAction());
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         toolMenu.DropDownItems.Add("Camera Settings", null, (s, e) => 
         {
@@ -410,6 +425,7 @@ public partial class MainForm : Form
         var ctxMenu = new ContextMenuStrip();
         var itemEditText = new ToolStripMenuItem("Edit text");
         var itemMask = new ToolStripMenuItem("Mask Image with Shape");
+        var itemUnmask = new ToolStripMenuItem("Unmask Image");
         var itemGroup = new ToolStripMenuItem("Group");
         var itemUngroup = new ToolStripMenuItem("Ungroup");
         var itemAttach = new ToolStripMenuItem("Attach to Path");
@@ -417,6 +433,7 @@ public partial class MainForm : Form
 
         itemEditText.Click += (s, e) => EditText();
         itemMask.Click += (s, e) => applyMask();
+        itemUnmask.Click += (s, e) => unmaskAction();
         itemGroup.Click += (s, e) => 
         {
             var sel = ProjectState.Instance.SelectedObjects;
@@ -453,23 +470,26 @@ public partial class MainForm : Form
              _workbench.Invalidate();
         };
 
-        ctxMenu.Items.AddRange(new ToolStripItem[] { itemEditText, new ToolStripSeparator(), itemMask, new ToolStripSeparator(), itemGroup, itemUngroup, new ToolStripSeparator(), itemAttach, itemDetach });
+        ctxMenu.Items.AddRange(new ToolStripItem[] { itemEditText, new ToolStripSeparator(), itemMask, itemUnmask, new ToolStripSeparator(), itemGroup, itemUngroup, new ToolStripSeparator(), itemAttach, itemDetach });
 
         ctxMenu.Opening += (s, e) => 
         {
-            var sel = _objectList.SelectedRows;
-            itemEditText.Enabled = ProjectState.Instance.SelectedObjects.Any(o => o is LaserText);
+            var selRows = _objectList.SelectedRows;
+            var selObjects = ProjectState.Instance.SelectedObjects;
+            
+            itemEditText.Enabled = selObjects.Any(o => o is LaserText);
             itemMask.Enabled = false;
-            if (sel.Count == 2)
+            itemUnmask.Enabled = selObjects.OfType<LaserImage>().Any(i => i.MaskId != Guid.Empty);
+
+            if (selRows.Count == 2)
             {
-                var obj1 = ProjectState.Instance.Objects[sel[0].Index];
-                var obj2 = ProjectState.Instance.Objects[sel[1].Index];
+                var obj1 = ProjectState.Instance.Objects[selRows[0].Index];
+                var obj2 = ProjectState.Instance.Objects[selRows[1].Index];
                 bool hasImage = obj1 is LaserImage || obj2 is LaserImage;
                 bool hasShape = obj1 is LaserCircle || obj1 is LaserRectangle || obj2 is LaserCircle || obj2 is LaserRectangle;
                 if (hasImage && hasShape) itemMask.Enabled = true;
             }
         };
-        ctxMenu.Items.Add(itemMask);
         _objectList.ContextMenuStrip = ctxMenu;
         
         // Wire Drag/Drop Events
