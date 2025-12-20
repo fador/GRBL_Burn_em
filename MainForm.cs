@@ -276,6 +276,11 @@ public partial class MainForm : Form
         });
         menuStrip.Items.Add(fileMenu);
 
+        // Layers Menu [NEW]
+        var layersMenu = new ToolStripMenuItem("Layers");
+        layersMenu.DropDownItems.Add("Scale Output...", null, (s, e) => ShowScaleLayerDialog());
+        menuStrip.Items.Add(layersMenu);
+
         var toolMenu = new ToolStripMenuItem("Tool");
         toolMenu.DropDownItems.Add("Edit text", null, (s, e) => EditText());
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -2045,6 +2050,35 @@ public partial class MainForm : Form
         catch (Exception ex)
         {
             MessageBox.Show($"Preview generation failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void ShowScaleLayerDialog()
+    {
+        var layer = ProjectState.Instance.ActiveLayer;
+        if (layer == null)
+        {
+            MessageBox.Show("Please select a layer first.", "No Layer Selected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dlg = new ScaleLayerForm(layer);
+        if (dlg.ShowDialog() == DialogResult.OK)
+        {
+            if (dlg.ScaleByPower)
+            {
+                layer.ScaleToPower(dlg.ResultValue);
+            }
+            else
+            {
+                layer.ScaleToSpeed(dlg.ResultValue);
+            }
+            
+            // Refresh UI
+            InitializeLayers(); 
+            _layerList.Refresh();
+            _workbench.Invalidate();
+            UpdateSelectedObjects();
         }
     }
 }
