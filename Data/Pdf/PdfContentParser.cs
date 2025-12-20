@@ -30,6 +30,7 @@ namespace laser_gui_test.Data.Pdf
             public float TextHScale { get; set; } = 100;
             public PdfName? FontName { get; set; }
             public float FontSize { get; set; } = 12;
+            public int RenderMode { get; set; } = 0; // 0=Fill, 1=Stroke, 2=Fill+Stroke, 3=Invisible, etc.
             
             public GraphicsState Clone()
             {
@@ -45,7 +46,8 @@ namespace laser_gui_test.Data.Pdf
                     TextWordSpacing = TextWordSpacing,
                     TextHScale = TextHScale,
                     FontName = FontName,
-                    FontSize = FontSize
+                    FontSize = FontSize,
+                    RenderMode = RenderMode
                 };
                 return clone;
             }
@@ -251,8 +253,14 @@ namespace laser_gui_test.Data.Pdf
                     {
                         float tx = (float)GetNum(operands[0]);
                         float ty = (float)GetNum(operands[1]);
-                        _textLineMatrix.Translate(tx, ty, MatrixOrder.Prepend);
+                        _textLineMatrix.Translate(tx, ty);
                         _textMatrix = _textLineMatrix.Clone();
+                    }
+                    break;
+                case "Tr": // Text Rendering Mode
+                    if (operands.Count == 1)
+                    {
+                        _state.RenderMode = (int)GetNum(operands[0]);
                     }
                     break;
                 case "Tm": // Set Text Matrix
@@ -406,37 +414,68 @@ namespace laser_gui_test.Data.Pdf
             PointF[] pts = new PointF[] { new PointF(0, 0) };
             _textMatrix.TransformPoints(pts);
             _state.CTM.TransformPoints(pts);
-            
-            // Extract Font Info from Resources if possible
+
+            // Font Information
             string fontName = "Arial";
-            if (_state.FontName != null)
+            bool isWinAnsi = false;
+            
+            if (_state.FontName != null && _resources != null)
             {
-                // Resolve font resource
-                 if (_resources != null)
+                 var fonts = _reader.Resolve(_resources.Get("Font")) as PdfDictionary;
+                 if (fonts != null)
+                 {
+                     var fontDict = _reader.Resolve(fonts.Get(_state.FontName.Name)) as PdfDictionary;
+                     if (fontDict != null)
+                     {
+                         // Check Encoding
+                         var encoding = _reader.Resolve(fontDict.Get("Encoding"));
+                         if (encoding is PdfName encName && encName.Name == "WinAnsiEncoding")
+                         {
+                             isWinAnsi = true;
+                         }
+
+                         var baseFont = _reader.Resolve(fontDict.Get("BaseFont")) as PdfName;
+                         if (baseFont != null)
+                         {
+                             fontName = baseFont.Name;
+                             if (fontName.Contains("+")) fontName = fontName.Substring(fontName.IndexOf('+') + 1);
+                             if (fontName.Contains(",")) fontName = fontName.Split(',')[0];
+                             if (fontName.Contains("-")) fontName = fontName.Split('-')[0];
+                         }
+                     }
+                 }
+            }
+
+            // Decode Text if needed
+            if (isWinAnsi)
+            {
+                // So checking chars for values > 127 and re-mapping might work, or using the specific encoding.
+                
+                // Quick hack: Re-encode to bytes then to 1252
+                byte[] raw = new byte[text.Length];
+                for(int i=0;i<text.Length;i++) raw[i] = (byte)text[i];
+                
+                try 
                 {
-                    var fonts = _reader.Resolve(_resources.Get("Font")) as PdfDictionary;
-                    if (fonts != null)
-                    {
-                        var fontDict = _reader.Resolve(fonts.Get(_state.FontName.Name)) as PdfDictionary;
-                        if (fontDict != null)
-                        {
-                            var baseFont = _reader.Resolve(fontDict.Get("BaseFont")) as PdfName;
-                            if (baseFont != null)
-                            {
-                                fontName = baseFont.Name;
-                                // Handle Subsets names like "ABCDE+Arial-Bold"
-                                if (fontName.Contains("+"))
-                                {
-                                    fontName = fontName.Substring(fontName.IndexOf('+') + 1);
-                                }
-                                // Handle "Arial,Bold" or "Arial-Bold" -> "Arial" (Simplification for GDI+)
-                                if (fontName.Contains(",")) fontName = fontName.Split(',')[0];
-                                if (fontName.Contains("-")) fontName = fontName.Split('-')[0];
-                            }
-                        }
-                    }
+                    // Register provider if needed? .NET Core usually needs it.
+                    // System.Text.Encoding.CodePages is typically needed. 
+                    // Fallback: Manual mapping for common chars or blindly trusting internal conversion?
+                    // Let's assume generic "Western" chars for now using ISO-8859-1 which is close to WinAnsi
+                    text = Encoding.GetEncoding("iso-8859-1").GetString(raw);
+                }
+                catch
+                {
+                    // Fallback if encoding not available
+                    // Text might be legible enough
                 }
             }
+            // User Issue: "two numbers" for UTF-8 chars?
+            // If the PDF uses a Identity-H / UTF-8 but we treat as bytes?
+            // If text contains sequences like \xc3\xa4 (ä), and we see it as "Ã¤", that's UTF-8 interpreted as Latin1.
+            // If user sees "two numbers" maybe they mean the font name or something else?
+            // But if text is invisible, we skip it anyway.
+            
+            if (_state.RenderMode == 3) return; // Invisible Text
             
             // Font Size scaling
             // Text Matrix scale * CTM scale * FontSize
