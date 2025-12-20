@@ -49,8 +49,20 @@ namespace laser_gui_test.Data.Pdf
                         // Get Resources
                         var resources = reader.Resolve(page.Get("Resources")) as PdfDictionary ?? new PdfDictionary();
 
+                        // Get MediaBox (Default Clip)
+                        var mediaBoxArr = reader.Resolve(page.Get("MediaBox")) as PdfArray;
+                        RectangleF mediaBox = RectangleF.Empty; 
+                        if (mediaBoxArr != null && mediaBoxArr.Items.Count >= 4)
+                        {
+                            float mx = (float)((mediaBoxArr.Items[0] as PdfNumber)?.RealValue ?? 0);
+                            float my = (float)((mediaBoxArr.Items[1] as PdfNumber)?.RealValue ?? 0);
+                            float mw = (float)((mediaBoxArr.Items[2] as PdfNumber)?.RealValue ?? 0) - mx;
+                            float mh = (float)((mediaBoxArr.Items[3] as PdfNumber)?.RealValue ?? 0) - my;
+                            mediaBox = new RectangleF(mx, my, mw, mh);
+                        }
+
                         // Parse Content
-                        var parser = new PdfContentParser(reader, resources);
+                        var parser = new PdfContentParser(reader, resources, mediaBox);
                         var pageObjects = parser.Parse(contentData);
                         
                         // Collect parser warnings

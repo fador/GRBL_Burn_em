@@ -33,6 +33,7 @@ namespace laser_gui_test.Data.Pdf
             public int RenderMode { get; set; } = 0; 
             public float FillAlpha { get; set; } = 1.0f;
             public float StrokeAlpha { get; set; } = 1.0f;
+            public RectangleF? ClipBounds { get; set; } = null; // Null means infinite? Or use MediaBox as baseline.
             
             public GraphicsState Clone()
             {
@@ -51,7 +52,8 @@ namespace laser_gui_test.Data.Pdf
                     FontSize = FontSize,
                     RenderMode = RenderMode,
                     FillAlpha = FillAlpha,
-                    StrokeAlpha = StrokeAlpha
+                    StrokeAlpha = StrokeAlpha,
+                    ClipBounds = ClipBounds
                 };
                 return clone;
             }
@@ -67,12 +69,15 @@ namespace laser_gui_test.Data.Pdf
         // Text Object State (Transient between BT...ET)
         private Matrix _textMatrix;
         private Matrix _textLineMatrix;
+        private bool _isClipping = false; // Flag if next painting op should update clip
         
-        public PdfContentParser(PdfReader reader, PdfDictionary resources)
+        public PdfContentParser(PdfReader reader, PdfDictionary resources, RectangleF mediaBox)
         {
             _reader = reader;
             _resources = resources;
             _state = new GraphicsState();
+            if (mediaBox.Width > 0 && mediaBox.Height > 0) _state.ClipBounds = mediaBox;
+            
             _ctm = new Matrix(); // Identity
             _currentPath = new GraphicsPath();
             _textMatrix = new Matrix();
@@ -229,10 +234,19 @@ namespace laser_gui_test.Data.Pdf
                 case "b": // Close, Fill, Stroke
                 case "b*":
                     if (op == "b" || op == "b*") _currentPath.CloseFigure();
-                    AddPathObject(objects, true); // Treat all fills as filled paths
+                    if (_isClipping) { UpdateClipBounds(); }
+                    else { AddPathObject(objects, true); } // Treat all fills as filled paths
                     _currentPath.Reset();
                     break;
+                case "W": // Set Clipping Path (Non-zero winding)
+                    _isClipping = true;
+                    break;
+                case "W*": // Set Clipping Path (Even-Odd)
+                    _isClipping = true;
+                    break;
+                    
                 case "n": // End path no op
+                    if (_isClipping) { UpdateClipBounds(); }
                     _currentPath.Reset();
                     break;
 
@@ -370,8 +384,17 @@ namespace laser_gui_test.Data.Pdf
             if (filled && IsWhite(_state.FillColor)) return;
             // If Stroked (not filled): Check StrokeColor
             if (!filled && IsWhite(_state.StrokeColor)) return;
+            
             using var transformedPath = (GraphicsPath)_currentPath.Clone();
             transformedPath.Transform(_state.CTM);
+
+            // Check Clipping
+            if (_state.ClipBounds != null)
+            {
+                RectangleF bounds = transformedPath.GetBounds();
+                if (!_state.ClipBounds.Value.IntersectsWith(bounds)) return; // Completely outside
+            }
+
             // Flatten to convert curves to lines for simple LaserPath processing
             transformedPath.Flatten();
             
@@ -523,6 +546,21 @@ namespace laser_gui_test.Data.Pdf
             if (isStroked && !isFilled && IsWhite(_state.StrokeColor)) return;
             
             // Font Size scaling
+            
+            // Check Scale/Visibility (Bounds)
+            if (_state.ClipBounds != null)
+            {
+                 // Calculate estimated bounds of text
+                 // Position is pts[0]. Size is effectiveFontSize (approx height). Width approx len * size/2?
+                 // Simple Point Check first: Is the Anchor Point inside the Clip?
+                 if (!_state.ClipBounds.Value.Contains(pts[0]))
+                 {
+                      // Strict check might be too aggressive if point is on edge?
+                      // But effectively invisible text usually is WAY outside.
+                      // Let's assume if anchor is outside, it's clipped.
+                      return; 
+                 }
+            }
             
             // Font Size scaling
             // Text Matrix scale * CTM scale * FontSize
@@ -848,20 +886,33 @@ namespace laser_gui_test.Data.Pdf
             }
         }
 
+        private void UpdateClipBounds()
+        {
+             if (_currentPath.PointCount == 0) return;
+             
+             // Transform path to device space (user space) calculate bounds, intersect with current clip
+             using var tempPath = (GraphicsPath)_currentPath.Clone();
+             tempPath.Transform(_state.CTM);
+             RectangleF pathBounds = tempPath.GetBounds();
+             
+             if (_state.ClipBounds == null)
+             {
+                 _state.ClipBounds = pathBounds;
+             }
+             else
+             {
+                 _state.ClipBounds = RectangleF.Intersect(_state.ClipBounds.Value, pathBounds);
+             }
+             _isClipping = false;
+        }
+
         private bool IsIgnoredStateOperator(string op)
         {
             // Common state operators that don't affect shape geometry directly for MVP
-            // w = line width (we track it but ignoring it here is fine as we don't warn)
-            // J, j = line cap/join
-            // M = miter limit
-            // d = dash pattern
-            // ri = rendering intent
-            // i = flatness
-            // gs = graphics state dictionary (ext state)
-            // cs, CS = color space
-            // W, W* = Clipping paths (Ignored for MVP visibility)
+            // w, J, j, M, d, ri, i, gs, cs, CS, BDC...
+            // REMOVED W, W* from ignore list
             return op == "w" || op == "J" || op == "j" || op == "M" || op == "d" || op == "ri" || op == "i" || op == "gs" || op == "cs" || op == "CS"
-                   || op == "BDC" || op == "EMC" || op == "BMC" || op == "DP" || op == "MP" || op == "W" || op == "W*";
+                   || op == "BDC" || op == "EMC" || op == "BMC" || op == "DP" || op == "MP";
         }
         
         private double GetNum(PdfObject obj)
