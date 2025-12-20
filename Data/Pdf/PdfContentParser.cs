@@ -331,22 +331,71 @@ namespace laser_gui_test.Data.Pdf
         {
             if (_currentPath.PointCount == 0) return;
             
-            // Create LaserPath
-            // Flatten path
-            // Transform path by CTM
+            // Transform path by CTM first
             using var transformedPath = (GraphicsPath)_currentPath.Clone();
             transformedPath.Transform(_state.CTM);
+            // Flatten to convert curves to lines for simple LaserPath processing
             transformedPath.Flatten();
             
             if (transformedPath.PointCount < 2) return;
             
-            var lp = new LaserPath();
-            lp.Points = transformedPath.PathPoints.ToList(); // Converts PointF[] to List<PointF>
-            lp.UpdateBounds();
-            // TODO: Color, Power, Speed mappings from GraphicsState?
-            // For now default.
+            // Extract subpaths (handling movements and closures)
+            var points = transformedPath.PathPoints;
+            var types = transformedPath.PathTypes;
             
-            objects.Add(lp);
+            List<PointF> currentSubpath = new List<PointF>();
+            
+            for (int i = 0; i < points.Length; i++)
+            {
+                byte type = types[i];
+                bool isStart = (type & 0x07) == 0; // PathPointType.Start = 0
+                bool isClose = (type & 0x80) != 0; // PathPointType.CloseSubpath = 0x80
+                
+                if (isStart)
+                {
+                    // If we have a previous subpath, finish it
+                    if (currentSubpath.Count > 1)
+                    {
+                        var lp = new LaserPath();
+                        lp.Points = new List<PointF>(currentSubpath);
+                        lp.UpdateBounds();
+                        objects.Add(lp);
+                    }
+                    currentSubpath.Clear();
+                }
+                
+                currentSubpath.Add(points[i]);
+                
+                if (isClose)
+                {
+                    // Close the subpath: Add line to start if strictly needed
+                    // GraphicsPath usually implies the line, but LaserPath needs points.
+                    if (currentSubpath.Count > 0)
+                    {
+                         var start = currentSubpath[0];
+                         var end = currentSubpath[currentSubpath.Count - 1];
+                         if (start != end) // Float comparison?
+                         {
+                             // Explicitly close
+                             currentSubpath.Add(start);
+                         }
+                    }
+                    
+                    // Finish this closed subpath immediately? 
+                    // Usually Close ends the subpath, next point should be Start (or Move).
+                    // But Flatten might produce [Start, Line, Line|Close].
+                    // Next point (if any) will be Start.
+                }
+            }
+            
+            // Add final subpath
+            if (currentSubpath.Count > 1)
+            {
+                var lp = new LaserPath();
+                lp.Points = new List<PointF>(currentSubpath);
+                lp.UpdateBounds();
+                objects.Add(lp);
+            }
         }
 
         private void AddTextObject(string text, List<LaserObject> objects)
@@ -406,7 +455,14 @@ namespace laser_gui_test.Data.Pdf
             // LaserText has Position, Rotation.
             // Extract Rotation from CTM * Tm?
             
-            objects.Add(lt);
+            if (lt.FontSize > 0.1f)
+            {
+                 objects.Add(lt);
+            }
+            else
+            {
+                 Warnings.Add($"Skipped zero-size text '{text}'");
+            }
         }
 
         private void ProcessXObject(PdfName name, List<LaserObject> objects)
@@ -428,53 +484,216 @@ namespace laser_gui_test.Data.Pdf
                  if (subtype != null && subtype.Name == "Image")
                  {
                      // It is an image
-                     // Get Width, Height from dictionary
-                     // ColorSpace?
-                     // BitsPerComponent?
+                     int width = 0;
+                     int height = 0;
+                     var wObj = _reader.Resolve(stream.Dictionary.Get("Width")) as PdfNumber;
+                     var hObj = _reader.Resolve(stream.Dictionary.Get("Height")) as PdfNumber;
                      
-                     // Decode bytes?
-                     // We already decoded filter in GetObject if implemented.
+                     if (wObj != null) width = (int)wObj.IntValue;
+                     if (hObj != null) height = (int)hObj.IntValue;
                      
-                     // Create Bitmap?
-                     // Simple formats: DeviceRGB, DeviceGray.
-                     // 8 bpc.
-                     // If complex, skip.
-                     
-                     try 
+                     if (width > 0 && height > 0)
                      {
-                         // Basic RGB 8bit or Gray 8bit support
-                         long w = ((PdfNumber)_reader.Resolve(stream.Dictionary.Get("Width"))!).IntValue;
-                         long h = ((PdfNumber)_reader.Resolve(stream.Dictionary.Get("Height"))!).IntValue;
-                         
-                         // Create LaserImage
-                         var lImg = new LaserImage();
-                         
-                         // Map 1x1 rect at (0,0) to CTM
-                         // Image XObject draws in unit square 0..1, 0..1
-                         PointF[] pts = new PointF[] { new PointF(0, 0), new PointF(1, 1) };
-                         _state.CTM.TransformPoints(pts);
-                         
-                         float x = Math.Min(pts[0].X, pts[1].X);
-                         float y = Math.Min(pts[0].Y, pts[1].Y);
-                         float width = Math.Abs(pts[1].X - pts[0].X);
-                         float height = Math.Abs(pts[1].Y - pts[0].Y);
-                         
-                         lImg.Position = new PointF(x, y);
-                         lImg.Size = new SizeF(width, height);
-                         
-                         // Populate Image...
-                         // Need conversion from raw bytes to Bitmap
-                         // Skipping actual bitmap creation for MVP if complex, or putting placeholder?
-                         // "Without external libraries" -> Use Sys.Draw.Bitmap
-                         // Can create Bitmap from pixel data.
-                         
-                         // Simplified:
-                         lImg.Name = name.Name;
-                         // Add logic to CreateBitmap(stream.Data, w, h, space)
-                         
-                         objects.Add(lImg);
+                          Warnings.Add($"Found Image {width}x{height}. Filter: {_reader.Resolve(stream.Dictionary.Get("Filter"))}");
+                          
+                          // Calculate Bounds in User Space
+                          PointF[] corners = new PointF[] { new PointF(0, 0), new PointF(1, 0), new PointF(1, 1), new PointF(0, 1) };
+                          _state.CTM.TransformPoints(corners);
+                          
+                          float minX = corners.Min(p => p.X);
+                          float minY = corners.Min(p => p.Y);
+                          float maxX = corners.Max(p => p.X);
+                          float maxY = corners.Max(p => p.Y);
+                          
+                          var li = new LaserImage();
+                          li.Position = new PointF(minX, minY);
+                          li.Size = new SizeF(maxX - minX, maxY - minY);
+                          li.Rotation = 0;
+                          
+                          // TODO: Load Actual Data
+                         if (stream.Data != null && stream.Data.Length > 0)
+                          {
+                               // Try to decode basic formats:
+                               var colorSpace = _reader.Resolve(stream.Dictionary.Get("ColorSpace"));
+                               var bitsPerComponent = _reader.Resolve(stream.Dictionary.Get("BitsPerComponent")) as PdfNumber;
+                               int bpc = (int)(bitsPerComponent?.IntValue ?? 8);
+                               
+                               string csName = "DeviceRGB";
+                               if (colorSpace is PdfName n) csName = n.Name;
+                               // Note: ColorSpace can be an array [ /Indexed /DeviceRGB ... ] - simplistic check for now
+                               
+                               if ((csName == "DeviceRGB" || csName == "DeviceGray") && bpc == 8)
+                               {
+                                   try 
+                                   {
+                                        var bmp = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                                        var bmpData = bmp.LockBits(new Rectangle(0, 0, width, height), System.Drawing.Imaging.ImageLockMode.WriteOnly, bmp.PixelFormat);
+                                        
+                                        // Copy data
+                                        // PDF RGB is R G B. 24bppRgb in GDI+ is usually B G R... need to swap?
+                                        // Let's copy row by row.
+                                        
+                                        byte[] pixelData = stream.Data;
+                                        int stride = bmpData.Stride;
+                                        IntPtr ptr = bmpData.Scan0;
+                                        int bytesPerPixel = csName == "DeviceRGB" ? 3 : 1; // Basic assumption
+                                        
+                                        // Safety check
+                                        if (pixelData.Length >= width * height * bytesPerPixel)
+                                        {
+                                           unsafe 
+                                           {
+                                                byte* pPtr = (byte*)ptr;
+                                                for(int y=0; y<height; y++)
+                                                {
+                                                    for(int x=0; x<width; x++)
+                                                    {
+                                                        int srcIdx = (y * width + x) * bytesPerPixel;
+                                                        int dstIdx = y * stride + x * 3;
+                                                        
+                                                        byte r = pixelData[srcIdx];
+                                                        byte g = bytesPerPixel == 3 ? pixelData[srcIdx+1] : r;
+                                                        byte b = bytesPerPixel == 3 ? pixelData[srcIdx+2] : r;
+                                                        
+                                                        // GDI+ 24bpp is BGR
+                                                        pPtr[dstIdx] = b;
+                                                        pPtr[dstIdx+1] = g;
+                                                        pPtr[dstIdx+2] = r;
+                                                    }
+                                                }
+                                           }
+                                           bmp.UnlockBits(bmpData); // Unlock RGB data before flip/mask
+                                           
+                                           // Re-apply RotateFlip as user confirmed it's needed (PDF vs GDI+ coordinates)
+                                           // lb.Bitmap assignment removed
+                                           // bmp.RotateFlip(RotateFlipType.RotateNoneFlipY); // Removed prior flip too 
+                                           
+                                           // Check for SMask (Soft Mask) for transparency
+                                           var smaskObj = _reader.Resolve(stream.Dictionary.Get("SMask"));
+                                           var maskObj = _reader.Resolve(stream.Dictionary.Get("Mask"));
+                                           
+                                           PdfStream? maskStream = smaskObj as PdfStream;
+                                           if (maskStream == null && maskObj is PdfStream ms) maskStream = ms;
+                                           
+                                           if (maskStream != null)
+                                           {
+                                                System.Drawing.Imaging.BitmapData? mainData = null;
+                                                System.Drawing.Imaging.BitmapData? resData = null;
+                                                Bitmap? builder = null;
+                                                
+                                                try 
+                                                {
+                                                    // Need to flip mask too if we flipped the main image!
+                                                    // Or better: Apply mask FIRST, then Flip result?
+                                                    // Flipping is lossy/slow? No, just data move.
+                                                    // Let's Flip at the END.
+                                                    // Undo the flip for now to apply mask? 
+                                                    // Actually, if we flip 'bmp', we must flip 'mask' data row access or just assume mask is also upside down?
+                                                    // Usually Mask is in same coord system as Image.
+                                                    // So if we Flip bmp, we must Flip mask logic or access mask inverted.
+                                                    // Easier: Apply Mask FIRST, Then Flip FINAL result.
+                                                    
+                                                    // Revert previous flip for a moment (or just don't do it yet)
+                                                    // bmp.RotateFlip(RotateFlipType.RotateNoneFlipY); // Removed (No need to revert if we didn't flip)
+                                                    
+                                                    // Decode SMask (Usually DeviceGray 8bpc)
+                                                    var mwObj = _reader.Resolve(maskStream.Dictionary.Get("Width")) as PdfNumber;
+                                                    var mhObj = _reader.Resolve(maskStream.Dictionary.Get("Height")) as PdfNumber;
+                                                    int mw = (int)(mwObj?.IntValue ?? width);
+                                                    int mh = (int)(mhObj?.IntValue ?? height);
+                                                    
+                                                    if (mw == width && mh == height && maskStream.Data != null)
+                                                    {
+                                                         // Unlock bmp if it was locked? In this scope, it is NOT locked.
+                                                         // The previous rgb-decoding block has finished and we are outside it.
+                                                    
+                                                         // Apply Alpha Channel
+                                                         builder = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                                                         mainData = bmp.LockBits(new Rectangle(0, 0, width, height), System.Drawing.Imaging.ImageLockMode.ReadOnly, bmp.PixelFormat);
+                                                         var maskData = maskStream.Data;
+                                                         resData = builder.LockBits(new Rectangle(0, 0, width, height), System.Drawing.Imaging.ImageLockMode.WriteOnly, builder.PixelFormat);
+                                                         
+                                                         unsafe 
+                                                         {
+                                                             byte* srcPtr = (byte*)mainData.Scan0;
+                                                             byte* dstPtr = (byte*)resData.Scan0;
+                                                             int srcStride = mainData.Stride;
+                                                             int dstStride = resData.Stride;
+                                                             
+                                                             for(int y=0; y<height; y++)
+                                                             {
+                                                                 for(int x=0; x<width; x++)
+                                                                 {
+                                                                     byte b = srcPtr[y * srcStride + x * 3];
+                                                                     byte g = srcPtr[y * srcStride + x * 3 + 1];
+                                                                     byte r = srcPtr[y * srcStride + x * 3 + 2];
+                                                                     
+                                                                     int alpha = 255;
+                                                                     if (maskData.Length >= width*height) alpha = maskData[y * width + x];
+                                                                     
+                                                                     dstPtr[y * dstStride + x * 4] = b;
+                                                                     dstPtr[y * dstStride + x * 4 + 1] = g;
+                                                                     dstPtr[y * dstStride + x * 4 + 2] = r;
+                                                                     dstPtr[y * dstStride + x * 4 + 3] = (byte)alpha;
+                                                                 }
+                                                             }
+                                                         }
+                                                         
+                                                         Warnings.Add("Applied Transparency Mask (SMask).");
+                                                    }
+                                                }
+                                                catch (Exception ex)
+                                                {
+                                                    Warnings.Add($"Failed to apply SMask: {ex.Message}");
+                                                    builder?.Dispose(); // Fail safe
+                                                    builder = null;
+                                                }
+                                                finally
+                                                {
+                                                    if (mainData != null) bmp.UnlockBits(mainData);
+                                                    if (resData != null && builder != null) builder.UnlockBits(resData);
+                                                }
+                                                
+                                                if (builder != null)
+                                                {
+                                                    bmp.Dispose();
+                                                    bmp = builder;
+                                                }
+                                           }
+                                           
+                                           // Coordinate System Flip:
+                                           // LaserImage.Draw applies a Scale(1, -1) which flips the Y-axis.
+                                           // Therefore, we do NOT need to flip the bitmap here. Standard Top-Down bitmap matches.
+                                           // bmp.RotateFlip(RotateFlipType.RotateNoneFlipY); // Removed
+                                           
+                                           li.Image = bmp; // Assign the processed bitmap to the LaserImage object
+                                           
+                                           Warnings.Add($"Image decoded successfully ({csName}).");
+                                        }
+                                        else
+                                        {
+                                            bmp.UnlockBits(bmpData);
+                                            bmp.Dispose();
+                                            Warnings.Add($"Image data length mismatch. Expected {width*height*bytesPerPixel}, got {pixelData.Length}.");
+                                        }
+                                   }
+                                   catch(Exception ex)
+                                   {
+                                       Warnings.Add($"Failed to decode bitmap: {ex.Message}");
+                                   }
+                               }
+                               else
+                               {
+                                   Warnings.Add($"Image Data Present but format not supported for decoding: {csName} {bpc}bpc.");
+                               }
+                          }
+                          
+                          objects.Add(li); // Add here to support placeholders if decoding failed/skipped
                      }
-                     catch {}
+                     else
+                     {
+                         Warnings.Add($"Image XObject found but invalid Size: {width}x{height}");
+                     }
                  }
                  else if (subtype != null && subtype.Name == "Form")
                  {
@@ -515,8 +734,9 @@ namespace laser_gui_test.Data.Pdf
             // i = flatness
             // gs = graphics state dictionary (ext state)
             // cs, CS = color space
+            // W, W* = Clipping paths (Ignored for MVP visibility)
             return op == "w" || op == "J" || op == "j" || op == "M" || op == "d" || op == "ri" || op == "i" || op == "gs" || op == "cs" || op == "CS"
-                   || op == "BDC" || op == "EMC" || op == "BMC" || op == "DP" || op == "MP";
+                   || op == "BDC" || op == "EMC" || op == "BMC" || op == "DP" || op == "MP" || op == "W" || op == "W*";
         }
         
         private double GetNum(PdfObject obj)

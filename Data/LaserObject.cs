@@ -360,10 +360,12 @@ public class LaserRectangle : LaserObject
     }
 }
 
-public class LaserImage : LaserObject
+public class LaserImage : LaserObject, IDisposable
 {
     // We shouldn't serialize Bitmap directly usually, but for GUI it's needed
     // In a real app we'd store the path or byte array
+    
+    [JsonIgnore]
     public Bitmap? Image { get; set; }
     public string ImagePath { get; set; } = "";
     public Guid MaskId { get; set; } = Guid.Empty;
@@ -372,6 +374,11 @@ public class LaserImage : LaserObject
     {
         Type = LaserObjectType.Image;
         Name = "Image";
+    }
+
+    public void Dispose()
+    {
+        Image?.Dispose();
     }
 
     public override RectangleF GetBounds()
@@ -407,9 +414,6 @@ public class LaserImage : LaserObject
                     {
                         g.SetClip(clipPath); 
                         // Note: clipPath needs disposal?
-                        // Yes. But we can't dispose it immediately if SetClip uses it?
-                        // SetClip clones it? documentation says "Sets the clipping region... to the property of the specified GraphicsPath".
-                        // Usually SetClip copies.
                     }
                 }
             }
@@ -943,3 +947,5 @@ public class LaserBezier : LaserObject
         };
     }
 }
+
+
