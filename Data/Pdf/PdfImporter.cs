@@ -99,11 +99,19 @@ namespace laser_gui_test.Data.Pdf
                     }
                 }
                 // Text font size?
-                 if (obj is LaserText lt)
+                if (obj is LaserText lt)
                 {
                     lt.FontSize *= scale;
+                    // Ensure Size matches scaled FontSize
+                    obj.Size = new SizeF(obj.Size.Width * scale, lt.FontSize); 
                 }
             }
+            
+            // Final Safety Filter: Remove objects that are effectively zero-dimensional
+            // User reported "text box width and height are 0" for invisible text.
+            // Be careful not to remove lines (W>0, H=0) or Vertical lines (W=0, H>0).
+            // Filter only if BOTH are roughly zero.
+            objects.RemoveAll(o => Math.Abs(o.Size.Width) < 0.001f && Math.Abs(o.Size.Height) < 0.001f);
             
             result.Objects = objects;
             return result;

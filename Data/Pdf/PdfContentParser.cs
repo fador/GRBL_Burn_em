@@ -630,10 +630,21 @@ namespace laser_gui_test.Data.Pdf
             
             var lt = new LaserText();
             lt.Text = text;
-            lt.Position = pts[0];
+            lt.Position = pts[0]; // Use pts[0] as the anchor point
             lt.FontSize = effectiveFontSize; 
             lt.FontName = fontName;
-            
+            // Estimate Width for Filter safety (Length * Size * 0.5 approx aspect)
+            // This is just to ensure it's not detected as "Zero Size" invisible object.
+            float estWidth = text.Length * effectiveFontSize * 0.5f;
+            lt.Size = new SizeF(estWidth, effectiveFontSize);
+            // lt.Color = _state.FillColor; // Not supported on base object yet
+            // Calculate rotation from CTM (assuming text is aligned with CTM's X-axis)
+            // Rotation = atan2(m12, m11) of the combined text matrix
+            // For simplicity, we can use the CTM's rotation if text matrix doesn't add rotation.
+            // Here, we'll use the CTM's rotation.
+            float rotation = (float)Math.Atan2(_state.CTM.Elements[1], _state.CTM.Elements[0]) * (180f / (float)Math.PI);
+            lt.Rotation = rotation;
+
             // Filter out empty or whitespace-only text
             if (string.IsNullOrWhiteSpace(lt.Text)) return;
 
