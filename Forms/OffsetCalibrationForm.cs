@@ -199,8 +199,10 @@ namespace laser_gui_test.Forms
                 var currentMachinePos = SerialInterface.Instance.MachinePosition; // Should be Start + 5, 5
                 
                 // Re-capture P3 (already have it)
-                float cx = _pbCam.Image.Width / 2f;
-                float cy = _pbCam.Image.Height / 2f;
+                var img = _pbCam.Image;
+                if (img == null) throw new Exception("Camera image is missing.");
+                float cx = img.Width / 2f;
+                float cy = img.Height / 2f;
                 
                 float du = cx - p3.Value.X; // We want spot to be at cx
                 float dv = cy - p3.Value.Y;

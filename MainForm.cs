@@ -2062,16 +2062,17 @@ public partial class MainForm : Form
             return;
         }
 
-        using var dlg = new ScaleLayerForm(layer);
+        using var dlg = new ScaleLayerForm(ProjectState.Instance.Layers.ToList(), layer);
         if (dlg.ShowDialog() == DialogResult.OK)
         {
+            var targetLayer = dlg.TargetLayer;
             if (dlg.ScaleByPower)
             {
-                layer.ScaleToPower(dlg.ResultValue);
+                targetLayer.ScaleToPower(dlg.ResultValue);
             }
             else
             {
-                layer.ScaleToSpeed(dlg.ResultValue);
+                targetLayer.ScaleToSpeed(dlg.ResultValue);
             }
             
             // Refresh UI

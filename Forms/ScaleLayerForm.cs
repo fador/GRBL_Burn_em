@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using laser_gui_test.Data;
 
@@ -7,23 +9,41 @@ namespace laser_gui_test.Forms
 {
     public class ScaleLayerForm : Form
     {
-        private RadioButton _rbScalePower;
-        private RadioButton _rbScaleSpeed;
-        private NumericUpDown _nudNewValue;
-        private Label _lblCurrentPower;
-        private Label _lblCurrentSpeed;
-        private Button _btnOk;
-        private Button _btnCancel;
+        private ComboBox _cmbLayers = null!;
+        private RadioButton _rbScalePower = null!;
+        private RadioButton _rbScaleSpeed = null!;
+        private NumericUpDown _nudNewValue = null!;
+        private Label _lblCurrentPower = null!;
+        private Label _lblCurrentSpeed = null!;
+        private Button _btnOk = null!;
+        private Button _btnCancel = null!;
+
+        private List<Layer> _allLayers;
+        private bool _isUpdating = false;
 
         public Layer TargetLayer { get; private set; }
         public bool ScaleByPower => _rbScalePower.Checked;
         public float ResultValue => (float)_nudNewValue.Value;
 
-        public ScaleLayerForm(Layer layer)
+        public ScaleLayerForm(List<Layer> layers, Layer initialLayer)
         {
-            TargetLayer = layer;
+            _allLayers = layers;
+            TargetLayer = initialLayer;
             InitializeComponent();
+            UpdateLayerSelection();
+        }
+
+        private void UpdateLayerSelection()
+        {
+            _isUpdating = true;
+            _cmbLayers.DataSource = null;
+            _cmbLayers.DataSource = _allLayers;
+            _cmbLayers.DisplayMember = "Name";
+            _cmbLayers.SelectedItem = TargetLayer;
+            _isUpdating = false;
+            
             UpdateLabels();
+            OptionChanged(null, null);
         }
 
         private void InitializeComponent()
@@ -39,19 +59,32 @@ namespace laser_gui_test.Forms
             {
                 Dock = DockStyle.Fill,
                 Padding = new Padding(10),
-                RowCount = 5,
+                RowCount = 6,
                 ColumnCount = 2,
                 AutoSize = true
             };
 
-            // Current Values
-            mainLayout.Controls.Add(new Label { Text = "Current Power:", AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) }, 0, 0);
-            _lblCurrentPower = new Label { Text = $"{TargetLayer.Power:F1}%", AutoSize = true };
-            mainLayout.Controls.Add(_lblCurrentPower, 1, 0);
+            // Layer Selection
+            mainLayout.Controls.Add(new Label { Text = "Target Layer:", AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) }, 0, 0);
+            _cmbLayers = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
+            _cmbLayers.SelectedIndexChanged += (s, e) => {
+                if (_isUpdating) return;
+                if (_cmbLayers.SelectedItem is Layer sel) {
+                    TargetLayer = sel;
+                    UpdateLabels();
+                    OptionChanged(null, null);
+                }
+            };
+            mainLayout.Controls.Add(_cmbLayers, 1, 0);
 
-            mainLayout.Controls.Add(new Label { Text = "Current Speed:", AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) }, 0, 1);
+            // Current Values
+            mainLayout.Controls.Add(new Label { Text = "Current Power:", AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) }, 0, 1);
+            _lblCurrentPower = new Label { Text = $"{TargetLayer.Power:F1}%", AutoSize = true };
+            mainLayout.Controls.Add(_lblCurrentPower, 1, 1);
+
+            mainLayout.Controls.Add(new Label { Text = "Current Speed:", AutoSize = true, Font = new Font(this.Font, FontStyle.Bold) }, 0, 2);
             _lblCurrentSpeed = new Label { Text = $"{TargetLayer.Speed:F0} mm/min", AutoSize = true };
-            mainLayout.Controls.Add(_lblCurrentSpeed, 1, 1);
+            mainLayout.Controls.Add(_lblCurrentSpeed, 1, 2);
 
             // Radio Buttons
             var panelRadios = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true };
@@ -64,7 +97,7 @@ namespace laser_gui_test.Forms
             panelRadios.Controls.Add(_rbScalePower);
             panelRadios.Controls.Add(_rbScaleSpeed);
             
-            mainLayout.Controls.Add(panelRadios, 0, 2);
+            mainLayout.Controls.Add(panelRadios, 0, 3);
             mainLayout.SetColumnSpan(panelRadios, 2);
 
             // New Value Input
@@ -80,7 +113,7 @@ namespace laser_gui_test.Forms
             };
             panelInput.Controls.Add(_nudNewValue);
             
-            mainLayout.Controls.Add(panelInput, 0, 3);
+            mainLayout.Controls.Add(panelInput, 0, 4);
             mainLayout.SetColumnSpan(panelInput, 2);
 
             // Buttons
@@ -91,7 +124,7 @@ namespace laser_gui_test.Forms
             panelButtons.Controls.Add(_btnCancel);
             panelButtons.Controls.Add(_btnOk);
             
-            mainLayout.Controls.Add(panelButtons, 0, 4);
+            mainLayout.Controls.Add(panelButtons, 0, 5);
             mainLayout.SetColumnSpan(panelButtons, 2);
 
             this.Controls.Add(mainLayout);
