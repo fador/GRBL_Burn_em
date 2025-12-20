@@ -432,18 +432,6 @@ namespace laser_gui_test.Data
             
             return result;
         }        
-                // if (ids != null && ids.Length > 0)
-                // {
-                //    for (int i = 0; i < ids.Length; i++)
-                //    {
-                //        var id = ids[i];
-                // using var dictionary = CvAruco.GetPredefinedDictionary(PredefinedDictionaryName.Dict4X4_50);
-                // using var detectorParameters = DetectorParameters.Create();
-                
-                // CvAruco.DetectMarkers(gray, dictionary, out var corners, out var ids, detectorParameters, out var rejected);
-                
-
-
 
         public void ComputeHomography(PointF[] imagePoints, PointF[] worldPoints)
         {
@@ -451,39 +439,22 @@ namespace laser_gui_test.Data
 
             try
             {
-                // Convert to Point2f for OpenCV
-                var src = new Point2f[4];
-                var dst = new Point2f[4];
-                for(int i=0; i<4; i++)
-                {
-                    src[i] = new Point2f(imagePoints[i].X, imagePoints[i].Y);
-                    dst[i] = new Point2f(worldPoints[i].X, worldPoints[i].Y); 
-                }
-
-                using var mat = Cv2.FindHomography(InputArray.Create(src), InputArray.Create(dst));
-                if (!mat.Empty())
-                {
-                     // Save Homography to CalibrationData
-                     // Current CalibrationData implementation?
-                     // We need to persist this.
-                     
-                     // For now, let's extract the basic transform (Scale/Offset/Rotation) if possible, 
-                     // OR just use the 4 point Warp if we support it in rendering.
-                     // The current Renderer supports simple Affine (Translate/Scale). Homography allows perspective.
-                     
-                     // If the camera is 90 degrees top down, Affine is enough.
-                     // A full Homography needs a shader or Mesh warp in rendering.
-                     // Or GDI+ Warp? GDI+ DrawImage supports 3 points (Parallelogram).
-                     // Homography is 4 points (Perspective).
-                     
-                     // If we assume a parallelogram (affine equivalent), we can take top-left, top-right, bottom-left.
-                     // Let's assume the user clicks 4 points forming a rect.
-                }
+                 var h = Tools.CalibrationMath.ComputeHomography(imagePoints, worldPoints);
+                 if (h != null)
+                 {
+                     Calibration.Homography = h;
+                     SaveCalibration();
+                 }
             }
             catch (Exception ex)
             {
                  System.Diagnostics.Debug.WriteLine($"Homography Error: {ex.Message}");
             }
+        }
+
+        public PointF UndistortPoint(PointF p)
+        {
+            return Tools.CalibrationMath.UndistortPoint(p, Calibration.CameraMatrix, Calibration.DistCoeffs);
         }
 
         public void Dispose()
