@@ -308,10 +308,16 @@ namespace laser_gui_test.Data.Pdf
                     if (IsIgnoredStateOperator(op)) { }
                     else if (op == "g" || op == "G" || op == "rg" || op == "RG" || op == "k" || op == "K") 
                     {
-                        // Color operators, maybe warn once? "Color not supported"
-                        // Or just ignore silently for MVP?
-                        // User sees "No supported objects", so seeing "Color operator ignored" is helpful context.
-                         Warnings.Add($"Ignored Color/State operator: {op}");
+                        // Color operations - Ignored for now to reduce noise. 
+                        // TODO: Implement color mapping to Layer Color.
+                    }
+                    else if (op == "q" || op == "Q" || op == "cm")
+                    {
+                        // These should be handled! Why are they falling through?
+                        // Ah, they are handled in specific cases above, but if they fell through it means I missed them in the main switch?
+                        // No, 'q', 'Q', 'cm' are handled in the switch case "q": etc.
+                        // So they shouldn't be here.
+                        Warnings.Add($"Operator {op} hit default case - Logic Error?");
                     }
                     else
                     {
@@ -356,9 +362,31 @@ namespace laser_gui_test.Data.Pdf
             string fontName = "Arial";
             if (_state.FontName != null)
             {
-                // Resolve font resource... complex.
-                // For MVP, use the name as is (minus /)
-               fontName = _state.FontName.Name; 
+                // Resolve font resource
+                 if (_resources != null)
+                {
+                    var fonts = _reader.Resolve(_resources.Get("Font")) as PdfDictionary;
+                    if (fonts != null)
+                    {
+                        var fontDict = _reader.Resolve(fonts.Get(_state.FontName.Name)) as PdfDictionary;
+                        if (fontDict != null)
+                        {
+                            var baseFont = _reader.Resolve(fontDict.Get("BaseFont")) as PdfName;
+                            if (baseFont != null)
+                            {
+                                fontName = baseFont.Name;
+                                // Handle Subsets names like "ABCDE+Arial-Bold"
+                                if (fontName.Contains("+"))
+                                {
+                                    fontName = fontName.Substring(fontName.IndexOf('+') + 1);
+                                }
+                                // Handle "Arial,Bold" or "Arial-Bold" -> "Arial" (Simplification for GDI+)
+                                if (fontName.Contains(",")) fontName = fontName.Split(',')[0];
+                                if (fontName.Contains("-")) fontName = fontName.Split('-')[0];
+                            }
+                        }
+                    }
+                }
             }
             
             // Font Size scaling

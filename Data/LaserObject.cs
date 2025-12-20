@@ -743,10 +743,21 @@ public class LaserText : LaserObject
 
          // Unwarped
          var gpNormal = new GraphicsPath();
-         using (var family = new FontFamily(FontName))
+         FontFamily fontFamily;
+         try 
+         {
+             fontFamily = new FontFamily(FontName);
+         }
+         catch
+         {
+             // Fallback
+             fontFamily = FontFamily.GenericSansSerif;
+         }
+
+         using (fontFamily)
          {
             float emSize = FontSize;
-            gpNormal.AddString(Text, family, (int)FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
+            gpNormal.AddString(Text, fontFamily, (int)FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
 
             using (var m = new Matrix())
             {

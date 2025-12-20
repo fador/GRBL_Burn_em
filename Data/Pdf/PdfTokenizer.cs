@@ -384,28 +384,44 @@ namespace laser_gui_test.Data.Pdf
         }
 
         // Helper to read raw bytes for Stream
+        // Helper to read raw bytes for Stream
         public byte[]? ReadStreamBytes(int length)
         {
             // Usually stream follows 'stream' keyword AND EOL.
-            // We need to skip the EOL after 'stream'
+            // The keyword stream that marks the beginning of the stream content shall be followed by either an end-of-line marker or a single space and an end-of-line marker.
+            
+             if (_pos < _len && _data[_pos] == 32) _pos++; // Skip optional space
              if (_pos < _len && _data[_pos] == '\r') _pos++;
              if (_pos < _len && _data[_pos] == '\n') _pos++;
             
-            if (_pos + length > _len) return null; // Error
-            
-            byte[] buf = new byte[length];
-            Array.Copy(_data, _pos, buf, 0, length);
-            _pos += length;
-            
-            // Optional: consume 'endstream'
-            SkipWhitespaceAndComments();
-            string kw = ReadKeyword();
-            if (kw != "endstream") 
+            if (_pos + length > _len) 
             {
-                // Warn?
+                 // Truncated?
+                 int available = _len - _pos;
+                 if (available <= 0) 
+                 {
+                     Console.WriteLine($"ReadStreamBytes Failed: Zero bytes available at {_pos}.");
+                     return null; 
+                 }
+                 
+                 Console.WriteLine($"ReadStreamBytes Warning: Requested {length}, available {available}. Truncating read.");
+                 // Read what we can
+                 byte[] buf = new byte[available];
+                 Array.Copy(_data, _pos, buf, 0, available);
+                 _pos += available;
+                 return buf;
             }
             
-            return buf;
+            byte[] buffer = new byte[length];
+            Array.Copy(_data, _pos, buffer, 0, length);
+            _pos += length;
+            return buffer;
+            
+            // Optional: consume 'endstream'
+            // We don't strictly need to checks "endstream" but it helps validation
+            // But saving _pos references might be safer if we just return content.
+            
+
         }
     }
 

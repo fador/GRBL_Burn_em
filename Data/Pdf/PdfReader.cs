@@ -254,6 +254,7 @@ namespace laser_gui_test.Data.Pdf
                 Warnings.Add("XRef Stream missing 'W' array.");
                 return;
             }
+            Warnings.Add($"XRef Stream W: [{string.Join(", ", wArr.Items)}]");
             
             // 2. Get 'Index' array (Optional, default [0 Size])
             var indArr = Resolve(dict.Get("Index")) as PdfArray;
@@ -293,8 +294,8 @@ namespace laser_gui_test.Data.Pdf
             
             if (data.Length < stride * indices.Count) 
             {
-                // Warning/Error?
-                // return;
+                Warnings.Add($"XRef Stream Data Underflow. Expected {stride * indices.Count} bytes (Stride {stride} * Count {indices.Count}), got {data.Length}.");
+                // return; 
             }
             
             int offset = 0;
@@ -348,7 +349,11 @@ namespace laser_gui_test.Data.Pdf
 
         public PdfObject? GetObject(int objectIds)
         {
-            if (!_xrefTable.ContainsKey(objectIds)) return null;
+            if (!_xrefTable.ContainsKey(objectIds)) 
+            {
+                Warnings.Add($"GetObject({objectIds}) failed. ID not found in XRef table.");
+                return null;
+            }
             
             var entry = _xrefTable[objectIds];
             
@@ -369,7 +374,7 @@ namespace laser_gui_test.Data.Pdf
                 
                 if (kw == null || kw.Keyword != "obj")
                 {
-                     // Maybe Error
+                     Warnings.Add($"GetObject({objectIds}) failed. Expected 'obj' at offset {offset}, found '{kw?.Keyword}' (Type: {kw?.GetType().Name})");
                      return null;
                 }
 
@@ -384,12 +389,30 @@ namespace laser_gui_test.Data.Pdf
                     if (next is PdfKeyword k && k.Keyword == "stream")
                     {
                          // It is a stream
-                         // Length is in dictionary
+                         // We must save position because Resolve(Length) or Resolve(Filter) might Seek!
+                         long streamDataStart = _tokenizer.Position;
+                         
                          long length = 0;
-                         var lenObj = Resolve(dict.Get("Length"));
+                         var rawLen = dict.Get("Length");
+                         var lenObj = Resolve(rawLen); // This might seek!
                          if (lenObj is PdfNumber n) length = (long)n.IntValue;
                          
+                         if (length <= 0)
+                         {
+                             Warnings.Add($"Stream {objectIds} Length issue. Val: {length}. Raw: {rawLen} ({rawLen?.GetType().Name}). Res: {lenObj} ({lenObj?.GetType().Name})");
+                         }
+                         
+                         // Restore position to start of stream data
+                         _tokenizer.Seek((int)streamDataStart);
+                         
                          var streamData = _tokenizer.ReadStreamBytes((int)length);
+                         
+                         if (streamData == null || streamData.Length != length)
+                         {
+                              long debugOffset = entry.Offset;
+                              string startBytes = streamData != null && streamData.Length > 0 ? BitConverter.ToString(streamData, 0, Math.Min(5, streamData.Length)) : "None";
+                              Warnings.Add($"Stream {objectIds} Read Issue. Expected {length}, read {streamData?.Length ?? -1}. Offset: {debugOffset}. FileLen: {_data.Length}. Header: {startBytes}");
+                         }
                          
                          // Handle Filters (FlateDecode)
                          // var filter = Resolve(dict.Get("Filter")); // Handled in DecodeStream
@@ -411,16 +434,28 @@ namespace laser_gui_test.Data.Pdf
         {
             // Get the Object Stream
             var objStream = GetObject(streamId) as PdfStream;
-            if (objStream == null) return null;
+            if (objStream == null) 
+            {
+                Warnings.Add($"ReadObjectFromStream: Failed to retrieval Object Stream {streamId}");
+                return null;
+            }
             
             // Check Type
             var type = Resolve(objStream.Dictionary.Get("Type")) as PdfName;
-            if (type == null || type.Name != "ObjStm") return null;
+            if (type == null || type.Name != "ObjStm") 
+            {
+                Warnings.Add($"ReadObjectFromStream: Object {streamId} is not an ObjStm (Type: {type?.Name})");
+                return null;
+            }
             
             // Parse First and N
             var nObj = Resolve(objStream.Dictionary.Get("N")) as PdfNumber;
             var firstObj = Resolve(objStream.Dictionary.Get("First")) as PdfNumber;
-            if (nObj == null || firstObj == null) return null;
+            if (nObj == null || firstObj == null) 
+            {
+                Warnings.Add($"ReadObjectFromStream: ObjStm {streamId} missing N or First");
+                return null;
+            }
             
             int n = (int)nObj.IntValue;
             int first = (int)firstObj.IntValue;
@@ -430,11 +465,12 @@ namespace laser_gui_test.Data.Pdf
             
             // We need to parse just enough to find our index
             var streamTokenizer = new PdfTokenizer(objStream.Data);
-            
+             
             int targetOffset = -1;
-            
+            int scanned = 0;
             for(int i=0; i<n; i++)
             {
+                scanned = i;
                 var numObj = streamTokenizer.ReadNextObject() as PdfNumber;
                 var offObj = streamTokenizer.ReadNextObject() as PdfNumber;
                 
@@ -455,6 +491,7 @@ namespace laser_gui_test.Data.Pdf
                 return streamTokenizer.ReadNextObject();
             }
             
+            Warnings.Add($"ReadObjectFromStream: Index {index} not found in ObjStm {streamId} (Count {n}). Scanned {scanned} pairs from {objStream.Data.Length} bytes.");
             return null;
         }
 
@@ -514,6 +551,10 @@ namespace laser_gui_test.Data.Pdf
                     Warnings.Add($"Unsupported stream filter: {f}");
                     Console.WriteLine($"Warning: Unsupported filter {f}");
                 }
+            }
+            if (data.Length == 0 && filters.Count > 0)
+            {
+                 Warnings.Add($"DecodeStream produced 0 bytes. Filters: {string.Join(",", filters)}.");
             }
             return data;
         }
@@ -692,7 +733,9 @@ namespace laser_gui_test.Data.Pdf
              var root = Resolve(_trailer.Get("Root")) as PdfDictionary;
              if (root == null) 
              {
-                 Warnings.Add("Root object not found in Trailer.");
+                 var keys = string.Join(", ", _trailer.Entries.Keys);
+                 var rootVal = _trailer.Get("Root");
+                 Warnings.Add($"Root object not found in Trailer. Keys: [{keys}]. Root Val: {rootVal}. XRef Count: {_xrefTable.Count}");
                  return new List<PdfObject>();
              }
              

@@ -26,9 +26,6 @@ namespace laser_gui_test.Data.Pdf
             var reader = new PdfReader(filePath);
             var objects = new List<LaserObject>();
             
-            // Collect reader warnings if any (Reader needs to expose them)
-            result.Warnings.AddRange(reader.Warnings); 
-
             try 
             {
                 var pages = reader.GetPages();
@@ -67,6 +64,9 @@ namespace laser_gui_test.Data.Pdf
             {
                 result.Warnings.Add($"Critical error during import: {ex.Message}");
             }
+            
+            // Collect all reader warnings (including those from GetPages)
+            result.Warnings.AddRange(reader.Warnings);
             
             result.Objects = objects;
             return result;
