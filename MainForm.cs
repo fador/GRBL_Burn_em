@@ -1107,7 +1107,7 @@ public partial class MainForm : Form
         tsRow3.Items.Add(_cmbFont);
         
         tsRow3.Items.Add(new ToolStripLabel("Size:"));
-        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 1, Maximum = 10000, DecimalPlaces = 1 };
+        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 0.1m, Maximum = 10000, DecimalPlaces = 2 };
         tsRow3.Items.Add(new ToolStripControlHost(_nudFontSize));
         
         _btnBold = new ToolStripButton ("B") { CheckOnClick = true, Font = new Font(this.Font, FontStyle.Bold) };

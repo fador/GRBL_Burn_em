@@ -65,8 +65,33 @@ namespace laser_gui_test.Data.Pdf
                 result.Warnings.Add($"Critical error during import: {ex.Message}");
             }
             
+            
             // Collect all reader warnings (including those from GetPages)
             result.Warnings.AddRange(reader.Warnings);
+            
+            // Convert Units: PDF is 72 DPI (Points). Laser is usually MM.
+            // 1 Point = 1/72 Inch. 1 Inch = 25.4 mm.
+            // Scale = 25.4 / 72.0 = 0.3527777...
+            float scale = 25.4f / 72.0f;
+            
+            foreach (var obj in objects)
+            {
+                obj.Position = new PointF(obj.Position.X * scale, obj.Position.Y * scale);
+                obj.Size = new SizeF(obj.Size.Width * scale, obj.Size.Height * scale);
+                
+                if (obj is LaserPath lp)
+                {
+                    for(int i=0; i<lp.Points.Count; i++)
+                    {
+                        lp.Points[i] = new PointF(lp.Points[i].X * scale, lp.Points[i].Y * scale);
+                    }
+                }
+                // Text font size?
+                 if (obj is LaserText lt)
+                {
+                    lt.FontSize *= scale;
+                }
+            }
             
             result.Objects = objects;
             return result;
