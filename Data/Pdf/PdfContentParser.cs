@@ -79,6 +79,7 @@ namespace laser_gui_test.Data.Pdf
             var objects = new List<LaserObject>();
             var operands = new List<PdfObject>();
 
+            int opCount = 0;
             while (!tokenizer.IsEOF)
             {
                 var obj = tokenizer.ReadNextObject();
@@ -86,6 +87,7 @@ namespace laser_gui_test.Data.Pdf
 
                 if (obj is PdfKeyword kw)
                 {
+                    opCount++;
                     ProcessOperator(kw.Keyword, operands, objects);
                     operands.Clear();
                 }
@@ -94,6 +96,16 @@ namespace laser_gui_test.Data.Pdf
                     operands.Add(obj);
                 }
             }
+            
+            if (objects.Count == 0 && opCount > 0)
+            {
+                Warnings.Add($"Parsed {opCount} operators but created 0 objects. (Possible invisible content, clipping, or unhandled painting ops).");
+            }
+            else if (objects.Count == 0 && operands.Count > 0 && opCount == 0)
+            {
+                 Warnings.Add($"Parsed {operands.Count} tokens (numbers/names) but found 0 operators. Content stream might be malformed or missing keywords.");
+            }
+            
             return objects;
         }
 

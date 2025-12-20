@@ -737,6 +737,7 @@ namespace laser_gui_test.Data.Pdf
                  else
                  {
                      Warnings.Add("Pages node missing Kids.");
+                     Warnings.Add($"Unknown Page Node Type: {type.Name}");
                  }
              }
         }

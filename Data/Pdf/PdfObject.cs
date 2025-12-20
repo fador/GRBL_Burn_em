@@ -78,7 +78,8 @@ namespace laser_gui_test.Data.Pdf
 
         public PdfName(string name)
         {
-            Name = name;
+            if (name.StartsWith("/")) Name = name.Substring(1);
+            else Name = name;
         }
 
         public override string ToString() => "/" + Name;

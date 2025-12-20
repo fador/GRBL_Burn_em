@@ -32,6 +32,10 @@ namespace laser_gui_test.Data.Pdf
             try 
             {
                 var pages = reader.GetPages();
+                if (pages.Count == 0)
+                {
+                    result.Warnings.Add("No pages found in PDF document (GetPages returned empty).");
+                }
 
                 foreach (var pageObj in pages)
                 {
@@ -41,9 +45,7 @@ namespace laser_gui_test.Data.Pdf
                         byte[] contentData = GetPageContent(reader, page, result.Warnings);
                         if (contentData == null || contentData.Length == 0) 
                         {
-                            // Already warned in GetPageContent if unexpected type, but if just empty:
-                            // continue
-                            // Warning is added inside GetPageContent
+                            result.Warnings.Add("Page content stream is empty.");
                             continue;
                         }
 
@@ -76,7 +78,7 @@ namespace laser_gui_test.Data.Pdf
             if (contentsRef == null)
             {
                  // Empty page is valid but worth noting if debugging
-                 // warnings.Add("Page has no Contents.");
+                 warnings.Add("Page has no Contents (Key not found).");
                  return new byte[0];
             }
 
