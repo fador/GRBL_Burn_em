@@ -440,28 +440,43 @@ namespace laser_gui_test.Data.Pdf
             
             // Font Size scaling
             // Text Matrix scale * CTM scale * FontSize
-            // Rough approximation of height
-            float fontSize = _state.FontSize; 
-            // We should apply scaling e.g. from CTM Y-scale?
-            // Let's assume FontSize is in abstract units, CTM converts to Device (MM?)
+            // We need to extract the "effective" scaling factor from the CTM/TextMatrix.
+            // Simplified: The Y-scale of the CTM is a good approximation for uniform scaling.
+            // CTM is [m11 m12 m21 m22 dx dy]. Y-scale is roughly sqrt(m21^2 + m22^2) or just m22 if no rotation/skew.
+            float ctmScaleY = (float)Math.Sqrt(_state.CTM.Elements[2] * _state.CTM.Elements[2] + _state.CTM.Elements[3] * _state.CTM.Elements[3]);
+            if (ctmScaleY == 0) ctmScaleY = 1.0f; // Safety
+            
+            // Also consider Text Matrix (Tm) scaling if separate? 
+            // Currently _textMatrix is applied to Position. 
+            // In PDF, Text Size is Tf size parameter. Text Matrix scales coordinate system.
+            // So Effective Size = Tf_Size * Tm_Scale * CTM_Scale.
+            
+            // Re-calculate scale from Text Matrix too
+            float tmScaleY = (float)Math.Sqrt(_textMatrix.Elements[2] * _textMatrix.Elements[2] + _textMatrix.Elements[3] * _textMatrix.Elements[3]);
+            if (tmScaleY == 0) tmScaleY = 1.0f;
+
+            float effectiveFontSize = _state.FontSize * tmScaleY * ctmScaleY;
             
             var lt = new LaserText();
             lt.Text = text;
             lt.Position = pts[0];
-            lt.FontSize = fontSize; // Needs checking scale
+            lt.FontSize = effectiveFontSize; 
             lt.FontName = fontName;
             
-            // Should apply transforms?
-            // LaserText has Position, Rotation.
-            // Extract Rotation from CTM * Tm?
-            
-            if (lt.FontSize > 0.1f)
+            // Filter out empty or whitespace-only text
+            if (string.IsNullOrWhiteSpace(lt.Text)) return;
+
+            // Filter out near-zero font sizes. 
+            // PDF units are usually points (1/72 inch). 
+            // 0.5 effective PDF units is still small (~0.17mm).
+            // Let's filter anything smaller than 0.5 effective units.
+            if (lt.FontSize > 0.5f)
             {
                  objects.Add(lt);
             }
             else
             {
-                 Warnings.Add($"Skipped zero-size text '{text}'");
+                 // Warnings.Add($"Skipped zero-size text '{text}' (Size: {lt.FontSize:F2})");
             }
         }
 

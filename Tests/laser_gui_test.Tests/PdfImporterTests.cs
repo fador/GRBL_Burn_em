@@ -121,10 +121,12 @@ namespace laser_gui_test.Tests
                     var lp = result.Objects[0] as LaserPath;
                     Assert.NotNull(lp);
                     
-                    Assert.Equal(50, lp.Position.X, 1);
-                    Assert.Equal(50, lp.Position.Y, 1);
-                    Assert.Equal(10, lp.Size.Width, 1);
-                    Assert.Equal(10, lp.Size.Height, 1);
+                    double scale = 25.4 / 72.0;
+                    
+                    Assert.Equal(50 * scale, lp.Position.X, 1);
+                    Assert.Equal(50 * scale, lp.Position.Y, 1);
+                    Assert.Equal(10 * scale, lp.Size.Width, 1);
+                    Assert.Equal(10 * scale, lp.Size.Height, 1);
                 }
                 finally
                 {
@@ -187,8 +189,11 @@ namespace laser_gui_test.Tests
                     var lt = result.Objects[0] as LaserText;
                     Assert.NotNull(lt);
                     Assert.Equal("Hello", lt.Text);
-                    Assert.Equal(10, lt.Position.X, 1);
-                    Assert.Equal(20, lt.Position.Y, 1);
+                    
+                    double scale = 25.4 / 72.0;
+                    Assert.Equal(10 * scale, lt.Position.X, 1);
+                    Assert.Equal(20 * scale, lt.Position.Y, 1);
+                    Assert.Equal(12 * scale, lt.FontSize, 1); // Check scaled font size
                 }
                 finally
                 {

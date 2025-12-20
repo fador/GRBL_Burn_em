@@ -1767,18 +1767,18 @@ public partial class MainForm : Form
                 {
                     var result = PdfImporter.Import(ofd.FileName);
                     
-                    if (result.Warnings.Count > 0)
-                    {
-                        string msg = "Import completed with warnings:\n\n" + string.Join("\n", result.Warnings.Take(10));
-                        if (result.Warnings.Count > 10) msg += $"\n...and {result.Warnings.Count - 10} more.";
-                        
-                        MessageBox.Show(msg, "PDF Import Warnings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-
                     if (result.Objects.Count == 0)
                     {
-                        if (result.Warnings.Count == 0) // Only show generic if we didn't show specific warnings?
+                        if (result.Warnings.Count > 0)
+                        {
+                            string msg = "Import failed / no objects found. Warnings:\n\n" + string.Join("\n", result.Warnings.Take(10));
+                            if (result.Warnings.Count > 10) msg += $"\n...and {result.Warnings.Count - 10} more.";
+                            MessageBox.Show(msg, "PDF Import Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                        else
+                        {
                             MessageBox.Show("No supported objects found in PDF.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
                     }
                     else
                     {
