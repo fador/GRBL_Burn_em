@@ -326,6 +326,9 @@ namespace laser_gui_test.Data.Pdf
                         _state.RenderMode = (int)GetNum(operands[0]);
                     }
                     break;
+                case "Tz": // Horizontal Scaling
+                     if (operands.Count == 1) _state.TextHScale = (float)GetNum(operands[0]);
+                     break;
                 case "Tm": // Set Text Matrix
                     if (operands.Count == 6)
                     {
@@ -589,6 +592,10 @@ namespace laser_gui_test.Data.Pdf
             // Check Color (White = Ignore)
             if (isFilled && IsWhite(_state.FillColor)) return;
             if (isStroked && !isFilled && IsWhite(_state.StrokeColor)) return;
+
+            // Check Horizontal Scaling (Tz)
+            // If scale is near zero, text is invisible
+            if (Math.Abs(_state.TextHScale) < 0.1f) return;
             
             // Font Size scaling
             
