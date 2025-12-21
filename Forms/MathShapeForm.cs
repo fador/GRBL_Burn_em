@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using System.ComponentModel;
 using laser_gui_test.Data;
+using laser_gui_test.Data.Generators;
 
 namespace laser_gui_test.Forms
 {
@@ -29,7 +30,7 @@ namespace laser_gui_test.Forms
         private void InitializeComponent()
         {
             this.Text = "Mathematical Shape Generator";
-            this.Size = new Size(600, 500);
+            this.Size = new Size(800, 500);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -71,8 +72,58 @@ namespace laser_gui_test.Forms
                 ToolbarVisible = false,
                 HelpVisible = true
             };
-            _propertyGrid.PropertyValueChanged += (s, e) => UpdatePreview();
+            _propertyGrid.PropertyValueChanged += (s, e) => 
+            {
+                 if (e.ChangedItem != null && e.ChangedItem.Label == "Definitions")
+                 {
+                     _propertyGrid.SelectedObject = _propertyGrid.SelectedObject;
+                 }
+                 UpdatePreview();
+            };
             leftPanel.Controls.Add(_propertyGrid, 0, 1);
+
+            // Custom Panel (Hidden by default)
+            _customPanel = new FlowLayoutPanel 
+            { 
+                Dock = DockStyle.Fill, 
+                FlowDirection = FlowDirection.TopDown,
+                Visible = false,
+                AutoScroll = true,
+                WrapContents = false
+            };
+            
+            _customPanel.Controls.Add(new Label { Text = "Formulas (x=..., y=...)", AutoSize = true });
+            _txtFormula = new TextBox { Multiline = true, Height = 100, Width = 230, ScrollBars = ScrollBars.Vertical, Text = "x = t * cos(t)\r\ny = t * sin(t)", AcceptsReturn = true };
+            _txtFormula.TextChanged += UpdateCustomParams;
+            _customPanel.Controls.Add(_txtFormula);
+            
+            _customPanel.Controls.Add(new Label { Text = "Variables (a=5; b=10)", AutoSize = true });
+            _txtDefinitions = new TextBox { Width = 230, Text = "a=10" };
+            _txtDefinitions.TextChanged += UpdateCustomParams;
+            _customPanel.Controls.Add(_txtDefinitions);
+            
+            var pnlStep = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+            pnlStep.Controls.Add(new Label { Text = "Step:", Width = 40, TextAlign = ContentAlignment.MiddleLeft });
+            _numStepSize = new NumericUpDown { DecimalPlaces = 3, Increment = 0.01M, Value = 0.1M, Width = 60 };
+            _numStepSize.ValueChanged += UpdateCustomParams;
+            pnlStep.Controls.Add(_numStepSize);
+            
+            pnlStep.Controls.Add(new Label { Text = "Max:", Width = 40, TextAlign = ContentAlignment.MiddleLeft });
+            _numMaxSteps = new NumericUpDown { Minimum = 10, Maximum = 100000, Value = 50, Width = 70 };
+            _numMaxSteps.ValueChanged += UpdateCustomParams;
+            pnlStep.Controls.Add(_numMaxSteps);
+            _customPanel.Controls.Add(pnlStep);
+
+            var lblHelp = new Label 
+            { 
+                Text = "Functions:\nsin, cos, tan, sqrt, pow, abs, floor, ceil, min, max, log, pi, e\n\nExample:\nx = t * 10\ny = t * t",
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font(FontFamily.GenericSansSerif, 8)
+            };
+            _customPanel.Controls.Add(lblHelp);
+
+            leftPanel.Controls.Add(_customPanel, 0, 1); // Add to same cell as PropertyGrid
 
             // Buttons
             var btnPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill, AutoSize = true };
@@ -102,12 +153,34 @@ namespace laser_gui_test.Forms
             this.CancelButton = _btnCancel;
         }
 
+        private FlowLayoutPanel _customPanel = null!;
+        private TextBox _txtFormula = null!;
+        private TextBox _txtDefinitions = null!;
+        private NumericUpDown _numStepSize = null!;
+        private NumericUpDown _numMaxSteps = null!;
+
+        private void UpdateCustomParams(object? sender, EventArgs e)
+        {
+            if (_currentParams is CustomShapeParameters csp)
+            {
+                csp.Formula = _txtFormula.Text;
+                csp.Definitions = _txtDefinitions.Text;
+                csp.StepSize = (float)_numStepSize.Value;
+                csp.MaxSteps = (int)_numMaxSteps.Value;
+                UpdatePreview();
+            }
+        }
+
         private void OnShapeTypeChanged(object? sender, EventArgs e)
         {
             if (_cmbShapeType.SelectedItem is string typeName)
             {
                 if (Enum.TryParse(typeName, out MathShapeType type))
                 {
+                    bool isCustom = type == MathShapeType.Custom;
+                    _propertyGrid.Visible = !isCustom;
+                    _customPanel.Visible = isCustom;
+
                     switch (type)
                     {
                         case MathShapeType.Spiral: _currentParams = new SpiralParameters(); break;
@@ -115,8 +188,18 @@ namespace laser_gui_test.Forms
                         case MathShapeType.Polygon: _currentParams = new PolygonParameters(); break;
                         case MathShapeType.Star: _currentParams = new StarParameters(); break;
                         case MathShapeType.Rose: _currentParams = new RoseParameters(); break;
+                        case MathShapeType.Custom: 
+                            var csp = new CustomShapeParameters();
+                            // Init UI from defaults
+                            _txtFormula.Text = csp.Formula;
+                            _txtDefinitions.Text = csp.Definitions;
+                            _numStepSize.Value = (decimal)csp.StepSize;
+                            _numMaxSteps.Value = csp.MaxSteps;
+                            _currentParams = csp; 
+                            break;
                     }
-                    _propertyGrid.SelectedObject = _currentParams;
+                    
+                    if (!isCustom) _propertyGrid.SelectedObject = _currentParams;
                     UpdatePreview();
                 }
             }
@@ -190,7 +273,8 @@ namespace laser_gui_test.Forms
         SineWave,
         Polygon,
         Star,
-        Rose
+        Rose,
+        Custom
     }
 
     public abstract class ShapeParameters
