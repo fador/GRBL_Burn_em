@@ -6,6 +6,7 @@ using laser_gui_test.Data.Commands;
 using System.Linq;
 using laser_gui_test.Forms;
 using laser_gui_test.Data.Generators;
+using laser_gui_test.Data.Pdf;
 
 namespace laser_gui_test;
 
@@ -1106,7 +1107,7 @@ public partial class MainForm : Form
         tsRow3.Items.Add(_cmbFont);
         
         tsRow3.Items.Add(new ToolStripLabel("Size:"));
-        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 1, Maximum = 10000, DecimalPlaces = 1 };
+        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 0.1m, Maximum = 10000, DecimalPlaces = 2 };
         tsRow3.Items.Add(new ToolStripControlHost(_nudFontSize));
         
         _btnBold = new ToolStripButton ("B") { CheckOnClick = true, Font = new Font(this.Font, FontStyle.Bold) };
@@ -1736,7 +1737,7 @@ public partial class MainForm : Form
     private void ImportFile()
     {
         using var ofd = new OpenFileDialog();
-        ofd.Filter = "Supported Files|*.bmp;*.jpg;*.jpeg;*.png;*.svg|Images|*.bmp;*.jpg;*.jpeg;*.png|Scalable Vector Graphics|*.svg|All Files|*.*";
+        ofd.Filter = "Supported Files|*.bmp;*.jpg;*.jpeg;*.png;*.svg;*.pdf|Images|*.bmp;*.jpg;*.jpeg;*.png|Scalable Vector Graphics|*.svg|PDF Documents|*.pdf|All Files|*.*";
         if (ofd.ShowDialog() == DialogResult.OK)
         {
             string ext = Path.GetExtension(ofd.FileName).ToLower();
@@ -1758,6 +1759,42 @@ public partial class MainForm : Form
                 catch (Exception ex)
                 {
                     MessageBox.Show($"Failed to import SVG: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else if (ext == ".pdf")
+            {
+                try 
+                {
+                    var result = PdfImporter.Import(ofd.FileName);
+                    
+                    if (result.Objects.Count == 0)
+                    {
+                        if (result.Warnings.Count > 0)
+                        {
+                            string msg = "Import failed / no objects found. Warnings:\n\n" + string.Join("\n", result.Warnings.Take(10));
+                            if (result.Warnings.Count > 10) msg += $"\n...and {result.Warnings.Count - 10} more.";
+                            MessageBox.Show(msg, "PDF Import Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                        else
+                        {
+                            MessageBox.Show("No supported objects found in PDF.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                    }
+                    else
+                    {
+                        var cmd = new AddObjectCommand(result.Objects);
+                        
+                        foreach(var obj in result.Objects)
+                        {
+                            if (ProjectState.Instance.ActiveLayer != null)
+                                 obj.LayerId = ProjectState.Instance.ActiveLayer.Id;
+                        }
+                        CommandManager.Instance.Execute(cmd);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to import PDF: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             else

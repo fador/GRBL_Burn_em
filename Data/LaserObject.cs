@@ -25,6 +25,13 @@ public enum TextWarpMethod
     Align
 }
 
+public enum TextAnchor
+{
+    Start,
+    Middle,
+    End
+}
+
 public abstract class LaserObject
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -360,10 +367,12 @@ public class LaserRectangle : LaserObject
     }
 }
 
-public class LaserImage : LaserObject
+public class LaserImage : LaserObject, IDisposable
 {
     // We shouldn't serialize Bitmap directly usually, but for GUI it's needed
     // In a real app we'd store the path or byte array
+    
+    [JsonIgnore]
     public Bitmap? Image { get; set; }
     public string ImagePath { get; set; } = "";
     public Guid MaskId { get; set; } = Guid.Empty;
@@ -372,6 +381,11 @@ public class LaserImage : LaserObject
     {
         Type = LaserObjectType.Image;
         Name = "Image";
+    }
+
+    public void Dispose()
+    {
+        Image?.Dispose();
     }
 
     public override RectangleF GetBounds()
@@ -407,9 +421,6 @@ public class LaserImage : LaserObject
                     {
                         g.SetClip(clipPath); 
                         // Note: clipPath needs disposal?
-                        // Yes. But we can't dispose it immediately if SetClip uses it?
-                        // SetClip clones it? documentation says "Sets the clipping region... to the property of the specified GraphicsPath".
-                        // Usually SetClip copies.
                     }
                 }
             }
@@ -493,6 +504,7 @@ public class LaserText : LaserObject
     public bool UpsideDown { get; set; } = false;
     public TextWarpMethod WarpMethod { get; set; } = TextWarpMethod.Stretch;
     public FontStyle FontStyle { get; set; } = FontStyle.Regular;
+    public TextAnchor Anchor { get; set; } = TextAnchor.Start;
 
     public LaserText()
     {
@@ -517,7 +529,11 @@ public class LaserText : LaserObject
             
             // Width: Use the maximum extent.
             // Height: Use FontSize (Em-Height) to maintain consistent baseline alignment.
-            Size = new SizeF(b.Width + b.Left, FontSize);
+            // But for accurate bounds, we should use the actual bounding box height or the font metrics.
+            // Let's use the bounding box width and the emSize for height.
+            // However, SvgImporter used G.MeasureString which includes padding.
+            // AddString + GetBounds is tighter and better for laser.
+            Size = new SizeF(b.Width, emSize);
         }
     }
 
@@ -743,27 +759,54 @@ public class LaserText : LaserObject
 
          // Unwarped
          var gpNormal = new GraphicsPath();
-         using (var family = new FontFamily(FontName))
+         FontFamily fontFamily;
+         try 
+         {
+             fontFamily = new FontFamily(FontName);
+         }
+         catch
+         {
+             // Fallback
+             fontFamily = FontFamily.GenericSansSerif;
+         }
+
+         using (fontFamily)
          {
             float emSize = FontSize;
-            gpNormal.AddString(Text, family, (int)FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
+            gpNormal.AddString(Text, fontFamily, (int)FontStyle, emSize, new PointF(0, 0), StringFormat.GenericTypographic);
 
             using (var m = new Matrix())
             {
-                m.Translate(-Size.Width / 2f, Size.Height / 2f);
-                m.Scale(1, -1, MatrixOrder.Append);
+                // Align text based on Anchor
+                float offsetX = 0;
+                if (Anchor == TextAnchor.Middle) offsetX = -Size.Width / 2f;
+                else if (Anchor == TextAnchor.End) offsetX = -Size.Width;
+
+                m.Translate(offsetX, 0);
+                m.Scale(1, -1, MatrixOrder.Append); // Flip Y because GraphicsPath.AddString is Y-down
                 if (Rotation != 0) m.Rotate(Rotation, MatrixOrder.Append);
-                m.Translate(Position.X + Size.Width / 2f, Position.Y + Size.Height / 2f, MatrixOrder.Append);
+                m.Translate(Position.X, Position.Y, MatrixOrder.Append);
                 
                 gpNormal.Transform(m);
             }
-         }
-         return gpNormal;
+        }
+        return gpNormal;
     }
 
     public override RectangleF GetBounds()
     {
-        return GetRotatedBoundsFromDef();
+        if (Rotation == 0)
+        {
+            float offsetX = 0;
+            if (Anchor == TextAnchor.Middle) offsetX = -Size.Width / 2f;
+            else if (Anchor == TextAnchor.End) offsetX = -Size.Width;
+            return new RectangleF(Position.X + offsetX, Position.Y - Size.Height, Size.Width, Size.Height);
+        }
+
+        using (var gp = GetPath())
+        {
+            return gp.GetBounds();
+        }
     }
 
     public override void Draw(Graphics g, float scale)
@@ -932,3 +975,5 @@ public class LaserBezier : LaserObject
         };
     }
 }
+
+

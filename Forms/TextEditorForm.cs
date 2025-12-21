@@ -56,7 +56,7 @@ namespace laser_gui_test.Forms
             }
 
             var labelSize = new Label { Text = "Size (pt):", Location = new Point(230, 70), AutoSize = true };
-            _fontSizeNumeric = new NumericUpDown { Location = new Point(230, 90), Width = 100, Minimum = 1, Maximum = 1000, Value = (decimal)fontSize, DecimalPlaces = 1 };
+            _fontSizeNumeric = new NumericUpDown { Location = new Point(230, 90), Width = 100, Minimum = 0.1m, Maximum = 1000, Value = (decimal)fontSize, DecimalPlaces = 2 };
 
             _boldCheckBox = new CheckBox { Text = "Bold", Location = new Point(10, 130), AutoSize = true, Checked = fontStyle.HasFlag(FontStyle.Bold) };
             _italicCheckBox = new CheckBox { Text = "Italic", Location = new Point(80, 130), AutoSize = true, Checked = fontStyle.HasFlag(FontStyle.Italic) };

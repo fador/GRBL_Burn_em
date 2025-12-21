@@ -400,9 +400,8 @@ public class SvgImporter
         float y = ParseDimension(elem.Attribute("y")?.Value, 0);
         float fontSize = ParseDimension(GetStyleOrAttribute(elem, "font-size"), 12);
         string fontFamily = GetStyleOrAttribute(elem, "font-family") ?? "Arial";
+        string textAnchor = GetStyleOrAttribute(elem, "text-anchor")?.ToLower() ?? "start";
 
-        // If simple text, we can still use GraphicsPath if we wanted to consistent, 
-        // but let's keep LaserText for simple text as it might be handled differently (e.g. native text in some outputs).
         var lText = new LaserText()
         {
             Name = elem.Attribute("id")?.Value ?? "Text",
@@ -412,19 +411,24 @@ public class SvgImporter
             FontStyle = ParseFontStyle(elem)
         };
 
+        if (textAnchor == "middle") lText.Anchor = TextAnchor.Middle;
+        else if (textAnchor == "end") lText.Anchor = TextAnchor.End;
+        else lText.Anchor = TextAnchor.Start;
+
+        // Extract transform components (Rotation and Scale)
+        // Extract rotation: atan2(m12, m11)
+        float rotation = (float)(Math.Atan2(transform.Elements[1], transform.Elements[0]) * 180 / Math.PI);
+        // Extract scale: sqrt(m11^2 + m12^2)
+        float scale = (float)Math.Sqrt(transform.Elements[0] * transform.Elements[0] + transform.Elements[1] * transform.Elements[1]);
+
+        lText.Rotation = rotation;
+        lText.FontSize *= scale;
+
         var pts = new PointF[] { new PointF(x, y) };
         transform.TransformPoints(pts);
-
         lText.Position = pts[0];
         
-        // Measure size approx
-        using (var tmpBmp = new Bitmap(1, 1))
-        using (var g = Graphics.FromImage(tmpBmp))
-        using (var f = new Font(lText.FontName, lText.FontSize, lText.FontStyle))
-        {
-             lText.Size = g.MeasureString(lText.Text, f);
-        }
-
+        lText.UpdateTextSize();
         list.Add(lText);
     }
     
