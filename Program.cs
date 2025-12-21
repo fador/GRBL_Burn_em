@@ -1,5 +1,4 @@
 using laser_gui_test.Forms;
-
 using laser_gui_test.Data;
 
 namespace laser_gui_test;

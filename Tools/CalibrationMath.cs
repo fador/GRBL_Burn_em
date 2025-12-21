@@ -175,5 +175,46 @@ namespace laser_gui_test.Tools
             // Denormalize
             return new PointF((float)(x * fx + cx), (float)(y * fy + cy));
         }
+        /// <summary>
+        /// Distorts a single point using Camera Matrix and Distortion Coefficients.
+        /// This is the forward model: Ideal -> Distorted.
+        /// </summary>
+        public static PointF DistortPoint(PointF p, double[] cameraMatrix, double[] distCoeffs)
+        {
+            if (cameraMatrix == null || distCoeffs == null || cameraMatrix.Length != 9) return p;
+
+            double fx = cameraMatrix[0];
+            double fy = cameraMatrix[4];
+            double cx = cameraMatrix[2];
+            double cy = cameraMatrix[5];
+            
+            double k1 = distCoeffs.Length > 0 ? distCoeffs[0] : 0;
+            double k2 = distCoeffs.Length > 1 ? distCoeffs[1] : 0;
+            double p1 = distCoeffs.Length > 2 ? distCoeffs[2] : 0;
+            double p2 = distCoeffs.Length > 3 ? distCoeffs[3] : 0;
+            double k3 = distCoeffs.Length > 4 ? distCoeffs[4] : 0;
+
+            // Normalize (Screen -> Normalized Device Coordinates)
+            double x = (p.X - cx) / fx;
+            double y = (p.Y - cy) / fy;
+
+            double r2 = x * x + y * y;
+            double r4 = r2 * r2;
+            double r6 = r4 * r2;
+
+            // Radial
+            double k = 1 + k1 * r2 + k2 * r4 + k3 * r6;
+
+            // Tangential
+            double deltaX = 2 * p1 * x * y + p2 * (r2 + 2 * x * x);
+            double deltaY = p1 * (r2 + 2 * y * y) + 2 * p2 * x * y;
+
+            // Distorted Normalized
+            double xDistort = x * k + deltaX;
+            double yDistort = y * k + deltaY;
+
+            // Denormalize (Normalized -> Screen)
+            return new PointF((float)(xDistort * fx + cx), (float)(yDistort * fy + cy));
+        }
     }
 }

@@ -2,8 +2,6 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using laser_gui_test.Data;
-using OpenCvSharp;
-using OpenCvSharp.Extensions;
 using Point = System.Drawing.Point;
 
 namespace laser_gui_test.Forms
@@ -43,7 +41,7 @@ namespace laser_gui_test.Forms
 
         private void InitializeComponent()
         {
-            this.Size = new System.Drawing.Size(900, 600);
+            this.Size = new Size(900, 600);
             this.Text = "Head-Mounted Camera Offset Calibration";
 
             var split = new SplitContainer { Dock = DockStyle.Fill };
@@ -67,11 +65,7 @@ namespace laser_gui_test.Forms
             var btnPulse = new Button { Text = "Pulse Laser", Width = 200, Height = 40, BackColor = Color.Salmon, ForeColor = Color.White };
             btnPulse.Click += (s, e) => {
                 // Pulse laser: M3 S100, G4 P0.5, M5
-                SerialInterface.Instance.Write("M3 S100\n"); // Weak power for marking? Or S1000? 
-                // Let's assume S50 is enough for diode, or S100.
-                // Depending on machine max S value (usually 1000). S50 = 5%. 
-                
-                // Fire and wait
+                SerialInterface.Instance.Write("M3 S100\n"); 
                 System.Threading.Tasks.Task.Delay(200).ContinueWith(t => SerialInterface.Instance.Write("M5\n"));
             };
             pnlRight.Controls.Add(btnPulse);
@@ -100,8 +94,6 @@ namespace laser_gui_test.Forms
         {
             var btn = new Button { Text = text, Width = 60, Height = 60 };
             btn.MouseDown += (s, e) => {
-                // Jog
-                // $J=G91 X.. Y.. F..
                 string cmd = $"$J=G91 X{x} Y{y} F1000\n";
                 SerialInterface.Instance.Write(cmd);
             };
@@ -119,7 +111,6 @@ namespace laser_gui_test.Forms
                      var old = _pbCam.Image;
                      _pbCam.Image = copy;
                      old?.Dispose();
-                     // Invalidate to paint crosshair? PictureBox paints image then Paint event.
                  }));
             }
             catch {}
@@ -149,33 +140,23 @@ namespace laser_gui_test.Forms
             
             try
             {
-                // 1. Capture current spot position
                 var p1 = await CaptureSpotLocation();
                 if (p1 == null) throw new Exception("Could not find dark spot (burn mark). Adjust light/threshold.");
                 
-                // 2. Characterize Movement (Scale & Orientation)
-                // Move X+5mm
                 float moveDist = 5.0f;
                 PointF startMachinePos = SerialInterface.Instance.MachinePosition;
                 
                 await SerialInterface.Instance.MoveRelative(moveDist, 0);
-                await Task.Delay(500); // Settle
+                await System.Threading.Tasks.Task.Delay(500); 
                 
                 var p2 = await CaptureSpotLocation();
                 if (p2 == null) throw new Exception("Lost spot after moving X.");
                 
-                // Move Y+5mm (from new pos)
                 await SerialInterface.Instance.MoveRelative(0, moveDist);
-                await Task.Delay(500); 
+                await System.Threading.Tasks.Task.Delay(500); 
                 
                 var p3 = await CaptureSpotLocation();
                 if (p3 == null) throw new Exception("Lost spot after moving Y.");
-                
-                // Vectors in Image Space
-                // vX = P2 - P1 (caused by +X move)
-                // vY = P3 - P2 (caused by +Y move)
-                // Note: If camera moves +X, the image content moves -X relative to frame!
-                // So Spot moves -X.
                 
                 float vx_x = p2.Value.X - p1.Value.X;
                 float vx_y = p2.Value.Y - p1.Value.Y;
@@ -183,54 +164,34 @@ namespace laser_gui_test.Forms
                 float vy_x = p3.Value.X - p2.Value.X;
                 float vy_y = p3.Value.Y - p2.Value.Y;
                 
-                // Solve for MM per Pixel (Inverse Jacobian)
-                // We want to find Move (dX, dY) given error (du, dv).
-                // [du] = [vx_x/dist  vy_x/dist] [dX]
-                // [dv]   [vx_y/dist  vy_y/dist] [dY]
-                // J = [vx_x  vy_x] / dist
-                //     [vx_y  vy_y]
-                
-                // We want [dX, dY] = Inv(J) * [du, dv] * dist
-                // Determinant
                 float det = vx_x * vy_y - vx_y * vy_x;
                 if (Math.Abs(det) < 0.1f) throw new Exception("Singular matrix. Movement not detected.");
                 
-                // Current variance from Center
-                var currentMachinePos = SerialInterface.Instance.MachinePosition; // Should be Start + 5, 5
-                
-                // Re-capture P3 (already have it)
                 var img = _pbCam.Image;
                 if (img == null) throw new Exception("Camera image is missing.");
                 float cx = img.Width / 2f;
                 float cy = img.Height / 2f;
                 
-                float du = cx - p3.Value.X; // We want spot to be at cx
+                float du = cx - p3.Value.X; 
                 float dv = cy - p3.Value.Y;
-                
-                // Inverse Matrix mult
-                // Inv(J) = 1/det * [vy_y  -vy_x]
-                //                  [-vx_y  vx_x]
                 
                 float dX = (vy_y * du - vy_x * dv) / det * moveDist;
                 float dY = (-vx_y * du + vx_x * dv) / det * moveDist;
                 
-                // Move to center
                 await SerialInterface.Instance.MoveRelative(dX, dY);
-                await Task.Delay(500);
+                await System.Threading.Tasks.Task.Delay(500);
                 
-                // Verify
                 var pFinal = await CaptureSpotLocation();
                 if (pFinal != null)
                 {
                     float distErr = (float)Math.Sqrt(Math.Pow(pFinal.Value.X - cx, 2) + Math.Pow(pFinal.Value.Y - cy, 2));
                     _lblPos.Text = $"Centered! Err: {distErr:F1}px";
                     
-                    if (distErr < 20) // Tolerance
+                    if (distErr < 20) 
                     {
                          MessageBox.Show("Centered Successfully!");
                     }
                 }
-                
             }
             catch (Exception ex)
             {
@@ -238,42 +199,19 @@ namespace laser_gui_test.Forms
             }
         }
 
-        private async Task<PointF?> CaptureSpotLocation()
+        private async System.Threading.Tasks.Task<PointF?> CaptureSpotLocation()
         {
-            // Wait for clean frame?
-            await Task.Delay(200);
+            await System.Threading.Tasks.Task.Delay(200);
             
-            // Get last frame from PictureBox or CameraManager? 
-            // PictureBox has a copy.
             if (_pbCam.Image == null) return null;
             
             var bmp = (Bitmap)_pbCam.Image.Clone();
-            return await Task.Run(() => Tools.ImageUtils.FindDarkestSpot(bmp));
+            return await System.Threading.Tasks.Task.Run(() => Tools.ImageUtils.FindDarkestSpot(bmp));
         }
 
         private void OnConfirmClick(object? sender, EventArgs e)
         {
-             // Logic:
-             // StartPos (Machine Coords) = Where we burned the dot.
-             // CurrentPos (Machine Coords) = Where the camera center is now.
-             // So, the CAMERA (at CurrentPos) is looking at the DOT (at StartPos).
-             // That means Physically, the Camera is at StartPos (over the dot).
-             // Wait.
-             // Let H = Head Position. C = Camera Position.
-             // Relationship: C = H + Offset.
-             // 1. At Start: Head is at H1. We burn a dot at H1. (Dot is at H1).
-             // 2. We move Head to H2. Camera is now looking at the Dot. 
-             //    So Camera Position C2 = Dot Position = H1.
-             //    We know C2 = H2 + Offset.
-             //    So H1 = H2 + Offset.
-             //    Offset = H1 - H2.
-             
              var current = SerialInterface.Instance.MachinePosition;
-             
-             // Note: If we moved the machine, _startPos is still the BURN location?
-             // Yes, assuming we didn't reset _startPos.
-             // Ideally we should Lock _startPos when we click "Pulse".
-             
              float offX = _startPos.X - current.X;
              float offY = _startPos.Y - current.Y;
              
@@ -287,7 +225,6 @@ namespace laser_gui_test.Forms
                  
                  CameraManager.Instance.SaveCalibration();
                  
-                 // Legacy
                  AppConfiguration.Instance.CameraOverlayX = offX;
                  AppConfiguration.Instance.CameraOverlayY = offY; 
                  
