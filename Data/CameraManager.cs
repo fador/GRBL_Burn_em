@@ -161,9 +161,10 @@ namespace laser_gui_test.Data
             else
             {
                 // Row by Row
+                int sbStride = buffer.GetPlaneDescription(0).Stride;
                 for (int y = 0; y < h; y++)
                 {
-                    System.Buffer.MemoryCopy(dataInBytes + y * sb.Stride, (void*)data.Scan0 + y * data.Stride, bytes, bytes);
+                    System.Buffer.MemoryCopy(dataInBytes + y * sbStride, (byte*)data.Scan0 + y * data.Stride, bytes, bytes);
                 }
             }
             

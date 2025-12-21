@@ -38,8 +38,9 @@ public abstract class LaserObject
     public string Name { get; set; } = "Object";
     public Guid LayerId { get; set; }
     public bool IsEnabled { get; set; } = true;
-    public float Power { get; set; } = 100f; // 0-100%
-    public float Speed { get; set; } = 1000f; // mm/min
+    public float? Power { get; set; } = null; // null = use layer settings
+    public float? Speed { get; set; } = null; // null = use layer settings
+    public LayerMode? Mode { get; set; } = null; // null = use layer settings
     public PointF Position { get; set; }
     public float Rotation { get; set; }
     public SizeF Size { get; set; }
@@ -181,6 +182,7 @@ public class LaserCircle : LaserObject
             IsEnabled = this.IsEnabled,
             Power = this.Power,
             Speed = this.Speed,
+            Mode = this.Mode,
             Position = this.Position,
             Rotation = this.Rotation,
             Size = this.Size
@@ -288,6 +290,7 @@ public class LaserPath : LaserObject
             IsEnabled = this.IsEnabled,
             Power = this.Power,
             Speed = this.Speed,
+            Mode = this.Mode,
             Position = this.Position,
             Rotation = this.Rotation,
             Size = this.Size,
@@ -359,6 +362,7 @@ public class LaserRectangle : LaserObject
             IsEnabled = this.IsEnabled,
             Power = this.Power,
             Speed = this.Speed,
+            Mode = this.Mode,
             Position = this.Position,
             Rotation = this.Rotation,
             Size = this.Size
@@ -479,6 +483,7 @@ public class LaserImage : LaserObject, IDisposable
             IsEnabled = this.IsEnabled,
             Power = this.Power,
             Speed = this.Speed,
+            Mode = this.Mode,
             Position = this.Position,
             Rotation = this.Rotation,
             Size = this.Size,

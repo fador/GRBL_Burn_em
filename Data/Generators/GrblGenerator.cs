@@ -46,9 +46,9 @@ public class GrblGenerator : IGCodeGenerator
         var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId) 
                     ?? ProjectState.Instance.Layers.FirstOrDefault();
         
-        float pwrPercent = layer?.Power ?? obj.Power;
-        float speedVal = layer?.Speed ?? obj.Speed;
-        LayerMode mode = layer?.Mode ?? LayerMode.Cut;
+        float pwrPercent = obj.Power ?? layer?.Power ?? 100f;
+        float speedVal = obj.Speed ?? layer?.Speed ?? 1000f;
+        LayerMode mode = obj.Mode ?? layer?.Mode ?? LayerMode.Cut;
 
         // Force Fill for Images (they are always raster) works naturally
         // But if user sets Image layer to "Cut", what happens? Images can't be cut effectively without vectorizing.

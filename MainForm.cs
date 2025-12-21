@@ -299,6 +299,8 @@ public partial class MainForm : Form
         layersMenu.DropDownItems.Add("Scale Output...", null, (s, e) => ShowScaleLayerDialog());
         menuStrip.Items.Add(layersMenu);
 
+
+
         // Insert Menu [NEW]
         var insertMenu = new ToolStripMenuItem("Insert");
         insertMenu.DropDownItems.Add("Mathematical Shape...", null, (s, e) => ShowMathShapeDialog());
@@ -377,6 +379,9 @@ public partial class MainForm : Form
             }
             _workbench.Invalidate();
         });
+
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
+        toolMenu.DropDownItems.Add("Power/Speed Calibration", null, (s, e) => ShowPowerSpeedCalibrationDialog());
 
         menuStrip.Items.Add(toolMenu);
 
@@ -2308,6 +2313,22 @@ public partial class MainForm : Form
             var cmd = new AddObjectCommand(lp);
             CommandManager.Instance.Execute(cmd);
             _workbench.Invalidate();
+        }
+    }
+
+    private void ShowPowerSpeedCalibrationDialog()
+    {
+        using var dlg = new PowerSpeedCalibrationForm();
+        if (dlg.ShowDialog() == DialogResult.OK)
+        {
+             var objects = dlg.Generator.Generate();
+             if (objects.Count > 0)
+             {
+                 var cmd = new AddObjectCommand(objects);
+                 CommandManager.Instance.Execute(cmd);
+                 ProjectState.Instance.SelectedObjects = objects;
+                 _workbench.Invalidate();
+             }
         }
     }
 }

@@ -36,8 +36,10 @@ public abstract class LaserObjectDto
     public string Name { get; set; } = "";
     public Guid LayerId { get; set; }
     public bool IsEnabled { get; set; }
-    public float Power { get; set; }
-    public float Speed { get; set; }
+    public float? Power { get; set; }
+
+    public float? Speed { get; set; }
+    public LayerMode? Mode { get; set; }
     public PointF Position { get; set; }
     public float Rotation { get; set; }
     public SizeF Size { get; set; }
@@ -155,7 +157,9 @@ public static class ProjectSerializer
             dto.LayerId = obj.LayerId;
             dto.IsEnabled = obj.IsEnabled;
             dto.Power = obj.Power;
+
             dto.Speed = obj.Speed;
+            dto.Mode = obj.Mode;
             dto.Position = obj.Position;
             dto.Rotation = obj.Rotation;
             dto.Size = obj.Size;
@@ -250,7 +254,9 @@ public static class ProjectSerializer
             obj.LayerId = objDto.LayerId;
             obj.IsEnabled = objDto.IsEnabled;
             obj.Power = objDto.Power;
+
             obj.Speed = objDto.Speed;
+            obj.Mode = objDto.Mode;
             obj.Position = objDto.Position;
             obj.Rotation = objDto.Rotation;
             obj.Size = objDto.Size;
