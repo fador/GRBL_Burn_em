@@ -44,6 +44,7 @@ namespace laser_gui_test.Data
     {
         Chessboard,
         Circles,
-        AsymmetricCircles
+        AsymmetricCirclesGrid,
+        AsymmetricCircles // Keep for compatibility if needed, or replace
     }
 }
