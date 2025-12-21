@@ -82,6 +82,8 @@ namespace laser_gui_test.Data.Pdf
         private Matrix _textMatrix;
         private Matrix _textLineMatrix;
         private bool _isClipping = false; // Flag if next painting op should update clip
+        private Stack<bool> _visibilityStack = new Stack<bool>();
+        private bool _currentVisibility = true;
         
         public PdfContentParser(PdfReader reader, PdfDictionary resources, RectangleF mediaBox)
         {
@@ -309,6 +311,12 @@ namespace laser_gui_test.Data.Pdf
                     _textLineMatrix.Translate(0, -_state.TextLeading, MatrixOrder.Prepend);
                     _textMatrix = _textLineMatrix.Clone();
                     break;
+                case "Tc": // Set Character Spacing
+                     if (operands.Count == 1) _state.TextCharSpacing = (float)GetNum(operands[0]);
+                     break;
+                case "Tw": // Set Word Spacing
+                     if (operands.Count == 1) _state.TextWordSpacing = (float)GetNum(operands[0]);
+                     break;
                 case "Ts": // Set Text Rise
                      if (operands.Count == 1) _state.TextRise = (float)GetNum(operands[0]);
                      break;
@@ -432,6 +440,26 @@ namespace laser_gui_test.Data.Pdf
                     }
                     break;
 
+                // --- Optional Content (Layers) ---
+                case "BDC": // Begin Marked Content
+                    if (operands.Count >= 2 && operands[1] is PdfDictionary props) 
+                    {
+                        // Check for /OC
+                        ProcessBDC(props); 
+                    }
+                    else 
+                    {
+                        // Default to visible if no OC, just push current state
+                        _visibilityStack.Push(_currentVisibility);
+                    }
+                    break;
+                case "EMC": // End Marked Content
+                    if (_visibilityStack.Count > 0)
+                    {
+                         _currentVisibility = _visibilityStack.Pop();
+                    }
+                    break;
+
                 default:
                     // Only warn for significant operators? 
                     // Many are state operators (gs, cs, CS, w, J, j, M, d, ri, i...) 
@@ -456,6 +484,7 @@ namespace laser_gui_test.Data.Pdf
 
         private void AddPathObject(List<LaserObject> objects, bool filled)
         {
+            if (!_currentVisibility) return;
             if (_currentPath.PointCount == 0) return;
             
             // Filter by Color (White Geometry = Invisible/Mask usually)
@@ -540,6 +569,7 @@ namespace laser_gui_test.Data.Pdf
 
         private void AddTextObject(string text, List<LaserObject> objects)
         {
+            if (!_currentVisibility) return;
             // Resolve Font info
             PdfFontInfo fontInfo = ResolveCurrentFont();
             
@@ -667,6 +697,9 @@ namespace laser_gui_test.Data.Pdf
         private float GetTextWidth(string text, PdfFontInfo font, float fontSize, float hScale)
         {
             float total = 0;
+            float charSpace = _state.TextCharSpacing;
+            float wordSpace = _state.TextWordSpacing;
+
             foreach(char c in text)
             {
                 int w = font.MissingWidth;
@@ -679,9 +712,36 @@ namespace laser_gui_test.Data.Pdf
                         if (idx >= 0 && idx < font.Widths.Length) w = font.Widths[idx];
                     }
                 }
-                total += w;
+                
+                // Convert glyph width to text space
+                float glyphWidth = w * (fontSize / 1000f);
+                
+                // Add CharSpacing to every char
+                glyphWidth += (charSpace * (fontSize / 1000f)); // Wait, Ts/Tc units are valid in unscaled text space.
+                // Spec: Tc is added to the horizontal displacement.
+                // "The value is added to the horizontal displacement... units are unscaled text space units."
+                // So if FontSize is 12, and Tc is 0.5. Displacement += 0.5 * text_space_scale?
+                // Actually: "expressed in unscaled text space units". This means it depends on Tfs (FontSize)? No. "Unscaled text space" means BEFORE FontSize scaling?
+                // Spec 1.7 5.2.1: "Tc parameter is a number... expressed in unscaled text space units."
+                // The position Update: tx_new = tx_old + ((w0 - Tj/1000)*Tfs + Tc + (tw_if_space))*Th
+                // w0 = Width from font (thousandths)
+                // Tj = Kernel (thousandths)
+                // Tfs = Font Size
+                // Tc = Char Spacing
+                // Th = Horiz Scale / 100
+                
+                // So: Width = (w0/1000 * Size) + Tc
+                // My existing code: total += w * (fontSize/1000f) * (hScale/100f)
+                
+                // Correct Formula per glyph:
+                // width = ( (w0 / 1000.0 * fontSize) + charSpace + (c == ' ' ? wordSpace : 0) ) * (hScale / 100.0);
+                
+                float glyphW = (w / 1000.0f * fontSize) + charSpace;
+                if (c == 32) glyphW += wordSpace; // 32 is Space
+                
+                total += glyphW;
             }
-            return total * (fontSize / 1000f) * (hScale / 100f);
+            return total * (hScale / 100f);
         }
 
         private void ProcessXObject(PdfName name, List<LaserObject> objects)
@@ -966,6 +1026,30 @@ namespace laser_gui_test.Data.Pdf
             }
         }
 
+        private void ProcessBDC(PdfDictionary props)
+        {
+            // Default assumes visible unless we find an OCG that is OFF
+            bool isVisible = _currentVisibility; // Inherit parent visibility? Yes.
+
+            if (isVisible && props.ContainsKey("OC"))
+            {
+                var ocRef = _reader.Resolve(props.Get("OC"));
+                // This is where we need access to the Catalog -> OCProperties
+                // Since this parser doesn't have it easily linked, we'll try a safe approach.
+                // If it's an OCG (Group), checking if it's "ON" is complex without full structure.
+                // However, most layers in simple PDFs for Lasers are:
+                // - Die Line (Cut)
+                // - Artwork (Print)
+                // If we can't resolve it, we default to VISIBLE to be safe.
+                // Only hide if we explicitly know it's off. 
+                // For now, we will track the stack but keep it visible.
+                // TODO: Implement OCG State lookup.
+            }
+
+            _visibilityStack.Push(isVisible); // Push the NEW state
+            _currentVisibility = isVisible;
+        }
+
         private void UpdateClipBounds()
         {
              if (_currentPath.PointCount == 0) return;
@@ -988,10 +1072,10 @@ namespace laser_gui_test.Data.Pdf
         private bool IsIgnoredStateOperator(string op)
         {
             // Common state operators that don't affect shape geometry directly for MVP
-            // w, J, j, M, d, ri, i, gs, cs, CS, BDC...
-            // REMOVED W, W* from ignore list
+            // w, J, j, M, d, ri, i, gs, cs, CS...
+            // REMOVED W, W*, BDC, EMC from ignore list
             return op == "w" || op == "J" || op == "j" || op == "M" || op == "d" || op == "ri" || op == "i" || op == "gs" || op == "cs" || op == "CS"
-                   || op == "BDC" || op == "EMC" || op == "BMC" || op == "DP" || op == "MP";
+                   || op == "BMC" || op == "DP" || op == "MP";
         }
         
         private double GetNum(PdfObject obj)
