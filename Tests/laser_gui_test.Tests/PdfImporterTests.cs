@@ -58,7 +58,7 @@ namespace laser_gui_test.Tests
 
             obj = tokenizer.ReadNextObject();
             Assert.IsType<PdfDictionary>(obj);
-            Assert.Equal(1, ((PdfDictionary)obj).Entries.Count);
+            Assert.Single(((PdfDictionary)obj).Entries);
         }
 
 

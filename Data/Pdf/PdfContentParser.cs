@@ -16,9 +16,9 @@ namespace laser_gui_test.Data.Pdf
         
         private class PdfFontInfo
         {
-             public string BaseFont;
+             public string BaseFont = ""; // Initialize to empty string to satisfy non-nullable
              public bool IsWinAnsi;
-             public int[] Widths;
+             public int[]? Widths; // Make nullable
              public int FirstChar;
              public int LastChar;
              public int MissingWidth = 600; 
@@ -57,7 +57,7 @@ namespace laser_gui_test.Data.Pdf
             public int RenderMode { get; set; } = 0; 
             public float FillAlpha { get; set; } = 1.0f;
             public float StrokeAlpha { get; set; } = 1.0f;
-            public Region ClipRegion { get; set; } = null; // Region supports complex shapes
+            public Region? ClipRegion { get; set; } = null; // Region supports complex shapes
 
             
             public GraphicsState Clone()
@@ -1065,7 +1065,7 @@ namespace laser_gui_test.Data.Pdf
                     // It's a direct object (Dictionary?) or Name?
                     // Resolve it to be sure
                     var resolved = _reader.Resolve(rawOC);
-                    if (!IsOCGVisible(resolved)) isVisible = false;
+                    if (resolved != null && !IsOCGVisible(resolved)) isVisible = false; // Check for null
                 }
             }
 
