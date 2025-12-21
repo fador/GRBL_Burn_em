@@ -4,6 +4,8 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Text;
+using System.Runtime.InteropServices;
+
 
 namespace laser_gui_test.Data.Pdf
 {
@@ -833,27 +835,26 @@ namespace laser_gui_test.Data.Pdf
                                         // Safety check
                                         if (pixelData.Length >= width * height * bytesPerPixel)
                                         {
-                                           unsafe 
-                                           {
-                                                byte* pPtr = (byte*)ptr;
-                                                for(int y=0; y<height; y++)
+                                            byte[] dstBytes = new byte[height * stride];
+                                            for (int y = 0; y < height; y++)
+                                            {
+                                                for (int x = 0; x < width; x++)
                                                 {
-                                                    for(int x=0; x<width; x++)
-                                                    {
-                                                        int srcIdx = (y * width + x) * bytesPerPixel;
-                                                        int dstIdx = y * stride + x * 3;
-                                                        
-                                                        byte r = pixelData[srcIdx];
-                                                        byte g = bytesPerPixel == 3 ? pixelData[srcIdx+1] : r;
-                                                        byte b = bytesPerPixel == 3 ? pixelData[srcIdx+2] : r;
-                                                        
-                                                        // GDI+ 24bpp is BGR
-                                                        pPtr[dstIdx] = b;
-                                                        pPtr[dstIdx+1] = g;
-                                                        pPtr[dstIdx+2] = r;
-                                                    }
+                                                    int srcIdx = (y * width + x) * bytesPerPixel;
+                                                    int dstIdx = y * stride + x * 3;
+
+                                                    byte r = pixelData[srcIdx];
+                                                    byte g = bytesPerPixel == 3 ? pixelData[srcIdx + 1] : r;
+                                                    byte b = bytesPerPixel == 3 ? pixelData[srcIdx + 2] : r;
+
+                                                    // GDI+ 24bpp is BGR
+                                                    dstBytes[dstIdx] = b;
+                                                    dstBytes[dstIdx + 1] = g;
+                                                    dstBytes[dstIdx + 2] = r;
                                                 }
-                                           }
+                                            }
+                                            Marshal.Copy(dstBytes, 0, ptr, dstBytes.Length);
+
                                            bmp.UnlockBits(bmpData); // Unlock RGB data before flip/mask
                                            
                                            // Re-apply RotateFlip as user confirmed it's needed (PDF vs GDI+ coordinates)
@@ -905,31 +906,31 @@ namespace laser_gui_test.Data.Pdf
                                                          var maskData = maskStream.Data;
                                                          resData = builder.LockBits(new Rectangle(0, 0, width, height), System.Drawing.Imaging.ImageLockMode.WriteOnly, builder.PixelFormat);
                                                          
-                                                         unsafe 
+                                                         int srcStride = mainData.Stride;
+                                                         int dstStride = resData.Stride;
+                                                         byte[] srcLine = new byte[srcStride];
+                                                         byte[] dstLine = new byte[dstStride];
+
+                                                         for (int y = 0; y < height; y++)
                                                          {
-                                                             byte* srcPtr = (byte*)mainData.Scan0;
-                                                             byte* dstPtr = (byte*)resData.Scan0;
-                                                             int srcStride = mainData.Stride;
-                                                             int dstStride = resData.Stride;
-                                                             
-                                                             for(int y=0; y<height; y++)
+                                                             Marshal.Copy((IntPtr)(mainData.Scan0.ToInt64() + y * srcStride), srcLine, 0, srcStride);
+                                                             for (int x = 0; x < width; x++)
                                                              {
-                                                                 for(int x=0; x<width; x++)
-                                                                 {
-                                                                     byte b = srcPtr[y * srcStride + x * 3];
-                                                                     byte g = srcPtr[y * srcStride + x * 3 + 1];
-                                                                     byte r = srcPtr[y * srcStride + x * 3 + 2];
-                                                                     
-                                                                     int alpha = 255;
-                                                                     if (maskData.Length >= width*height) alpha = maskData[y * width + x];
-                                                                     
-                                                                     dstPtr[y * dstStride + x * 4] = b;
-                                                                     dstPtr[y * dstStride + x * 4 + 1] = g;
-                                                                     dstPtr[y * dstStride + x * 4 + 2] = r;
-                                                                     dstPtr[y * dstStride + x * 4 + 3] = (byte)alpha;
-                                                                 }
+                                                                 byte b = srcLine[x * 3];
+                                                                 byte g = srcLine[x * 3 + 1];
+                                                                 byte r = srcLine[x * 3 + 2];
+
+                                                                 int alpha = 255;
+                                                                 if (maskData.Length >= width * height) alpha = maskData[y * width + x];
+
+                                                                 dstLine[x * 4] = b;
+                                                                 dstLine[x * 4 + 1] = g;
+                                                                 dstLine[x * 4 + 2] = r;
+                                                                 dstLine[x * 4 + 3] = (byte)alpha;
                                                              }
+                                                             Marshal.Copy(dstLine, 0, (IntPtr)(resData.Scan0.ToInt64() + y * dstStride), dstLine.Length);
                                                          }
+
                                                          
                                                          Warnings.Add("Applied Transparency Mask (SMask).");
                                                     }
