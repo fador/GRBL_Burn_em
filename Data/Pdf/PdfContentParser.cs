@@ -25,6 +25,19 @@ namespace laser_gui_test.Data.Pdf
         }
         public List<string> Warnings { get; } = new List<string>();
         
+        // OCG State
+        private bool _ocPropertiesLoaded = false;
+        private HashSet<PdfReference> _hiddenOCGs = new HashSet<PdfReference>();
+        // We might also need a set of "Visible OCGs" if we want to handle BaseState=OFF?
+        // Spec: BaseState (default ON).
+        // D -> ON [list], OFF [list].
+        // Visibility = (BaseState == ON) ? (!OFF.Contains(ocg)) : (ON.Contains(ocg))
+        private bool _ocBaseStateOn = true;
+        private HashSet<PdfReference> _ocOnList = new HashSet<PdfReference>();
+        private HashSet<PdfReference> _ocOffList = new HashSet<PdfReference>();
+        
+        // Graphics State
+        
         // Graphics State
         private class GraphicsState
         {
@@ -1028,25 +1041,35 @@ namespace laser_gui_test.Data.Pdf
 
         private void ProcessBDC(PdfDictionary props)
         {
-            // Default assumes visible unless we find an OCG that is OFF
-            bool isVisible = _currentVisibility; // Inherit parent visibility? Yes.
+            bool isVisible = _currentVisibility; // Inherit parent
 
             if (isVisible && props.ContainsKey("OC"))
             {
-                var ocRef = _reader.Resolve(props.Get("OC"));
-                // This is where we need access to the Catalog -> OCProperties
-                // Since this parser doesn't have it easily linked, we'll try a safe approach.
-                // If it's an OCG (Group), checking if it's "ON" is complex without full structure.
-                // However, most layers in simple PDFs for Lasers are:
-                // - Die Line (Cut)
-                // - Artwork (Print)
-                // If we can't resolve it, we default to VISIBLE to be safe.
-                // Only hide if we explicitly know it's off. 
-                // For now, we will track the stack but keep it visible.
-                // TODO: Implement OCG State lookup.
+                var ocRef = props.Get("OC"); // Don't resolve yet if we want the Reference itself
+                // Actually Resolve() returns the Object. If it was a Ref, we lose the Ref info?
+                // PdfReader.Resolve DOES return the Object, masking the Reference.
+                // But IsOCGVisible expects Reference for equality check!
+                // We need the Reference to check against our OFF List.
+                
+                // We need 'GetRaw' or check if item is PdfReference before Resolving?
+                // PdfDictionary.Get returns the raw object (which might be PdfReference).
+                var rawOC = props.Get("OC");
+                
+                if (rawOC is PdfReference refObj)
+                {
+                     // Use Ref ID
+                     if (!IsOCGVisible(refObj)) isVisible = false;
+                }
+                else
+                {
+                    // It's a direct object (Dictionary?) or Name?
+                    // Resolve it to be sure
+                    var resolved = _reader.Resolve(rawOC);
+                    if (!IsOCGVisible(resolved)) isVisible = false;
+                }
             }
 
-            _visibilityStack.Push(isVisible); // Push the NEW state
+            _visibilityStack.Push(isVisible); 
             _currentVisibility = isVisible;
         }
 
@@ -1122,6 +1145,115 @@ namespace laser_gui_test.Data.Pdf
         private bool IsWhite(Color c)
         {
             return c.R > 250 && c.G > 250 && c.B > 250; // Near White
+        }
+
+        private void EnsureOCPropertiesLoaded()
+        {
+            if (_ocPropertiesLoaded) return;
+            _ocPropertiesLoaded = true;
+
+            var trailer = _reader.Trailer;
+            if (trailer == null) return;
+            
+            var root = _reader.Resolve(trailer.Get("Root")) as PdfDictionary;
+            if (root == null) return;
+            
+            var ocProps = _reader.Resolve(root.Get("OCProperties")) as PdfDictionary;
+            if (ocProps == null) return;
+            
+            // Default Config
+            var d = _reader.Resolve(ocProps.Get("D")) as PdfDictionary;
+            if (d == null) return;
+            
+            // Base State
+            var baseState = _reader.Resolve(d.Get("BaseState")) as PdfName;
+            if (baseState != null && baseState.Name == "OFF") _ocBaseStateOn = false;
+            
+            // OFF Array
+            var offArr = _reader.Resolve(d.Get("OFF")) as PdfArray;
+            if (offArr != null)
+            {
+                foreach(var item in offArr.Items)
+                {
+                    if (item is PdfReference refObj) _ocOffList.Add(refObj);
+                }
+            }
+
+            // ON Array
+            var onArr = _reader.Resolve(d.Get("ON")) as PdfArray;
+            if (onArr != null)
+            {
+                foreach(var item in onArr.Items)
+                {
+                    if (item is PdfReference refObj) _ocOnList.Add(refObj);
+                }
+            }
+        }
+
+        private bool IsOCGVisible(PdfObject ocgOrName)
+        {
+            EnsureOCPropertiesLoaded();
+            
+            if (ocgOrName is PdfReference refObj)
+            {
+                // Simple Check: is it in OFF list or ON list vs BaseState
+                if (_ocBaseStateOn)
+                {
+                   // ON by default, unless in OFF list
+                   if (_ocOffList.Contains(refObj)) return false;
+                   return true;
+                }
+                else
+                {
+                   // OFF by default, unless in ON list
+                   if (_ocOnList.Contains(refObj)) return true;
+                   return false;
+                }
+            }
+             else if (ocgOrName is PdfDictionary ocmd)
+             {
+                 // Handle OCMD (Membership Dictionary)
+                 // /OCGs [ ... ] or single dict
+                 // /P (Policy): AllOn, AnyOn, AnyOff, AllOff
+                 // Implement basic "AnyOn" logic for default?
+                 
+                 // Get OCGs
+                 var ocgsObj = _reader.Resolve(ocmd.Get("OCGs"));
+                 List<PdfReference> list = new List<PdfReference>();
+                 if (ocgsObj is PdfReference singleRef) list.Add(singleRef);
+                 else if (ocgsObj is PdfArray arr)
+                 {
+                     foreach(var item in arr.Items)
+                     {
+                         if (item is PdfReference r) list.Add(r);
+                     }
+                 }
+                 
+                 if (list.Count == 0) return true; // No OCGs? Visible.
+                 
+                 var policy = _reader.Resolve(ocmd.Get("P")) as PdfName;
+                 string pName = policy?.Name ?? "AnyOn";
+                 
+                 if (pName == "AllOn")
+                 {
+                     return list.All(r => IsOCGVisible(r));
+                 }
+                 else if (pName == "AnyOff") // Visible if AT LEAST ONE is OFF
+                 {
+                      return list.Any(r => !IsOCGVisible(r));
+                 }
+                 else if (pName == "AllOff")
+                 {
+                     return list.All(r => !IsOCGVisible(r));
+                 }
+                 else // AnyOn (Default)
+                 {
+                     return list.Any(r => IsOCGVisible(r));
+                 }
+             }
+
+            // Fallback: If it's a Name (not standard for OCG usage in BDC but possible?), visible.
+            return true;
         }
     }
 }

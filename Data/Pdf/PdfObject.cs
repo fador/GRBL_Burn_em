@@ -154,6 +154,20 @@ namespace laser_gui_test.Data.Pdf
         }
 
         public override string ToString() => $"{ObjectNumber} {GenerationNumber} R";
+
+        public override bool Equals(object? obj)
+        {
+            if (obj is PdfReference other)
+            {
+                return ObjectNumber == other.ObjectNumber && GenerationNumber == other.GenerationNumber;
+            }
+            return false;
+        }
+
+        public override int GetHashCode()
+        {
+            return ObjectNumber.GetHashCode() ^ GenerationNumber.GetHashCode();
+        }
     }
 
     public class PdfStream : PdfObject
