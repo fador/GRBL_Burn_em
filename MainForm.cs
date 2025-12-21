@@ -7,6 +7,7 @@ using System.Linq;
 using laser_gui_test.Forms;
 using laser_gui_test.Data.Generators;
 using laser_gui_test.Data.Pdf;
+using System.Text.Json;
 
 namespace laser_gui_test;
 
@@ -276,6 +277,17 @@ public partial class MainForm : Form
             dlg.ShowDialog();
         });
         menuStrip.Items.Add(fileMenu);
+
+        // Edit Menu [NEW]
+        var editMenu = new ToolStripMenuItem("Edit");
+        ((ToolStripMenuItem)editMenu.DropDownItems.Add("Undo", null, (s, e) => CommandManager.Instance.Undo())).ShortcutKeys = Keys.Control | Keys.Z;
+        ((ToolStripMenuItem)editMenu.DropDownItems.Add("Redo", null, (s, e) => CommandManager.Instance.Redo())).ShortcutKeys = Keys.Control | Keys.Y;
+        editMenu.DropDownItems.Add(new ToolStripSeparator());
+        editMenu.DropDownItems.Add("Copy", null, (s, e) => CopySelection()); // Ctrl+C handled by ProcessCmdKey but we can link?
+        editMenu.DropDownItems.Add("Paste", null, (s, e) => PasteSelection()); // Ctrl+V
+        editMenu.DropDownItems.Add("Delete", null, (s, e) => DeleteSelection()); // Del
+        
+        menuStrip.Items.Add(editMenu);
 
         // Layers Menu [NEW]
         var layersMenu = new ToolStripMenuItem("Layers");
@@ -1856,6 +1868,21 @@ public partial class MainForm : Form
             CommandManager.Instance.Redo();
             return true;
         }
+        if (keyData == (Keys.Control | Keys.C))
+        {
+             CopySelection();
+             return true;
+        }
+        if (keyData == (Keys.Control | Keys.V))
+        {
+             PasteSelection();
+             return true;
+        }
+        if (keyData == Keys.Delete)
+        {
+             DeleteSelection();
+             return true;
+        }
         if (keyData == (Keys.Control | Keys.G))
         {
             var sel = ProjectState.Instance.SelectedObjects;
@@ -1878,6 +1905,88 @@ public partial class MainForm : Form
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private void CopySelection()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        if (sel.Count > 0)
+        {
+            var dtos = sel.Select(ProjectSerializer.ToDto).ToList();
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            options.Converters.Add(new ColorJsonConverter());
+            var json = JsonSerializer.Serialize(dtos, options);
+            Clipboard.SetText(json);
+        }
+    }
+
+    private void PasteSelection()
+    {
+        if (Clipboard.ContainsText())
+        {
+            try
+            {
+                var json = Clipboard.GetText();
+                if (json.TrimStart().StartsWith("[")) // Basic check
+                {
+                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    options.Converters.Add(new ColorJsonConverter());
+                    var dtos = JsonSerializer.Deserialize<List<LaserObjectDto>>(json, options);
+                    
+                    if (dtos != null && dtos.Count > 0)
+                    {
+                        var newObjects = new List<LaserObject>();
+                        foreach (var dto in dtos)
+                        {
+                            var obj = ProjectSerializer.FromDto(dto);
+                            if (obj != null)
+                            {
+                                obj.Id = Guid.NewGuid();
+                                obj.Position = new PointF(obj.Position.X + 10, obj.Position.Y + 10);
+                                if (obj.Name != null) obj.Name += " (Copy)";
+                                newObjects.Add(obj);
+                            }
+                        }
+                        
+                        if (newObjects.Count > 0)
+                        {
+                            var cmd = new AddObjectCommand(newObjects);
+                            CommandManager.Instance.Execute(cmd);
+                            
+                            ProjectState.Instance.SelectedObjects = newObjects;
+                            _workbench.Invalidate();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Paste failed: {ex.Message}");
+            }
+        }
+    }
+
+    private void DeleteSelection()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        if (sel.Count > 0)
+        {
+            // Use RemoveObjectCommand (we need to implement it or use simple removal inside a command if not exists)
+            // Wait, we probably don't have RemoveObjectCommand exposed in snippets.
+            // Let's check AddObjectCommand... wait, AddObjectCommand has Undo which removes.
+            // We need a RemoveObjectCommand that does the opposite.
+            // I'll implement a logic here, or better, check if RemoveObjectCommand exists.
+            // If not, I can create a generic command here or define it.
+            
+            // Checking CommandManager context... I saw AddObjectCommand.
+            // I should make a RemoveObjectCommand.
+            
+            var cmd = new RemoveObjectCommand(sel);
+            CommandManager.Instance.Execute(cmd);
+            
+            ProjectState.Instance.SelectedObjects = new List<LaserObject>();
+            _workbench.Invalidate();
+        }
     }
 
     public bool UpdateSelectedObjects(bool updateListSelection = true)
