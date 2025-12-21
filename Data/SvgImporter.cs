@@ -540,6 +540,11 @@ public class SvgImporter
             IsEnabled = true
         };
 
+        string textAnchor = GetStyleOrAttribute(textElem, "text-anchor")?.ToLower() ?? "start";
+        if (textAnchor == "middle") lText.Anchor = TextAnchor.Middle;
+        else if (textAnchor == "end") lText.Anchor = TextAnchor.End;
+        else lText.Anchor = TextAnchor.Start;
+
         // Attributes
         string startOffsetStr = textPathElem.Attribute("startOffset")?.Value;
         if (!string.IsNullOrEmpty(startOffsetStr))
@@ -613,73 +618,91 @@ public class SvgImporter
         else
         {
             // Simulate Align Bounds
-            // Reuse logic from LaserText.Draw or simplified approximation?
-            // We should try to be somewhat accurate.
-            // Simplified: Iterate chars.
-             float curX = 0;
-             PathWarp.ComputeBackboneProperties(effectiveBackbone, out var lengths, out var normals);
-             float totalPathLen = lengths.Last();
+            PathWarp.ComputeBackboneProperties(effectiveBackbone, out var lengths, out var normals);
+            float totalPathLen = lengths.Last();
              
-             float minX = float.MaxValue, minY = float.MaxValue;
-             float maxX = float.MinValue, maxY = float.MinValue;
-             bool hasPoints = false;
+            float minX = float.MaxValue, minY = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue;
+            bool hasPoints = false;
 
-             // Accurate simulation matching LaserText.Draw
-             using (var tmpBmp = new Bitmap(1, 1))
-             using (var g = Graphics.FromImage(tmpBmp))
-             using (var f = new Font(ffm, fontSize, lText.FontStyle, GraphicsUnit.World))
-             {
-                 foreach (char ch in txt)
-                 {
-                     if (char.IsControl(ch)) continue;
-                     string s = ch.ToString();
-                     using (var charPath = new GraphicsPath())
-                     {
-                         charPath.AddString(s, ffm, (int)lText.FontStyle, fontSize, new PointF(0, 0), sf);
-                         var bounds = charPath.GetBounds();
-                         
-                         float advance = g.MeasureString(s, f, 1000, sf).Width;
-                         if (advance <= 0) advance = fontSize * 0.3f;
-                         
-                         if (char.IsWhiteSpace(ch)) { curX += advance; continue; }
-                         
-                         float charMidX = curX + advance / 2f;
-                         float targetDist = charMidX + lText.PathOffset;
-                         if (totalPathLen > 0.001f) targetDist = ((targetDist % totalPathLen) + totalPathLen) % totalPathLen;
+            // Accurate simulation matching LaserText.Draw
+            using (var tmpBmp = new Bitmap(1, 1))
+            using (var g = Graphics.FromImage(tmpBmp))
+            using (var f = new Font(ffm, fontSize, lText.FontStyle, GraphicsUnit.World))
+            {
+                // Pre-calculate width
+                float totalWidth = 0;
+                var charAdvances = new List<float>();
+                foreach (char ch in txt)
+                {
+                    if (char.IsControl(ch)) 
+                    {
+                        charAdvances.Add(0);
+                        continue;
+                    }
+                    string s = ch.ToString();
+                    float adv = g.MeasureString(s, f, 1000, sf).Width;
+                    if (adv <= 0) adv = fontSize * 0.3f;
+                    charAdvances.Add(adv);
+                    totalWidth += adv;
+                }
 
-                         PathWarp.GetPointAndNormalAt(targetDist, effectiveBackbone, lengths, normals, out PointF origin, out PointF normal);
+                float curX = 0;
+                if (lText.Anchor == TextAnchor.Middle) curX = -totalWidth / 2f;
+                else if (lText.Anchor == TextAnchor.End) curX = -totalWidth;
+
+                int charIndex = 0;
+                foreach (char ch in txt)
+                {
+                    float advance = charAdvances[charIndex++];
+                    if (char.IsControl(ch)) continue;
+                    
+                    if (char.IsWhiteSpace(ch)) { curX += advance; continue; }
+                     
+                    string s = ch.ToString();
+                    using (var charPath = new GraphicsPath())
+                    {
+                        charPath.AddString(s, ffm, (int)lText.FontStyle, fontSize, new PointF(0, 0), sf);
+                        
+                        float charMidX = curX + advance / 2f;
+                        float targetDist = charMidX + lText.PathOffset;
+                        
+                        // Handle loop
+                        if (totalPathLen > 0.001f) targetDist = ((targetDist % totalPathLen) + totalPathLen) % totalPathLen;
+
+                        PathWarp.GetPointAndNormalAt(targetDist, effectiveBackbone, lengths, normals, out PointF origin, out PointF normal);
                          
-                         using(var mChar = new Matrix())
-                         {
-                             // 1. Center character cell on path point (matching Draw logic)
-                             mChar.Translate(-(advance / 2f), -baselineY); 
-                             mChar.Scale(1, -1, MatrixOrder.Append);
+                        using(var mChar = new Matrix())
+                        {
+                            // 1. Center character cell on path point (matching Draw logic)
+                            mChar.Translate(-(advance / 2f), -baselineY); 
+                            mChar.Scale(1, -1, MatrixOrder.Append);
                              
-                             float rotAngle = (float)(Math.Atan2(-normal.X, normal.Y) * 180 / Math.PI);
-                             mChar.Rotate(rotAngle, MatrixOrder.Append);
+                            float rotAngle = (float)(Math.Atan2(-normal.X, normal.Y) * 180 / Math.PI);
+                            mChar.Rotate(rotAngle, MatrixOrder.Append);
                              
-                             // 2. Apply position + VerticalOffset
-                             PointF finalPos = new PointF(origin.X + normal.X * lText.VerticalOffset, origin.Y + normal.Y * lText.VerticalOffset);
+                            // 2. Apply position + VerticalOffset
+                            PointF finalPos = new PointF(origin.X + normal.X * lText.VerticalOffset, origin.Y + normal.Y * lText.VerticalOffset);
                              
-                             mChar.Translate(finalPos.X, finalPos.Y, MatrixOrder.Append);
-                             charPath.Transform(mChar);
+                            mChar.Translate(finalPos.X, finalPos.Y, MatrixOrder.Append);
+                            charPath.Transform(mChar);
                              
-                             var cBounds = charPath.GetBounds();
-                             if (cBounds.Left < minX) minX = cBounds.Left;
-                             if (cBounds.Top < minY) minY = cBounds.Top;
-                             if (cBounds.Right > maxX) maxX = cBounds.Right;
-                             if (cBounds.Bottom > maxY) maxY = cBounds.Bottom;
-                             hasPoints = true;
-                         }
-                         curX += advance;
-                     }
-                 }
-             }
+                            var cBounds = charPath.GetBounds();
+                            if (cBounds.Left < minX) minX = cBounds.Left;
+                            if (cBounds.Top < minY) minY = cBounds.Top;
+                            if (cBounds.Right > maxX) maxX = cBounds.Right;
+                            if (cBounds.Bottom > maxY) maxY = cBounds.Bottom;
+                            hasPoints = true;
+                        }
+                    }
+                    curX += advance;
+                }
+            }
              
-             if (hasPoints)
-                finalBounds = new RectangleF(minX, minY, maxX - minX, maxY - minY);
-             else
-                finalBounds = new RectangleF(backbonePath.Position, new SizeF(0,0));
+            if (hasPoints)
+               finalBounds = new RectangleF(minX, minY, maxX - minX, maxY - minY);
+            else
+               finalBounds = new RectangleF(backbonePath.Position, new SizeF(0,0));
         }
 
         lText.Position = finalBounds.Location;

@@ -577,7 +577,6 @@ public class LaserText : LaserObject
         else // Align
         {
             // Simulate alignment layout
-            float curX = 0;
             PathWarp.ComputeBackboneProperties(effectiveBackbone, out var lengths, out var normals);
             float totalPathLen = lengths.Last();
             
@@ -589,20 +588,52 @@ public class LaserText : LaserObject
             using (var f = new Font(family, emSize, FontStyle, GraphicsUnit.World))
             {
                 var sf = StringFormat.GenericTypographic;
+                
+                // Calculate total width first for Anchor alignment
+                float totalWidth = 0;
+                var charAdvances = new List<float>();
                 foreach (char ch in Text)
                 {
+                    if (char.IsControl(ch)) 
+                    {
+                        charAdvances.Add(0); 
+                        continue;
+                    }
+                    string s = ch.ToString();
+                    float adv = g.MeasureString(s, f, 1000, sf).Width;
+                     if (adv <= 0) adv = emSize * 0.3f;
+                    charAdvances.Add(adv);
+                    totalWidth += adv;
+                }
+
+                float curX = 0;
+                if (Anchor == TextAnchor.Middle) curX = -totalWidth / 2f;
+                else if (Anchor == TextAnchor.End) curX = -totalWidth;
+
+                int charIndex = 0;
+                foreach (char ch in Text)
+                {
+                    float advance = charAdvances[charIndex++];
                     if (char.IsControl(ch)) continue;
+                    
+                    if (char.IsWhiteSpace(ch))
+                    {
+                        curX += advance;
+                        continue;
+                    }
+
                     string s = ch.ToString();
                     using (var charPath = new GraphicsPath())
                     {
                         charPath.AddString(s, family, (int)FontStyle, emSize, new PointF(0, 0), sf);
-                        float advance = g.MeasureString(s, f, 1000, sf).Width;
-                        if (advance <= 0) advance = emSize * 0.3f;
-                        if (char.IsWhiteSpace(ch)) { curX += advance; continue; }
-
+                        
                         float charMidX = curX + advance / 2f;
                         float targetDist = charMidX + PathOffset;
-                        if (totalPathLen > 0.001f) targetDist = ((targetDist % totalPathLen) + totalPathLen) % totalPathLen;
+                        
+                        // Handle loop wrap? usually textPath doesn't wrap unless requested, implies closed loop
+                        if (totalPathLen > 0.001f) 
+                             targetDist = ((targetDist % totalPathLen) + totalPathLen) % totalPathLen;
+                        
                         PathWarp.GetPointAndNormalAt(targetDist, effectiveBackbone, lengths, normals, out PointF origin, out PointF normal);
 
                         using (var mChar = new Matrix())
@@ -620,8 +651,8 @@ public class LaserText : LaserObject
                             if (cb.Right > maxX) maxX = cb.Right; if (cb.Bottom > maxY) maxY = cb.Bottom;
                             hasPoints = true;
                         }
-                        curX += advance;
                     }
+                    curX += advance;
                 }
             }
             bounds = hasPoints ? RectangleF.FromLTRB(minX, minY, maxX, maxY) : RectangleF.Empty;
@@ -688,38 +719,48 @@ public class LaserText : LaserObject
                              gp.Dispose();
                              gp = new GraphicsPath();
 
-                             float curX = 0;
                              PathWarp.ComputeBackboneProperties(effectiveBackbone, out var lengths, out var normals);
                              
                              float totalPathLen = lengths.Last();
 
+                             using (var tmpBmp = new Bitmap(1, 1))
+                             using (var gCtx = Graphics.FromImage(tmpBmp))
                              using (var f = new Font(family, emSize, FontStyle, GraphicsUnit.World))
                              {
+
+                                 
+                                 // Calculate total width first for Anchor alignment
+                                 float totalWidth = 0;
+                                 var charAdvances = new List<float>(); // Store advances to avoid re-measuring
                                  foreach (char ch in Text)
                                  {
+                                     if (char.IsControl(ch)) 
+                                     {
+                                         charAdvances.Add(0);
+                                         continue;
+                                     }
                                      string s = ch.ToString();
+                                     float adv = gCtx.MeasureString(s, f, 1000, sf).Width;
+                                     if (adv <= 0) adv = emSize * 0.3f;
+                                     charAdvances.Add(adv);
+                                     totalWidth += adv;
+                                 }
+                                 
+                                 float curX = 0;
+                                 if (Anchor == TextAnchor.Middle) curX = -totalWidth / 2f;
+                                 else if (Anchor == TextAnchor.End) curX = -totalWidth;
+
+                                 int charIndex = 0;
+                                 foreach (char ch in Text)
+                                 {
+                                     float advance = charAdvances[charIndex++];
                                      if (char.IsControl(ch)) continue; 
                                      
-                                     float advance;
+                                     string s = ch.ToString();
+
                                      using (var charPath = new GraphicsPath())
                                      {
                                          charPath.AddString(s, family, (int)FontStyle, emSize, new PointF(0, 0), sf);
-                                         
-                                         // Advance logic
-                                         // Optimization: If we could pass 'g' here it would be better, but we are in Data model.
-                                         // We'll create a temp bitmap 1x1 just for measurement if needed, OR use simple approximation?
-                                         // But GenericTypographic should be okay without context? 
-                                         // Actually MeasureString needs Graphics context.
-                                          // Note: This matches Draw method logic.
-                                         // In GetPath we don't have G. 
-                                         // Let's create a temp static or dispose it.
-                                         using (var bmp = new Bitmap(1,1))
-                                         using (var gCtx = Graphics.FromImage(bmp))
-                                         {
-                                              advance = gCtx.MeasureString(s, f, 1000, sf).Width;
-                                         }
-                                         
-                                         if (advance <= 0) advance = emSize * 0.3f;
                                          
                                          if (char.IsWhiteSpace(ch))
                                          {
@@ -749,7 +790,7 @@ public class LaserText : LaserObject
                                          curX += advance;
                                      } // End Using CharPath
                                  } // End Foreach
-                             } // End Using Font
+                             } // End Using Font/Graphics
                              return gp;
                          }
                      }
