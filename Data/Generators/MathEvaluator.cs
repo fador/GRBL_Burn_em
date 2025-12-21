@@ -92,7 +92,12 @@ namespace laser_gui_test.Data.Generators
                         id += expr[i++];
                     tokens.Add(new Token { Type = TokenType.Identifier, Value = id });
                 }
-                else if ("+*-/^%,".Contains(c))
+                else if (c == ',')
+                {
+                    tokens.Add(new Token { Type = TokenType.Comma, Value = "," });
+                    i++;
+                }
+                else if ("+*-/^%".Contains(c))
                 {
                     tokens.Add(new Token { Type = TokenType.Operator, Value = c.ToString() });
                     i++;

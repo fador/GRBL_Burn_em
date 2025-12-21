@@ -9,7 +9,7 @@ namespace laser_gui_test.Data.Generators
 {
     public class CustomShapeParameters : ShapeParameters, ICustomTypeDescriptor
     {
-        private string _definitions = "a=10; b=5";
+        private string _definitions = "a=16; b=13";
         private Dictionary<string, double> _paramValues = new Dictionary<string, double>();
         private PropertyDescriptorCollection _globalProps;
 
@@ -21,15 +21,15 @@ namespace laser_gui_test.Data.Generators
 
         [Category("Formula"), Description("Script to calculate x and y. Use t as loop variable.")]
         [Editor("System.ComponentModel.Design.MultilineStringEditor, System.Design, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a", typeof(System.Drawing.Design.UITypeEditor))]
-        public string Formula { get; set; } = "x = 16 * sin(t)^3\r\ny = 13 * cos(t) - 5 * cos(2*t) - 2 * cos(3*t) - cos(4*t)";
+        public string Formula { get; set; } = "x = a * pow(sin(t), 3)\r\ny = b * cos(t) - 5 * cos(2*t) - 2 * cos(3*t) - cos(4*t)";
 
         [Category("Loop"), Description("Step size for t")]
         public float StepSize { get; set; } = 0.1f;
 
         [Category("Loop"), Description("Maximum number of steps")]
-        public int MaxSteps { get; set; } = 1000;
+        public int MaxSteps { get; set; } = 63;
 
-        [Category("Configuration"), Description("Define variables here (e.g. a=10; b=5). semicolon separated.")]
+        [Category("Configuration"), Description("Define variables here (e.g. a=16; b=13). semicolon separated.")]
         public string Definitions
         {
             get => _definitions;
@@ -57,10 +57,7 @@ namespace laser_gui_test.Data.Generators
                         string key = kv[0].Trim();
                         if (double.TryParse(kv[1].Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double val))
                         {
-                            if (!_paramValues.ContainsKey(key))
-                            {
-                                _paramValues[key] = val;
-                            }
+                            _paramValues[key] = val;
                             newKeys.Add(key);
                         }
                     }
@@ -103,20 +100,20 @@ namespace laser_gui_test.Data.Generators
             return points;
         }
 
-        // ICustomTypeDescriptor implementation remains roughly the same but simplified property set
+        // ICustomTypeDescriptor implementation
         public AttributeCollection GetAttributes() => TypeDescriptor.GetAttributes(this, true);
-        public string GetClassName() => TypeDescriptor.GetClassName(this, true);
-        public string GetComponentName() => TypeDescriptor.GetComponentName(this, true);
+        public string? GetClassName() => TypeDescriptor.GetClassName(this, true);
+        public string? GetComponentName() => TypeDescriptor.GetComponentName(this, true);
         public TypeConverter GetConverter() => TypeDescriptor.GetConverter(this, true);
-        public EventDescriptor GetDefaultEvent() => TypeDescriptor.GetDefaultEvent(this, true);
-        public PropertyDescriptor GetDefaultProperty() => null;
-        public object GetEditor(Type editorBaseType) => TypeDescriptor.GetEditor(this, editorBaseType, true);
+        public EventDescriptor? GetDefaultEvent() => TypeDescriptor.GetDefaultEvent(this, true);
+        public PropertyDescriptor? GetDefaultProperty() => null;
+        public object? GetEditor(Type editorBaseType) => TypeDescriptor.GetEditor(this, editorBaseType, true);
         public EventDescriptorCollection GetEvents() => TypeDescriptor.GetEvents(this, true);
-        public EventDescriptorCollection GetEvents(Attribute[] attributes) => TypeDescriptor.GetEvents(this, attributes, true);
+        public EventDescriptorCollection GetEvents(Attribute[]? attributes) => TypeDescriptor.GetEvents(this, attributes, true);
         
         public PropertyDescriptorCollection GetProperties() => GetProperties(null);
 
-        public PropertyDescriptorCollection GetProperties(Attribute[] attributes)
+        public PropertyDescriptorCollection GetProperties(Attribute[]? attributes)
         {
             var props = new List<PropertyDescriptor>();
             
@@ -135,7 +132,7 @@ namespace laser_gui_test.Data.Generators
             return new PropertyDescriptorCollection(props.ToArray());
         }
 
-        public object GetPropertyOwner(PropertyDescriptor pd) => this;
+        public object? GetPropertyOwner(PropertyDescriptor? pd) => this;
     }
 
     public class DynamicPropertyDescriptor : PropertyDescriptor
@@ -154,11 +151,14 @@ namespace laser_gui_test.Data.Generators
         public override bool IsReadOnly => false;
         public override Type PropertyType => typeof(double);
         public override bool CanResetValue(object component) => false;
-        public override object GetValue(object component) => _dict[_key];
-        public override void ResetValue(object component) { }
-        public override void SetValue(object component, object value)
+        public override object? GetValue(object? component) => _dict[_key];
+        public override void ResetValue(object? component) { }
+        public override void SetValue(object? component, object? value)
         {
-            _dict[_key] = Convert.ToDouble(value);
+            if (value != null)
+            {
+                _dict[_key] = Convert.ToDouble(value);
+            }
         }
         public override bool ShouldSerializeValue(object component) => false;
     }

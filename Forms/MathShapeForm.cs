@@ -109,7 +109,7 @@ namespace laser_gui_test.Forms
             pnlStep.Controls.Add(_numStepSize);
             
             pnlStep.Controls.Add(new Label { Text = "Max:", Width = 40, TextAlign = ContentAlignment.MiddleLeft });
-            _numMaxSteps = new NumericUpDown { Minimum = 10, Maximum = 100000, Value = 50, Width = 70 };
+            _numMaxSteps = new NumericUpDown { Minimum = 10, Maximum = 100000, Value = 63, Width = 70 };
             _numMaxSteps.ValueChanged += UpdateCustomParams;
             pnlStep.Controls.Add(_numMaxSteps);
             _customPanel.Controls.Add(pnlStep);
