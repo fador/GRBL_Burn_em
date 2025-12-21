@@ -282,6 +282,11 @@ public partial class MainForm : Form
         layersMenu.DropDownItems.Add("Scale Output...", null, (s, e) => ShowScaleLayerDialog());
         menuStrip.Items.Add(layersMenu);
 
+        // Insert Menu [NEW]
+        var insertMenu = new ToolStripMenuItem("Insert");
+        insertMenu.DropDownItems.Add("Mathematical Shape...", null, (s, e) => ShowMathShapeDialog());
+        menuStrip.Items.Add(insertMenu);
+
         var toolMenu = new ToolStripMenuItem("Tool");
         toolMenu.DropDownItems.Add("Edit text", null, (s, e) => EditText());
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -2117,6 +2122,23 @@ public partial class MainForm : Form
             _layerList.Refresh();
             _workbench.Invalidate();
             UpdateSelectedObjects();
+        }
+    }
+
+    private void ShowMathShapeDialog()
+    {
+        using var dlg = new MathShapeForm();
+        if (dlg.ShowDialog() == DialogResult.OK && dlg.ResultPath != null)
+        {
+            var lp = dlg.ResultPath;
+            if (ProjectState.Instance.ActiveLayer != null)
+            {
+                lp.LayerId = ProjectState.Instance.ActiveLayer.Id;
+            }
+            
+            var cmd = new AddObjectCommand(lp);
+            CommandManager.Instance.Execute(cmd);
+            _workbench.Invalidate();
         }
     }
 }
