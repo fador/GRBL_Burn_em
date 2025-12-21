@@ -12,6 +12,17 @@ namespace laser_gui_test.Data.Pdf
         private readonly PdfReader _reader;
         private readonly PdfDictionary _resources;
         private Matrix _ctm;
+        private Dictionary<string, PdfFontInfo> _fontCache = new Dictionary<string, PdfFontInfo>();
+        
+        private class PdfFontInfo
+        {
+             public string BaseFont;
+             public bool IsWinAnsi;
+             public int[] Widths;
+             public int FirstChar;
+             public int LastChar;
+             public int MissingWidth = 600; 
+        }
         public List<string> Warnings { get; } = new List<string>();
         
         // Graphics State
@@ -355,14 +366,34 @@ namespace laser_gui_test.Data.Pdf
                 case "TJ": // Show Text with spacing
                     if (operands.Count == 1 && operands[0] is PdfArray arr)
                     {
-                        // Simplified: concatenate string parts
-                        StringBuilder sb = new StringBuilder();
                         foreach(var item in arr.Items)
                         {
-                            if (item is PdfString s) sb.Append(s.Value);
-                            // Numbers are spacing adjustments, ignoring for MVP
+                            if (item is PdfString s) 
+                            { 
+                                AddTextObject(s.Value, objects);
+                            }
+                            else if (item is PdfNumber n)
+                            {
+                                // Adjust text position defined by n
+                                // "Subtracting" the amount (Move Left)
+                                // Units: thousandths of text space
+                                // tx = (-n / 1000) * FontSize * HScale
+                                float spacing = (float)n.RealValue;
+                                float tx = (-spacing / 1000f) * _state.FontSize * (_state.TextHScale / 100f);
+                                _textLineMatrix.Translate(tx, 0, MatrixOrder.Prepend); // Wait, TJ updates Text Matrix (Tm), not Text Line Matrix (Tlm) usually?
+                                // Actually TJ updates Tm. Tlm is start of line.
+                                // In this parser: _textMatrix is Tm. _textLineMatrix is Tlm.
+                                // Td/TD updates Tlm. TJ updates Tm. 
+                                // My code uses _textMatrix = _textLineMatrix.Clone() at start of line.
+                                // So here we must update _textMatrix.
+                                _textMatrix.Translate(tx, 0, MatrixOrder.Prepend);
+                            }
                         }
-                        AddTextObject(sb.ToString(), objects);
+                    }
+                    else if (operands.Count == 1 && operands[0] is PdfString strOne)
+                    {
+                         // Handle case where TJ is called with single string (unlikely but possible error)
+                         AddTextObject(strOne.Value, objects);
                     }
                     break;
                 
@@ -509,159 +540,148 @@ namespace laser_gui_test.Data.Pdf
 
         private void AddTextObject(string text, List<LaserObject> objects)
         {
-            if (string.IsNullOrEmpty(text)) return;
+            // Resolve Font info
+            PdfFontInfo fontInfo = ResolveCurrentFont();
             
-            // Calculate Position: (0, TextRise) in Text Space -> Transformed by Tm -> Transformed by CTM
-            // Reverting Top-Left Shift: LaserText implementation will be fixed to align Text within the Box
-            // starting from the Baseline/Position.
+            // Decoded text if needed
+            string decodedText = text;
+            if (fontInfo.IsWinAnsi)
+            {
+                 try 
+                 {
+                    byte[] raw = new byte[text.Length];
+                    for(int i=0;i<text.Length;i++) raw[i] = (byte)text[i];
+                    decodedText = Encoding.GetEncoding("iso-8859-1").GetString(raw);
+                 }
+                 catch {}
+            }
+            
+            // Calculate Width & Update Matrix
+            float totalWidth = 0;
+            if (!string.IsNullOrEmpty(text))
+            {
+                totalWidth = GetTextWidth(text, fontInfo, _state.FontSize, _state.TextHScale);
+            }
+            
+            // Current Position
             PointF[] pts = new PointF[] { new PointF(0, _state.TextRise) };
             _textMatrix.TransformPoints(pts);
             _state.CTM.TransformPoints(pts);
-
-            // Font Information
-            string fontName = "Arial";
-            bool isWinAnsi = false;
             
-            if (_state.FontName != null && _resources != null)
-            {
-                 var fonts = _reader.Resolve(_resources.Get("Font")) as PdfDictionary;
-                 if (fonts != null)
-                 {
-                     var fontDict = _reader.Resolve(fonts.Get(_state.FontName.Name)) as PdfDictionary;
-                     if (fontDict != null)
-                     {
-                         // Check Encoding
-                         var encoding = _reader.Resolve(fontDict.Get("Encoding"));
-                         if (encoding is PdfName encName && encName.Name == "WinAnsiEncoding")
-                         {
-                             isWinAnsi = true;
-                         }
+            // Update Matrix for NEXT text
+            // Translate Tm by (width, 0)
+            _textMatrix.Translate(totalWidth, 0, MatrixOrder.Prepend);
 
-                         var baseFont = _reader.Resolve(fontDict.Get("BaseFont")) as PdfName;
-                         if (baseFont != null)
-                         {
-                             fontName = baseFont.Name;
-                             if (fontName.Contains("+")) fontName = fontName.Substring(fontName.IndexOf('+') + 1);
-                             if (fontName.Contains(",")) fontName = fontName.Split(',')[0];
-                             if (fontName.Contains("-")) fontName = fontName.Split('-')[0];
-                         }
-                     }
-                 }
-            }
-
-            // Decode Text if needed
-            if (isWinAnsi)
-            {
-                // So checking chars for values > 127 and re-mapping might work, or using the specific encoding.
-                
-                // Quick hack: Re-encode to bytes then to 1252
-                byte[] raw = new byte[text.Length];
-                for(int i=0;i<text.Length;i++) raw[i] = (byte)text[i];
-                
-                try 
-                {
-                    // Register provider if needed? .NET Core usually needs it.
-                    // System.Text.Encoding.CodePages is typically needed. 
-                    // Fallback: Manual mapping for common chars or blindly trusting internal conversion?
-                    // Let's assume generic "Western" chars for now using ISO-8859-1 which is close to WinAnsi
-                    text = Encoding.GetEncoding("iso-8859-1").GetString(raw);
-                }
-                catch
-                {
-                    // Fallback if encoding not available
-                    // Text might be legible enough
-                }
-            }
-            // User Issue: "two numbers" for UTF-8 chars?
-            // If the PDF uses a Identity-H / UTF-8 but we treat as bytes?
-            // If text contains sequences like \xc3\xa4 (ä), and we see it as "Ã¤", that's UTF-8 interpreted as Latin1.
-            // If user sees "two numbers" maybe they mean the font name or something else?
-            // But if text is invisible, we skip it anyway.
+            if (string.IsNullOrEmpty(decodedText)) return;
             
+             // Visibility Checks
             if (_state.RenderMode == 3) return; // Invisible
-            if (_state.RenderMode == 7) return; // Clip Only (Invisible)
+            if (_state.RenderMode == 7) return; // Clip Only
             
-            // Check Transparency (Alpha)
-            // If Text is Filled (Mode 0, 2, 4...) check FillAlpha.
-            // If Text is Stroked (Mode 1, 2, 5...) check StrokeAlpha.
-            // Common case: 0 (Fill).
             bool isFilled = (_state.RenderMode == 0 || _state.RenderMode == 2 || _state.RenderMode == 4 || _state.RenderMode == 6);
             bool isStroked = (_state.RenderMode == 1 || _state.RenderMode == 2 || _state.RenderMode == 5 || _state.RenderMode == 6);
             
-            if (isFilled && _state.FillAlpha < 0.05f) return; // Effectively transparent
-            if (isStroked && !isFilled && _state.StrokeAlpha < 0.05f) return; // Stroked only and transparent
-            
-            // Check Color (White = Ignore)
+            if (isFilled && _state.FillAlpha < 0.05f) return;
+            if (isStroked && !isFilled && _state.StrokeAlpha < 0.05f) return;
             if (isFilled && IsWhite(_state.FillColor)) return;
             if (isStroked && !isFilled && IsWhite(_state.StrokeColor)) return;
-
-            // Check Horizontal Scaling (Tz)
-            // If scale is near zero, text is invisible
             if (Math.Abs(_state.TextHScale) < 0.1f) return;
             
-            // Font Size scaling
-            
-            // Check Scale/Visibility (Bounds)
-            if (_state.ClipRegion != null)
-            {
-                 // Check if the text anchor point is visible
-                 if (!_state.ClipRegion.IsVisible(pts[0]))
-                 {
-                      return; 
-                 }
-            }
-            
-            // Font Size scaling
-            // Text Matrix scale * CTM scale * FontSize
-            // We need to extract the "effective" scaling factor from the CTM/TextMatrix.
-            // Simplified: The Y-scale of the CTM is a good approximation for uniform scaling.
-            // CTM is [m11 m12 m21 m22 dx dy]. Y-scale is roughly sqrt(m21^2 + m22^2) or just m22 if no rotation/skew.
+            if (_state.ClipRegion != null && !_state.ClipRegion.IsVisible(pts[0])) return;
+
+            // Effective Size
             float ctmScaleY = (float)Math.Sqrt(_state.CTM.Elements[2] * _state.CTM.Elements[2] + _state.CTM.Elements[3] * _state.CTM.Elements[3]);
-            if (ctmScaleY == 0) ctmScaleY = 1.0f; // Safety
-            
-            // Also consider Text Matrix (Tm) scaling if separate? 
-            // Currently _textMatrix is applied to Position. 
-            // In PDF, Text Size is Tf size parameter. Text Matrix scales coordinate system.
-            // So Effective Size = Tf_Size * Tm_Scale * CTM_Scale.
-            
-            // Re-calculate scale from Text Matrix too
-            float tmScaleY = (float)Math.Sqrt(_textMatrix.Elements[2] * _textMatrix.Elements[2] + _textMatrix.Elements[3] * _textMatrix.Elements[3]);
+            if (ctmScaleY == 0) ctmScaleY = 1.0f;
+            float tmScaleY = (float)Math.Sqrt(_textMatrix.Elements[2] * _textMatrix.Elements[2] + _textMatrix.Elements[3] * _textMatrix.Elements[3]); 
             if (tmScaleY == 0) tmScaleY = 1.0f;
 
             float effectiveFontSize = _state.FontSize * tmScaleY * ctmScaleY;
-            
+            if (effectiveFontSize < 0.5f) return;
+
+             // Create Object
             var lt = new LaserText();
-            lt.Text = text;
-            lt.Position = pts[0]; // Use pts[0] as the anchor point
-            lt.FontSize = effectiveFontSize; 
-            lt.FontName = fontName;
-            // Estimate Width for Filter safety (Length * Size * 0.5 approx aspect)
-            // This is just to ensure it's not detected as "Zero Size" invisible object.
-            float estWidth = text.Length * effectiveFontSize * 0.5f;
-            lt.Size = new SizeF(estWidth, effectiveFontSize);
-            // lt.Color = _state.FillColor; // Not supported on base object yet
-            // Calculate rotation from CTM (assuming text is aligned with CTM's X-axis)
-            // Rotation = atan2(m12, m11) of the combined text matrix
-            // For simplicity, we can use the CTM's rotation if text matrix doesn't add rotation.
-            // Here, we'll use the CTM's rotation.
+            lt.Text = decodedText;
+            lt.Position = pts[0];
+            lt.FontSize = effectiveFontSize;
+            lt.FontName = fontInfo.BaseFont ?? "Arial";
+            
+            // Helper for estimated visual width
+            float estVisualWidth = decodedText.Length * effectiveFontSize * 0.5f; 
+            lt.Size = new SizeF(estVisualWidth, effectiveFontSize);
+            
             float rotation = (float)Math.Atan2(_state.CTM.Elements[1], _state.CTM.Elements[0]) * (180f / (float)Math.PI);
             lt.Rotation = rotation;
-
-            // Filter out empty or whitespace-only text
-            if (string.IsNullOrWhiteSpace(lt.Text)) return;
-
-            // Filter out near-zero font sizes. 
-            // PDF units are usually points (1/72 inch). 
-            // 0.5 effective PDF units is still small (~0.17mm).
-            // Let's filter anything smaller than 0.5 effective units.
-            if (lt.FontSize > 0.5f)
+            
+            if (!string.IsNullOrWhiteSpace(lt.Text))
             {
-                 objects.Add(lt);
+                objects.Add(lt);
             }
-            else
+        }
+
+        private PdfFontInfo ResolveCurrentFont()
+        {
+            if (_state.FontName == null) return new PdfFontInfo { MissingWidth = 600 };
+            
+            string name = _state.FontName.Name;
+            if (_fontCache.ContainsKey(name)) return _fontCache[name];
+            
+            var info = new PdfFontInfo { BaseFont = "Arial", MissingWidth = 600 };
+            _fontCache[name] = info; 
+            
+            if (_resources == null) return info;
+            var fonts = _reader.Resolve(_resources.Get("Font")) as PdfDictionary;
+            if (fonts == null) return info;
+            
+            var fontDict = _reader.Resolve(fonts.Get(name)) as PdfDictionary;
+            if (fontDict == null) return info;
+            
+            var baseFont = _reader.Resolve(fontDict.Get("BaseFont")) as PdfName;
+            if (baseFont != null) 
             {
-                 // Warnings.Add($"Skipped zero-size text '{text}' (Size: {lt.FontSize:F2})");
+                string fn = baseFont.Name;
+                if (fn.Contains("+")) fn = fn.Substring(fn.IndexOf('+') + 1);
+                info.BaseFont = fn;
             }
+            
+            var encoding = _reader.Resolve(fontDict.Get("Encoding"));
+            if (encoding is PdfName encName && encName.Name == "WinAnsiEncoding")
+            {
+                info.IsWinAnsi = true;
+            }
+            
+            // Widths
+            var firstCharObj = _reader.Resolve(fontDict.Get("FirstChar")) as PdfNumber;
+            var lastCharObj = _reader.Resolve(fontDict.Get("LastChar")) as PdfNumber;
+            var widthsObj = _reader.Resolve(fontDict.Get("Widths")) as PdfArray;
+            
+            if (firstCharObj != null && lastCharObj != null && widthsObj != null)
+            {
+                info.FirstChar = (int)firstCharObj.IntValue;
+                info.LastChar = (int)lastCharObj.IntValue;
+                info.Widths = widthsObj.Items.Select(x => (int)((PdfNumber)x).IntValue).ToArray();
+            }
+            
+            return info;
+        }
+        
+        private float GetTextWidth(string text, PdfFontInfo font, float fontSize, float hScale)
+        {
+            float total = 0;
+            foreach(char c in text)
+            {
+                int w = font.MissingWidth;
+                if (font.Widths != null)
+                {
+                    int code = (int)c;
+                    if (code >= font.FirstChar && code <= font.LastChar)
+                    {
+                        int idx = code - font.FirstChar;
+                        if (idx >= 0 && idx < font.Widths.Length) w = font.Widths[idx];
+                    }
+                }
+                total += w;
+            }
+            return total * (fontSize / 1000f) * (hScale / 100f);
         }
 
         private void ProcessXObject(PdfName name, List<LaserObject> objects)

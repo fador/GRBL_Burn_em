@@ -579,8 +579,40 @@ namespace laser_gui_test.Data.Pdf
                 return UnfilterPng(data, predictor, columns, colors, bpc);
             }
             
+            if (predictor == 2)
+            {
+                return UnfilterTiff2(data, columns, colors, bpc);
+            }
+            
             // TIFF Predictor 2 unsupported for now
             Warnings.Add($"Unsupported Predictor {predictor}");
+            return data;
+        }
+
+        private byte[] UnfilterTiff2(byte[] data, int columns, int colors, int bpc)
+        {
+            if (bpc != 8) 
+            {
+                Warnings.Add($"TIFF Predictor 2 only implemented for 8 bpc. Got {bpc}.");
+                return data; 
+            }
+            
+            int rowBytes = columns * colors; // For 8 bpc
+            
+            // Loop rows
+            for (int i = 0; i < data.Length; i += rowBytes)
+            {
+                int rowStart = i;
+                int rowEnd = Math.Min(i + rowBytes, data.Length);
+                
+                // Horizontal Differencing
+                for (int j = colors; j < rowEnd - rowStart; j++)
+                {
+                     // data[rowStart + j] += data[rowStart + j - colors];
+                     int idx = rowStart + j;
+                     data[idx] = (byte)(data[idx] + data[idx - colors]);
+                }
+            }
             return data;
         }
 

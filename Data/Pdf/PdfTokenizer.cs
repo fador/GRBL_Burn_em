@@ -213,12 +213,27 @@ namespace laser_gui_test.Data.Pdf
                     else if (IsDigit((char)next))
                     {
                          // Octal \ddd
-                         // complex logic, skipping for MVP, just taking literal if not matched
-                         buffer.Add(next); 
+                         int val = next - '0';
+                         // Check up to 2 more digits
+                         for (int k = 0; k < 2; k++)
+                         {
+                             if (_pos < _len)
+                             {
+                                 byte nextByte = _data[_pos];
+                                 if (nextByte >= '0' && nextByte <= '7')
+                                 {
+                                     val = (val << 3) + (nextByte - '0');
+                                     _pos++;
+                                 }
+                                 else break;
+                             }
+                         }
+                         buffer.Add((byte)(val & 0xFF));
                     }
                     else
                     {
-                        // Ignore backslash?
+                        // Ignore backslash (unless it was essentially escaped self? no, self escaped is \\)
+                        // Spec: If char is not one of above, backslash is ignored.
                         buffer.Add(next);
                     }
                 }
