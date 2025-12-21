@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Icons\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="OpenCvSharp4.Extensions" Version="4.11.0.20250507" />
     <PackageReference Include="OpenCvSharp4.Windows" Version="4.11.0.20250507" />
     <PackageReference Include="RJCP.SerialPortStream" Version="3.0.4" />

@@ -8,6 +8,8 @@ using laser_gui_test.Forms;
 using laser_gui_test.Data.Generators;
 using laser_gui_test.Data.Pdf;
 using System.Text.Json;
+using System.IO;
+using System.Reflection;
 
 namespace laser_gui_test;
 
@@ -99,6 +101,7 @@ public partial class MainForm : Form
     private CheckBox _chkReversePath = null!;
     private CheckBox _chkUpsideDown = null!;
     private ToolStripComboBox _cmbWarpMethod = null!;
+    private ToolTip _toolTip = new ToolTip();
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -1429,29 +1432,56 @@ public partial class MainForm : Form
 
     private void InitializeTools()
     {
-        var toolMap = new Dictionary<string, ToolType>
+        var toolMap = new Dictionary<string, (ToolType Type, string Icon)>
         {
-            { "Select", ToolType.Select },
-            { "Line", ToolType.DrawLine },
-            { "Box", ToolType.DrawBox },
-            { "Circle", ToolType.DrawCircle },
-            { "Bezier", ToolType.DrawBezier },
-            { "Text", ToolType.Text },
-            { "Rotate", ToolType.Rotate },
-            { "Ruler", ToolType.Ruler },
-            { "Move", ToolType.ClickToMove }
+            { "Select", (ToolType.Select, "tool_select.png") },
+            { "Line", (ToolType.DrawLine, "tool_line.png") },
+            { "Box", (ToolType.DrawBox, "tool_box.png") },
+            { "Circle", (ToolType.DrawCircle, "tool_circle.png") },
+            { "Bezier", (ToolType.DrawBezier, "tool_bezier.png") },
+            { "Text", (ToolType.Text, "tool_text.png") },
+            { "Rotate", (ToolType.Rotate, "tool_rotate.png") },
+            { "Ruler", (ToolType.Ruler, "tool_ruler.png") },
+            { "Move Laser", (ToolType.ClickToMove, "tool_move.png") }
         };
 
         foreach (var kvp in toolMap)
         {
             var btn = new Button
             {
-                Text = kvp.Key,
                 Size = new Size(50, 50),
                 Margin = new Padding(2),
-                Tag = kvp.Value
+                Tag = kvp.Value.Type,
+                BackgroundImageLayout = ImageLayout.Zoom
             };
+
+            // Load from Embedded Resource
+            string resourceName = $"laser_gui_test.Icons.{kvp.Value.Icon}";
+            bool iconLoaded = false;
             
+            try
+            {
+                using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+                {
+                    if (stream != null)
+                    {
+                        btn.BackgroundImage = Image.FromStream(stream);
+                        iconLoaded = true;
+                    }
+                }
+            }
+            catch(Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to load icon {resourceName}: {ex.Message}");
+            }
+
+            if (!iconLoaded)
+            {
+                btn.Text = kvp.Key;
+            }
+            
+            _toolTip.SetToolTip(btn, kvp.Key);
+
             btn.Click += (s, e) => 
             {
                 ToolManager.Instance.SetTool((ToolType)btn.Tag);
