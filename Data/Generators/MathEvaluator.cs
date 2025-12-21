@@ -97,7 +97,22 @@ namespace laser_gui_test.Data.Generators
                     tokens.Add(new Token { Type = TokenType.Comma, Value = "," });
                     i++;
                 }
-                else if ("+*-/^%".Contains(c))
+                else if (c == '-')
+                {
+                    // Check for unary minus
+                    // Start of expr, or after operator, open paren, comma
+                    bool isUnary = tokens.Count == 0 || 
+                                   tokens.Last().Type == TokenType.Operator || 
+                                   tokens.Last().Type == TokenType.OpenParen || 
+                                   tokens.Last().Type == TokenType.Comma;
+                    
+                    if (isUnary)
+                        tokens.Add(new Token { Type = TokenType.Operator, Value = "~" }); // Unary minus
+                    else
+                        tokens.Add(new Token { Type = TokenType.Operator, Value = "-" }); // Binary minus
+                    i++;
+                }
+                else if ("+*/^%".Contains(c))
                 {
                     tokens.Add(new Token { Type = TokenType.Operator, Value = c.ToString() });
                     i++;
@@ -118,7 +133,6 @@ namespace laser_gui_test.Data.Generators
             {
                 if (token.Type == TokenType.Number || token.Type == TokenType.Identifier)
                 {
-                    // Check if identifier is a function
                     if (token.Type == TokenType.Identifier && IsFunction(token.Value))
                     {
                         stack.Push(token);
@@ -136,7 +150,11 @@ namespace laser_gui_test.Data.Generators
                 else if (token.Type == TokenType.Operator)
                 {
                     while (stack.Count > 0 && stack.Peek().Type == TokenType.Operator &&
-                           GetPrecedence(stack.Peek().Value) >= GetPrecedence(token.Value))
+                           // Right associative for ^ and ~ (unary)
+                           ( (token.Value == "^" || token.Value == "~") ? 
+                             GetPrecedence(stack.Peek().Value) > GetPrecedence(token.Value) :
+                             GetPrecedence(stack.Peek().Value) >= GetPrecedence(token.Value) )
+                           )
                     {
                         output.Enqueue(stack.Pop());
                     }
@@ -151,9 +169,9 @@ namespace laser_gui_test.Data.Generators
                     while (stack.Count > 0 && stack.Peek().Type != TokenType.OpenParen)
                         output.Enqueue(stack.Pop());
                     if (stack.Count > 0 && stack.Peek().Type == TokenType.OpenParen)
-                        stack.Pop(); // Pop '('
+                        stack.Pop(); 
                     if (stack.Count > 0 && stack.Peek().Type == TokenType.Identifier && IsFunction(stack.Peek().Value))
-                        output.Enqueue(stack.Pop()); // Pop function
+                        output.Enqueue(stack.Pop()); 
                 }
             }
 
@@ -177,10 +195,6 @@ namespace laser_gui_test.Data.Generators
                 {
                     if (IsFunction(token.Value))
                     {
-                        // Functions are handled when popping from stack based on recursive logic? 
-                        // No, in RPN functions are just operators.
-                        // But wait, my RPN logic put Function tokens in the output queue.
-                        // So if we see a function here, we pop args.
                         ApplyFunction(token.Value, stack);
                     }
                     else
@@ -188,15 +202,24 @@ namespace laser_gui_test.Data.Generators
                         if (_variables.TryGetValue(token.Value, out double val))
                             stack.Push(val);
                         else
-                            stack.Push(0); // Default to 0 if unknown
+                            stack.Push(0); 
                     }
                 }
                 else if (token.Type == TokenType.Operator)
                 {
-                    if (stack.Count < 2) return 0; // Error
-                    double b = stack.Pop();
-                    double a = stack.Pop();
-                    stack.Push(ApplyOp(token.Value, a, b));
+                    if (token.Value == "~")
+                    {
+                         if (stack.Count < 1) return 0;
+                         double a = stack.Pop();
+                         stack.Push(-a);
+                    }
+                    else
+                    {
+                        if (stack.Count < 2) return 0; 
+                        double b = stack.Pop();
+                        double a = stack.Pop();
+                        stack.Push(ApplyOp(token.Value, a, b));
+                    }
                 }
             }
 
@@ -210,6 +233,7 @@ namespace laser_gui_test.Data.Generators
 
         private int GetPrecedence(string op)
         {
+            if (op == "~") return 5; // Unary minus high precedence
             if (op == "^") return 4;
             if (op == "*" || op == "/" || op == "%") return 3;
             if (op == "+" || op == "-") return 2;
