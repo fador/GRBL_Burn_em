@@ -176,7 +176,7 @@ namespace grbl_burn_em.Data
         }
 
         private bool _bitmapConversionErrorShown = false;
-        private unsafe Bitmap? SoftwareBitmapToBitmap(SoftwareBitmap inputSb)
+        private Bitmap? SoftwareBitmapToBitmap(SoftwareBitmap inputSb)
         {
             SoftwareBitmap? sbToUse = inputSb;
             bool shouldDisposeSb = false;
@@ -523,7 +523,7 @@ namespace grbl_burn_em.Data
             return UndistortBitmap(frame);
         }
 
-        private unsafe Bitmap UndistortBitmap(Bitmap src)
+        private Bitmap UndistortBitmap(Bitmap src)
         {
             if (Calibration.CameraMatrix == null || Calibration.DistCoeffs == null || Calibration.CameraMatrix.Length != 9)
                 return new Bitmap(src); // Return copy
@@ -535,8 +535,7 @@ namespace grbl_burn_em.Data
              
              Bitmap dst = new Bitmap(w, h, PixelFormat.Format24bppRgb);
              
-             // We need 24bpp for easier pointer math, or 32bpp. 
-             // Let's force Convert src to 24bpp
+             // We need 24bpp for easier array math
              Bitmap src24 = src;
              bool disposeSrc24 = false;
              if (src.PixelFormat != PixelFormat.Format24bppRgb)
@@ -555,14 +554,18 @@ namespace grbl_burn_em.Data
 
              try 
              {
-                 byte* srcPtr = (byte*)srcData.Scan0;
-                 byte* dstPtr = (byte*)dstData.Scan0;
-                 int stride = srcData.Stride; // Assumes same stride
+                 int stride = srcData.Stride;
+                 int bytes = Math.Abs(stride) * h;
+                 byte[] srcBytes = new byte[bytes];
+                 byte[] dstBytes = new byte[bytes];
+
+                 // Copy source to managed array
+                 Marshal.Copy(srcData.Scan0, srcBytes, 0, bytes);
                  
                  // Parallel loop for speed
                  Parallel.For(0, h, y => 
                  {
-                     byte* rowDst = dstPtr + y * stride;
+                     int rowOffset = y * stride;
                      
                      for (int x = 0; x < w; x++)
                      {
@@ -583,31 +586,38 @@ namespace grbl_burn_em.Data
                              float dx = sx - x0;
                              float dy = sy - y0;
                              
-                             byte* p00 = srcPtr + y0 * stride + x0 * 3;
-                             byte* p01 = srcPtr + y0 * stride + x1 * 3;
-                             byte* p10 = srcPtr + y1 * stride + x0 * 3;
-                             byte* p11 = srcPtr + y1 * stride + x1 * 3;
+                             // Indices in srcBytes
+                             int idx00 = y0 * stride + x0 * 3;
+                             int idx01 = y0 * stride + x1 * 3;
+                             int idx10 = y1 * stride + x0 * 3;
+                             int idx11 = y1 * stride + x1 * 3;
                              
+                             int dstIdx = rowOffset + x * 3;
+
                              for(int c=0; c<3; c++) 
                              {
                                  float val = 
-                                    p00[c] * (1 - dx) * (1 - dy) +
-                                    p01[c] * dx * (1 - dy) +
-                                    p10[c] * (1 - dx) * dy +
-                                    p11[c] * dx * dy;
+                                    srcBytes[idx00 + c] * (1 - dx) * (1 - dy) +
+                                    srcBytes[idx01 + c] * dx * (1 - dy) +
+                                    srcBytes[idx10 + c] * (1 - dx) * dy +
+                                    srcBytes[idx11 + c] * dx * dy;
                                     
-                                 rowDst[x * 3 + c] = (byte)val;
+                                 dstBytes[dstIdx + c] = (byte)val;
                              }
                          }
                          else
                          {
                              // Black padding
-                             rowDst[x * 3] = 0;
-                             rowDst[x * 3 + 1] = 0;
-                             rowDst[x * 3 + 2] = 0;
+                             int dstIdx = rowOffset + x * 3;
+                             dstBytes[dstIdx] = 0;
+                             dstBytes[dstIdx + 1] = 0;
+                             dstBytes[dstIdx + 2] = 0;
                          }
                      }
                  });
+
+                 // Copy managed array to destination
+                 Marshal.Copy(dstBytes, 0, dstData.Scan0, bytes);
              }
              finally
              {
