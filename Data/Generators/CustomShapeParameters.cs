@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.Linq;
+using System.IO;
 using grbl_burn_em.Forms;
 
 namespace grbl_burn_em.Data.Generators
@@ -167,5 +168,22 @@ namespace grbl_burn_em.Data.Generators
             }
         }
         public override bool ShouldSerializeValue(object component) => false;
+    }
+
+    public static class CustomShapeSerializer
+    {
+        public static void Save(CustomShapeParameters data, string filename)
+        {
+            var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+            string json = System.Text.Json.JsonSerializer.Serialize(data, options);
+            File.WriteAllText(filename, json);
+        }
+
+        public static CustomShapeParameters Load(string filename)
+        {
+            string json = File.ReadAllText(filename);
+            var obj = System.Text.Json.JsonSerializer.Deserialize<CustomShapeParameters>(json);
+            return obj ?? new CustomShapeParameters();
+        }
     }
 }

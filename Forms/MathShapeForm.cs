@@ -120,6 +120,16 @@ namespace grbl_burn_em.Forms
             pnlStep.Controls.Add(_numMaxSteps);
             _customPanel.Controls.Add(pnlStep);
 
+            // Load/Save Buttons
+            var pnlFile = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(3, 10, 3, 3) };
+            var btnLoad = new Button { Text = "Load JSON", AutoSize = true };
+            var btnSave = new Button { Text = "Save JSON", AutoSize = true };
+            btnLoad.Click += OnLoadClick;
+            btnSave.Click += OnSaveClick;
+            pnlFile.Controls.Add(btnLoad);
+            pnlFile.Controls.Add(btnSave);
+            _customPanel.Controls.Add(pnlFile);
+
             var lblHelp = new Label 
             { 
                 Text = "Functions:\nsin, cos, tan, sqrt, pow, abs, floor, ceil, min, max, log, pi, e\n\nExample:\nx = t * 10\ny = t * t",
@@ -174,6 +184,50 @@ namespace grbl_burn_em.Forms
                 csp.StepSize = (float)_numStepSize.Value;
                 csp.MaxSteps = (int)_numMaxSteps.Value;
                 UpdatePreview();
+            }
+        }
+
+        private void OnLoadClick(object? sender, EventArgs e)
+        {
+            using var ofd = new OpenFileDialog();
+            ofd.Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*";
+            if (ofd.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    var loaded = CustomShapeSerializer.Load(ofd.FileName);
+                    if (loaded != null)
+                    {
+                        _txtFormula.Text = loaded.Formula;
+                        _txtDefinitions.Text = loaded.Definitions;
+                        _numStepSize.Value = (decimal)loaded.StepSize;
+                        _numMaxSteps.Value = loaded.MaxSteps;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error loading file: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void OnSaveClick(object? sender, EventArgs e)
+        {
+            if (_currentParams is CustomShapeParameters csp)
+            {
+                using var sfd = new SaveFileDialog();
+                sfd.Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*";
+                if (sfd.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        CustomShapeSerializer.Save(csp, sfd.FileName);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Error saving file: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
             }
         }
 
