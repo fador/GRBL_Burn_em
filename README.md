@@ -1,5 +1,7 @@
 # GRBL Burn'Em: Laser Control Software
 
+![GRBL Burn'Em logo](logo.png)
+
 A Windows Forms application designed for controlling laser cutters, built with .NET 9.0. This tool provides an interface for designing, importing, and managing laser cutting jobs with features like layer management, G-code generation, and hardware control.
 
 *This project is made because of personal need for a laser cutter control software, LaserGRBL is too limited and Lightburn is too expensive.*
