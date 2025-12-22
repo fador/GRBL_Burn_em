@@ -14,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 
+using Windows.Devices.Enumeration;
 using Windows.Media.Capture;
 using Windows.Media.Capture.Frames;
 using Windows.Media.Core;
@@ -21,6 +22,8 @@ using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 
 using grbl_burn_em.Tools;
+
+using WinRT;
 
 namespace grbl_burn_em.Data
 {
@@ -31,7 +34,8 @@ namespace grbl_burn_em.Data
 
         private MediaCapture? _mediaCapture;
         private MediaFrameReader? _frameReader;
-        private List<DirectShowDeviceInfo> _devices = new List<DirectShowDeviceInfo>();
+        // private List<DirectShowDeviceInfo> _devices = new List<DirectShowDeviceInfo>(); // Removed
+        private List<DeviceInformation> _deviceInfos = new List<DeviceInformation>();
         
         public event Action<Bitmap>? FrameReceived;
         public event Action? CameraStopped;
@@ -50,35 +54,36 @@ namespace grbl_burn_em.Data
 
         public List<string> GetAvailableDevices()
         {
-            _devices = DeviceEnumerator.GetAllDevices();
-            return _devices.Select(d => d.Name).ToList();
+            // Use WinRT DeviceInformation to get IDs compatible with MediaCapture
+            try 
+            {
+                var task = DeviceInformation.FindAllAsync(DeviceClass.VideoCapture).AsTask();
+                task.Wait();
+                var devices = task.Result;
+                _deviceInfos = devices.ToList();
+                return _deviceInfos.Select(d => d.Name).ToList();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error enumerating devices: {ex.Message}");
+                return new List<string>();
+            }
         }
 
         public async void StartCamera(int deviceIndex)
         {
             await StopCameraAsync();
 
-            if (_devices == null || deviceIndex < 0 || deviceIndex >= _devices.Count)
+            if (_deviceInfos == null || deviceIndex < 0 || deviceIndex >= _deviceInfos.Count)
                 return;
 
             try
             {
-                var device = _devices[deviceIndex];
-                
-                // Find correct Id (Symlink/Moniker)
-                // DeviceEnumerator returns MonikerString or DevicePath.
-                // MediaCaptureInitSettings needs Id.
-                // NOTE: Windows 10 MediaCapture requires DeviceInformation Id usually.
-                // But DirectShow enumerator returns a path. Often works. 
-                // However, mix of APIs might fail.
-                // Let's assume standard index-based or first available if index matches.
-                // Actually, to use MediaCapture correctly, we should use DeviceInformation.FindAllAsync(DeviceClass.VideoCapture).
-                // But keeping GetAvailableDevices purely using DirectShowEnumerator is fine if we can match them.
-                // Let's try to use the MonikerString as Id.
+                var device = _deviceInfos[deviceIndex];
                 
                 var settings = new MediaCaptureInitializationSettings
                 {
-                    VideoDeviceId = device.MonikerString,
+                    VideoDeviceId = device.Id,
                     MemoryPreference = MediaCaptureMemoryPreference.Cpu,
                     StreamingCaptureMode = StreamingCaptureMode.Video,
                     SharingMode = MediaCaptureSharingMode.SharedReadOnly
@@ -88,18 +93,30 @@ namespace grbl_burn_em.Data
                 await _mediaCapture.InitializeAsync(settings);
                 
                 // Create Frame Reader
+                if (_mediaCapture.FrameSources.Count == 0)
+                {
+                    System.Windows.Forms.MessageBox.Show("No FrameSources found on this device!", "Camera Debug");
+                    return;
+                }
+
                 var frameSource = _mediaCapture.FrameSources.FirstOrDefault().Value;
                 if (frameSource != null)
                 {
+                    // Debug info about format
+                    var formats = frameSource.SupportedFormats.Select(f => $"{f.Subtype} {f.VideoFormat.Width}x{f.VideoFormat.Height}").Take(5);
+                    // System.Windows.Forms.MessageBox.Show($"Selected Source: {frameSource.Id}\nFormats: {string.Join(", ", formats)}", "Camera Debug");
+
                     _frameReader = await _mediaCapture.CreateFrameReaderAsync(frameSource, Windows.Media.MediaProperties.MediaEncodingSubtypes.Bgra8);
                     _frameReader.FrameArrived += OnFrameArrived;
                     await _frameReader.StartAsync();
                     _isRunning = true;
+                    // System.Windows.Forms.MessageBox.Show("FrameReader Started", "Camera Debug");
                 }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Camera Start Error: {ex.Message}");
+                System.Windows.Forms.MessageBox.Show($"Camera Start Error: {ex.Message}\n\nStackTrace: {ex.StackTrace}", "Camera Error", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
                 _mediaCapture?.Dispose();
                 _mediaCapture = null;
                 _isRunning = false;
@@ -117,74 +134,110 @@ namespace grbl_burn_em.Data
                  if (videoFrame != null && videoFrame.SoftwareBitmap != null)
                  {
                      using var sb = videoFrame.SoftwareBitmap;
+                     
                      // Convert SoftwareBitmap to System.Drawing.Bitmap
                      Bitmap? bmp = SoftwareBitmapToBitmap(sb);
                      if (bmp != null)
                      {
-                         FrameReceived?.Invoke(bmp);
+                         if (FrameReceived != null)
+                         {
+                              FrameReceived.Invoke(bmp);
+                         }
                      }
                  }
             }
         }
 
-        private unsafe Bitmap? SoftwareBitmapToBitmap(SoftwareBitmap sb)
+        private void SafeExecute(Action action)
         {
-            // Ensure BGRA8
-            if (sb.BitmapPixelFormat != BitmapPixelFormat.Bgra8 || sb.BitmapAlphaMode != BitmapAlphaMode.Ignore)
-            {
-                 // Convert if necessary (MediaFrameReader was asked for Bgra8 though)
-                 if (sb.BitmapPixelFormat != BitmapPixelFormat.Bgra8) 
-                 {
-                      var temp = SoftwareBitmap.Convert(sb, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore);
-                      sb = temp;
-                 }
-            }
-            
-            int w = sb.PixelWidth;
-            int h = sb.PixelHeight;
-            
-            var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            
-            using var buffer = sb.LockBuffer(BitmapBufferAccessMode.Read);
-            using var reference = buffer.CreateReference();
-            
-            byte* dataInBytes;
-            uint capacity;
-            ((IMemoryBufferByteAccess)reference).GetBuffer(out dataInBytes, out capacity);
-            
-            // Lock Bitmap
-            BitmapData data = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-            
-            // Copy
-            long bytes = data.Stride * h;
-            // Buffer.MemoryCopy(dataInBytes, (void*)data.Scan0, bytes, bytes); // Might be safe or not
-            // Manual loop or Marshal copy
-            // Stride might match?
-            if (data.Stride == w * 4) // BGRA = 4 bytes
-            {
-                System.Buffer.MemoryCopy(dataInBytes, (void*)data.Scan0, bytes, bytes);
-            }
-            else
-            {
-                // Row by Row
-                int sbStride = buffer.GetPlaneDescription(0).Stride;
-                for (int y = 0; y < h; y++)
-                {
-                    System.Buffer.MemoryCopy(dataInBytes + y * sbStride, (byte*)data.Scan0 + y * data.Stride, bytes, bytes);
-                }
-            }
-            
-            bmp.UnlockBits(data);
-            return bmp;
+             Task.Run(action);
         }
 
-        [ComImport]
-        [Guid("5B0D3235-4DBA-4D44-865E-8F1D0E4FD04D")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        unsafe interface IMemoryBufferByteAccess
+        private bool _bitmapConversionErrorShown = false;
+        private unsafe Bitmap? SoftwareBitmapToBitmap(SoftwareBitmap inputSb)
         {
-            void GetBuffer(out byte* buffer, out uint capacity);
+            SoftwareBitmap? sbToUse = inputSb;
+            bool shouldDisposeSb = false;
+
+            try
+            {
+                // Ensure BGRA8
+                if (inputSb.BitmapPixelFormat != BitmapPixelFormat.Bgra8 || inputSb.BitmapAlphaMode != BitmapAlphaMode.Ignore)
+                {
+                     // Convert
+                     sbToUse = SoftwareBitmap.Convert(inputSb, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore);
+                     shouldDisposeSb = true;
+                }
+                
+                int w = sbToUse.PixelWidth;
+                int h = sbToUse.PixelHeight;
+                
+                var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+                
+                // Use standard CopyToBuffer (Avoids unsafe COM cast issues)
+                int size = w * h * 4;
+                var uwpBuffer = new Windows.Storage.Streams.Buffer((uint)size);
+                sbToUse.CopyToBuffer(uwpBuffer);
+                
+                byte[] bytes = new byte[size];
+                using (var reader = DataReader.FromBuffer(uwpBuffer))
+                {
+                    reader.ReadBytes(bytes);
+                }
+                
+                // Lock System.Drawing.Bitmap
+                BitmapData data = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                
+                try
+                {
+                    int dstStride = data.Stride;
+                    int srcStride = w * 4; // BGRA is packed in the byte array
+                    
+                    if (dstStride == srcStride)
+                    {
+                        System.Runtime.InteropServices.Marshal.Copy(bytes, 0, data.Scan0, size);
+                    }
+                    else
+                    {
+                        // Row by Row copy if stride differs (e.g. padding)
+                        for (int y = 0; y < h; y++)
+                        {
+                            IntPtr dstPtr = data.Scan0 + (y * dstStride);
+                            System.Runtime.InteropServices.Marshal.Copy(bytes, y * srcStride, dstPtr, srcStride);
+                        }
+                    }
+                }
+                finally
+                {
+                    bmp.UnlockBits(data);
+                }
+                
+                return bmp;
+            }
+            catch (Exception ex)
+            {
+                if (!_bitmapConversionErrorShown)
+                {
+                    _bitmapConversionErrorShown = true;
+                    this.SafeExecute(() => System.Windows.Forms.MessageBox.Show($"Bitmap Conversion Failed: {ex.Message}\nType: {ex.GetType().Name}\nStack: {ex.StackTrace}", "Debug Error"));
+                }
+                else
+                {
+                    // Print to output once error is shown
+                    System.Diagnostics.Debug.WriteLine($"Bitmap Conversion Failed: {ex.Message}");
+                }
+                return null;
+            }
+            finally
+            {
+                if (shouldDisposeSb && sbToUse != null)
+                {
+                    sbToUse.Dispose();
+                }
+            }
         }
+
+
 
         public async Task StopCameraAsync()
         {
@@ -193,7 +246,7 @@ namespace grbl_burn_em.Data
             if (_frameReader != null)
             {
                 _frameReader.FrameArrived -= OnFrameArrived;
-                await _frameReader.StopAsync();
+                await _frameReader.StopAsync(); // Await outside lock
                 _frameReader.Dispose();
                 _frameReader = null;
             }
@@ -206,12 +259,14 @@ namespace grbl_burn_em.Data
             
             CameraStopped?.Invoke();
         }
-        
+
         public void StopCamera()
         {
              // Sync wrapper
              StopCameraAsync().Wait();
         }
+        
+
 
         private void LoadCalibration()
         {
@@ -576,7 +631,7 @@ namespace grbl_burn_em.Data
 
         public void Dispose()
         {
-            StopCamera();
+            StopCameraAsync().Wait();
         }
     }
 }

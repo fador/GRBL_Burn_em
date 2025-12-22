@@ -270,11 +270,12 @@ namespace grbl_burn_em.Controls
             }
         }
 
-        private void OnStartStopClick(object? sender, EventArgs e)
+        private async void OnStartStopClick(object? sender, EventArgs e)
         {
             if (CameraManager.Instance.IsRunning)
             {
-                CameraManager.Instance.StopCamera();
+                CameraManager.Instance.FrameReceived -= OnFrameReceived;
+                await CameraManager.Instance.StopCameraAsync();
                 // Button update handled by OnCameraStopped event
             }
             else
@@ -286,8 +287,10 @@ namespace grbl_burn_em.Controls
                     AppConfiguration.Instance.LastCameraDevice = deviceName;
                     AppConfiguration.Instance.Save();
                     
+                    CameraManager.Instance.FrameReceived -= OnFrameReceived; // Unsubscribe just in case
                     CameraManager.Instance.StartCamera(index);
                     CameraManager.Instance.FrameReceived += OnFrameReceived;
+                    
                     _btnStartStop.Text = "Stop Camera";
                     _btnStartStop.BackColor = Color.Salmon;
                 }
@@ -302,14 +305,6 @@ namespace grbl_burn_em.Controls
 
         private void OnFrameReceived(Bitmap frame)
         {
-            // This comes from Camera Thread. Invoke UI.
-            // But we don't want to flood the UI message pump.
-            // WorkbenchControl needs the bitmap.
-            // We should push the bitmap to WorkbenchControl.BackgroundImage?
-            
-            // We can invoke an update on WorkbenchControl periodically or as fast as possible.
-            // Updating BackgroundImage triggers Invalidate() only if we set it.
-            
             if (_chkOverlay.Checked)
             {
                 // We need to pass this bitmap to Main UI.
@@ -318,10 +313,11 @@ namespace grbl_burn_em.Controls
                 
                 try
                 {
-                    this.Invoke(new Action(() => 
+                    // Use BeginInvoke to avoid deadlocks if the UI thread is blocked (e.g. stopping camera)
+                    this.BeginInvoke(new Action(() => 
                     {
                         var wb = GetWorkbench();
-                        if (wb != null)
+                        if (wb != null && !_chkOverlay.IsDisposed) // Double check availability
                         {
                             var old = wb.OverlayImage;
                             wb.OverlayImage = frame; // Workbench uses this for drawing
@@ -342,9 +338,10 @@ namespace grbl_burn_em.Controls
                         }
                     }));
                 }
-                catch 
+                catch (Exception ex)
                 {
                     // UI Disposed or Closing
+                    System.Diagnostics.Debug.WriteLine($"Overlay Update Error: {ex.Message}");
                     frame.Dispose(); 
                 }
             }
@@ -375,14 +372,14 @@ namespace grbl_burn_em.Controls
              // Or if we want to repaint the Last Frame with new params?
              
              // If we have a background image, we can just invalidate.
-             var wbc = GetWorkbench();
-             if (wbc != null)
+             var wb2 = GetWorkbench();
+             if (wb2 != null)
              {
                  var config = AppConfiguration.Instance;
-                 wbc.OverlayImageOpacity = config.CameraOverlayOpacity;
-                 wbc.OverlayImagePosition = new PointF(config.CameraOverlayX, config.CameraOverlayY);
-                 wbc.OverlayImageSize = new SizeF(config.CameraOverlayWidth, config.CameraOverlayHeight);
-                 wbc.Invalidate();
+                 wb2.OverlayImageOpacity = config.CameraOverlayOpacity;
+                 wb2.OverlayImagePosition = new PointF(config.CameraOverlayX, config.CameraOverlayY);
+                 wb2.OverlayImageSize = new SizeF(config.CameraOverlayWidth, config.CameraOverlayHeight);
+                 wb2.Invalidate();
              }
         }
 

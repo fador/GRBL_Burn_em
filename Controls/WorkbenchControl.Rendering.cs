@@ -30,12 +30,13 @@ namespace grbl_burn_em.Controls
             g.TranslateTransform(Width / 2f + _panOffset.X, Height / 2f + _panOffset.Y);
             g.ScaleTransform(_zoom, -_zoom); // Y-Up coordinate system
 
-            DrawBackgroundImage(g);
+            DrawCameraBackground(g);
             DrawGrid(g);
             DrawWorkArea(g); // Draw Work Area before Origin
             DrawOrigin(g);
             DrawObjects(g);
             DrawLaserPosition(g);
+            DrawCameraOverlay(g);
             DrawRulerOverlay(g);
         }
 
@@ -70,7 +71,7 @@ namespace grbl_burn_em.Controls
             g.DrawRectangle(pen, x, y, w, h);
         }
 
-        private void DrawBackgroundImage(Graphics g)
+        private void DrawCameraBackground(Graphics g)
         {
             var config = AppConfiguration.Instance;
             
@@ -117,6 +118,11 @@ namespace grbl_burn_em.Controls
                      }
                  }
             }
+        }
+
+        private void DrawCameraOverlay(Graphics g)
+        {
+            var config = AppConfiguration.Instance;
 
             // 2. Draw Live Overlay (Stationary or Single Frame Mounted)
             if (OverlayImage != null && (!config.CameraIsMounted || config.ShowCameraOverlay)) // Show Live even if mounted? Yes, usually.
