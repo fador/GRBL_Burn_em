@@ -433,13 +433,15 @@ namespace grbl_burn_em.Data
             return -1;
         }
         
+        public int DotDetectionThreshold { get; set; } = 120; // Default
+
         public PointF[]? DetectDotPattern(Bitmap frame, Bitmap? debugDraw, int rows, int cols, CalibrationPatternType type)
         {
              // Use Custom Blob Detector
              // Frame is likely RGB or RGBA. BlobDetector handles RGB locking.
              
              // 1. Detect Blobs
-             var blobs = BlobDetector.DetectBlobs(frame, threshold: 120, minArea: 5, maxArea: 5000);
+             var blobs = BlobDetector.DetectBlobs(frame, threshold: (byte)DotDetectionThreshold, minArea: 5, maxArea: 5000);
              
              // 2. Filter / Detect Grid?
              // Since we removed OpenCV FindCirclesGrid, we need to manually organize blobs into a grid.

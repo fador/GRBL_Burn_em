@@ -339,9 +339,9 @@ public partial class MainForm : Form
             frm.Show(this); // Modeless
         });
         
-        toolMenu.DropDownItems.Add("Stop Camera", null, (s, e) => 
+        toolMenu.DropDownItems.Add("Stop Camera", null, async (s, e) => 
         {
-            CameraManager.Instance.StopCamera();
+            await CameraManager.Instance.StopCameraAsync();
         });
         
         var itemDebugDots = new ToolStripMenuItem("Debug: Detect Dots", null, (s, e) => 
@@ -350,6 +350,13 @@ public partial class MainForm : Form
             if (s is ToolStripMenuItem item) item.Checked = CameraManager.Instance.DebugDotDetection;
         });
         toolMenu.DropDownItems.Add(itemDebugDots);
+
+        var itemThreshold = new ToolStripMenuItem("Dot Sensitivity");
+        itemThreshold.DropDownItems.Add("Low (80)", null, (s, e) => CameraManager.Instance.DotDetectionThreshold = 80);
+        itemThreshold.DropDownItems.Add("Medium (120)", null, (s, e) => CameraManager.Instance.DotDetectionThreshold = 120);
+        itemThreshold.DropDownItems.Add("High (180)", null, (s, e) => CameraManager.Instance.DotDetectionThreshold = 180);
+        itemThreshold.DropDownItems.Add("Very High (220)", null, (s, e) => CameraManager.Instance.DotDetectionThreshold = 220);
+        toolMenu.DropDownItems.Add(itemThreshold);
 
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         
