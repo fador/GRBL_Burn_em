@@ -28,6 +28,20 @@ public class OptionsForm : Form
     private NumericUpDown _numSvgQuality = null!;
     private CheckBox _chkEmbedImages = null!;
 
+    private TabControl _tabs = null!;
+
+    public void SelectTab(string tabName)
+    {
+        foreach (TabPage tab in _tabs.TabPages)
+        {
+            if (tab.Text == tabName)
+            {
+                _tabs.SelectedTab = tab;
+                break;
+            }
+        }
+    }
+
     public OptionsForm()
     {
         InitializeComponent();
@@ -43,7 +57,7 @@ public class OptionsForm : Form
         this.MinimizeBox = false;
         this.StartPosition = FormStartPosition.CenterParent;
 
-        var tabs = new TabControl { Dock = DockStyle.Fill };
+        _tabs = new TabControl { Dock = DockStyle.Fill };
 
         // --- Connection Tab ---
         var tabConnection = new TabPage("Connection");
@@ -58,7 +72,7 @@ public class OptionsForm : Form
         tabConnection.Controls.Add(_cbPorts);
         tabConnection.Controls.Add(lblBaud);
         tabConnection.Controls.Add(_cbBaud);
-        tabs.TabPages.Add(tabConnection);
+        _tabs.TabPages.Add(tabConnection);
 
         // --- Machine Tab ---
         var tabMachine = new TabPage("Machine");
@@ -85,7 +99,7 @@ public class OptionsForm : Form
         tabMachine.Controls.Add(_numHeight);
         tabMachine.Controls.Add(lblOrg);
         tabMachine.Controls.Add(_cbOrigin);
-        tabs.TabPages.Add(tabMachine);
+        _tabs.TabPages.Add(tabMachine);
 
         // --- Raster / Image Tab ---
         var tabRaster = new TabPage("Raster / Image");
@@ -105,7 +119,7 @@ public class OptionsForm : Form
         tabRaster.Controls.Add(_numMinSegment);
         tabRaster.Controls.Add(_chkBicubic);
         tabRaster.Controls.Add(_chkDither);
-        tabs.TabPages.Add(tabRaster);
+        _tabs.TabPages.Add(tabRaster);
 
         // --- View / Grid Tab ---
         var tabView = new TabPage("View / Grid");
@@ -118,7 +132,7 @@ public class OptionsForm : Form
         tabView.Controls.Add(lblSnap);
         tabView.Controls.Add(_numSnapGrid);
         tabView.Controls.Add(_chkSkipSplash);
-        tabs.TabPages.Add(tabView);
+        _tabs.TabPages.Add(tabView);
 
         // --- Import / Files Tab ---
         var tabImport = new TabPage("Files");
@@ -132,7 +146,39 @@ public class OptionsForm : Form
         _chkEmbedImages = new CheckBox { Text = "Embed Images in Project File (Base64)", Location = new Point(20, 70), AutoSize = true, Width = 300 };
         tabImport.Controls.Add(_chkEmbedImages);
 
-        tabs.TabPages.Add(tabImport);
+        _tabs.TabPages.Add(tabImport);
+
+        // --- About Tab ---
+        var tabAbout = new TabPage("About");
+        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        var lblVersion = new Label 
+        { 
+            Text = $"GRBL Burn'Em\nVersion: {version?.Major}.{version?.Minor}\n\nCreated by Fador\n(c) 2025", 
+            AutoSize = true, 
+            Location = new Point(50, 50),
+            Font = new Font(this.Font.FontFamily, 12, FontStyle.Bold),
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+
+        var lnkGithub = new LinkLabel
+        {
+            Text = "https://github.com/fador/GRBL_Burn_em",
+            AutoSize = true,
+            Location = new Point(50, 180),
+            Font = new Font(this.Font.FontFamily, 10, FontStyle.Regular)
+        };
+        lnkGithub.LinkClicked += (s, e) => 
+        { 
+            try 
+            { 
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = lnkGithub.Text, UseShellExecute = true }); 
+            } 
+            catch { } 
+        };
+
+        tabAbout.Controls.Add(lblVersion);
+        tabAbout.Controls.Add(lnkGithub);
+        _tabs.TabPages.Add(tabAbout);
 
         // --- Bottom Panel for Buttons ---
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 50 };
@@ -145,7 +191,7 @@ public class OptionsForm : Form
         pnlBottom.Controls.Add(_btnSave);
         pnlBottom.Controls.Add(_btnCancel);
 
-        this.Controls.Add(tabs); // Tabs Fill
+        this.Controls.Add(_tabs); // Tabs Fill
         this.Controls.Add(pnlBottom); // Bottom panel dock
         
         this.AcceptButton = _btnSave;

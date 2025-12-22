@@ -160,7 +160,8 @@ public partial class MainForm : Form
     {
         try
         {
-            this.Text = "Laser Control Software";
+            var version = Assembly.GetExecutingAssembly().GetName().Version;
+            this.Text = $"GRBL Burn'Em Laser Control Software v{version?.Major}.{version?.Minor}";
             
             try
             {
@@ -321,8 +322,6 @@ public partial class MainForm : Form
         layersMenu.DropDownItems.Add("Scale Output...", null, (s, e) => ShowScaleLayerDialog());
         menuStrip.Items.Add(layersMenu);
 
-
-
         // Insert Menu [NEW]
         var insertMenu = new ToolStripMenuItem("Insert");
         insertMenu.DropDownItems.Add("Mathematical Shape...", null, (s, e) => ShowMathShapeDialog());
@@ -406,6 +405,16 @@ public partial class MainForm : Form
         toolMenu.DropDownItems.Add("Power/Speed Calibration", null, (s, e) => ShowPowerSpeedCalibrationDialog());
 
         menuStrip.Items.Add(toolMenu);
+
+        // About Menu (Always last)
+        var aboutMenu = new ToolStripMenuItem("About");
+        aboutMenu.DropDownItems.Add("About", null, (s, e) => 
+        {
+            using var dlg = new OptionsForm();
+            dlg.SelectTab("About");
+            dlg.ShowDialog();
+        });
+        menuStrip.Items.Add(aboutMenu);
 
         this.MainMenuStrip = menuStrip;
         this.Controls.Add(menuStrip);
