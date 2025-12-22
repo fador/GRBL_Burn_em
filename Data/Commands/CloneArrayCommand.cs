@@ -4,9 +4,9 @@
  *
  * This file is part of the GRBL Burn'Em laser control software
  */
-using System.Drawing;
 using System.Linq;
 using System.Collections.Generic;
+using grbl_burn_em.Data.Generators;
 
 namespace grbl_burn_em.Data.Commands;
 
@@ -14,116 +14,34 @@ public class CloneArrayCommand : ICommand
 {
     private List<LaserObject> _newObjects = new();
     private List<LaserObject> _sourceObjects;
-    private int _rows;
-    private int _cols;
-    private float _gapX;
-    private float _gapY;
+    private ArrayParameters _params;
 
-    public CloneArrayCommand(IEnumerable<LaserObject> source, int rows, int cols, float gapX, float gapY)
+    public CloneArrayCommand(IEnumerable<LaserObject> source, ArrayParameters parameters)
     {
         _sourceObjects = source.ToList();
-        _rows = rows;
-        _cols = cols;
-        _gapX = gapX;
-        _gapY = gapY;
+        _params = parameters;
     }
 
     public void Execute()
     {
         _newObjects.Clear();
+        var generator = new ArrayLayoutGenerator(_params.Seed);
         
-        foreach (var obj in _sourceObjects)
-        {
-            var bounds = obj.GetBounds();
-            float w = bounds.Width;
-            float h = bounds.Height;
-            float stepX = w + _gapX;
-            float stepY = h + _gapY;
+        var generated = generator.Generate(_sourceObjects, _params);
 
-            // Loop rows/cols
-            for (int r = 0; r < _rows; r++)
-            {
-                for (int c = 0; c < _cols; c++)
-                {
-                    // Skip original if we consider (0,0) as original. 
-                    // But typically Array *Tool* creates copies. 
-                    // If we want to keep original, we shouldn't create a copy at 0,0?
-                    // "Array" usually means "Create N copies".
-                    // If user selects object and says 3x3 array. Do they imply 9 objects TOTAL (including original) or 9 NEW objects?
-                    // Standard vector app behavior (Inkscape/Illustrator): Rows/Cols includes original.
-                    // So if 1x1 -> No change.
-                    // If 2x2 -> 3 new objects.
-                    
-                    if (r == 0 && c == 0) continue; // Original is here
-
-                    var clone = obj.Clone();
-                    
-                    // Move
-                    float dx = c * stepX;
-                    float dy = -(r * stepY); // Standard Y is UP? No, Graphics Y is DOWN.
-                    // If we want array to go DOWN (visual), we add Y.
-                    // If "Rows" implies going down? Yes.
-                    // Check Coordinate system:
-                    // LaserObject.Position: usually Bottom-Left?
-                    // Wait, LaserImage.Draw says: "Position.Y + Size.Height" is Top.
-                    // So Position.Y is Bottom in their coordinate mind, but GDI+ treats it as Top-Left usually?
-                    // Let's check GrblGenerator: "G1 X.. Y.."
-                    // Typically CNC is Y+ Up.
-                    // If GDI+ Y+ Down, then visual array down means increasing Y.
-                    // If CNC Y+ Up, visual array down means decreasing Y.
-                    
-                    // Let's assume visual "Layout" logic match screen Y (Down).
-                    // If Coordinate system is Standard Cartesian (Y Up), then "Rows" implies going UP or DOWN?
-                    // Usually "Grid" expands Right and Up (Quadrant I). 
-                    // But standard text/reading is Right and Down.
-                    // Let's do Right (+X) and Up (+Y) for positive Gap?
-                    // User requested "Distance between".
-                    // Let's use +Y for Rows (Up) as default for CNC.
-                    // If they want Down, they can use negative Gap?
-                    // Or we just implement +Y (Up) and +X (Right).
-                    
-                    dy = r * stepY; 
-
-                    ShiftObject(clone, dx, dy);
-                    _newObjects.Add(clone);
-                }
-            }
-        }
-        
-        foreach (var newObj in _newObjects)
+        // Remove source objects (replacement logic)
+        foreach (var src in _sourceObjects)
         {
-            ProjectState.Instance.Objects.Add(newObj);
+            ProjectState.Instance.Objects.Remove(src);
         }
-    }
 
-    private void ShiftObject(LaserObject obj, float dx, float dy)
-    {
-        obj.Position = new PointF(obj.Position.X + dx, obj.Position.Y + dy);
-        if (obj is LaserPath path)
+        foreach (var obj in generated)
         {
-            for (int i = 0; i < path.Points.Count; i++)
-            {
-                path.Points[i] = new PointF(path.Points[i].X + dx, path.Points[i].Y + dy);
-            }
+            _newObjects.Add(obj);
+            ProjectState.Instance.Objects.Add(obj);
         }
-        else if (obj is LaserGroup group)
-        {
-             // If Group Position is just a reference, we need to shift children?
-             // LaserGroup.Clone() clones children.
-             // But LaserGroup.Position logic is weak in current codebase.
-             // If we shift Group Position, does it affect children?
-             // Check LaserGroup.Draw -> calls child.Draw.
-             // Child.Draw uses Child.Position.
-             // So changing Group.Position does NOTHING unless we propagate.
-             // BUT: Clone() makes new children.
-             // We provided ShiftObject.
-             // We need to Recurse.
-             
-             foreach(var child in group.Children)
-             {
-                 ShiftObject(child, dx, dy);
-             }
-        }
+
+        ProjectState.Instance.SelectedObjects = new List<LaserObject>(_newObjects);
     }
 
     public void Undo()
@@ -132,9 +50,14 @@ public class CloneArrayCommand : ICommand
         {
             ProjectState.Instance.Objects.Remove(obj);
         }
-        ProjectState.Instance.SelectedObjects.Clear();
-        // Select original?
+        
+        foreach(var obj in _sourceObjects)
+        {
+             ProjectState.Instance.Objects.Add(obj);
+        }
+        
+        ProjectState.Instance.SelectedObjects = new List<LaserObject>(_sourceObjects);
     }
 
-    public string Description => $"Array Clone {_rows}x{_cols}";
+    public string Description => $"Array Clone {_params.Rows}x{_params.Cols}";
 }

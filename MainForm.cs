@@ -2104,7 +2104,7 @@ public partial class MainForm : Form
         using var dlg = new GridArrayForm();
         if (dlg.ShowDialog() == DialogResult.OK)
         {
-            var cmd = new CloneArrayCommand(sel, dlg.Rows, dlg.Cols, dlg.GapX, dlg.GapY);
+            var cmd = new CloneArrayCommand(sel, dlg.Parameters);
             CommandManager.Instance.Execute(cmd);
             if (_workbench != null) _workbench.Invalidate();
         }
