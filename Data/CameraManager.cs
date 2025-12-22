@@ -123,6 +123,8 @@ namespace grbl_burn_em.Data
             }
         }
         
+        public bool DebugDotDetection { get; set; } = false;
+
         private void OnFrameArrived(MediaFrameReader sender, MediaFrameArrivedEventArgs args)
         {
             if (!_isRunning) return;
@@ -139,6 +141,21 @@ namespace grbl_burn_em.Data
                      Bitmap? bmp = SoftwareBitmapToBitmap(sb);
                      if (bmp != null)
                      {
+                         // Debug: Detect Dots
+                         if (DebugDotDetection)
+                         {
+                             try
+                             {
+                                 // Draw directly on the frame we are about to send
+                                 // Pass 'bmp' as both source and debug info destination
+                                 DetectDotPattern(bmp, bmp, 5, 4, CalibrationPatternType.Circles);
+                             }
+                             catch (Exception ex)
+                             {
+                                 System.Diagnostics.Debug.WriteLine($"Debug Dot Detection Failed: {ex.Message}");
+                             }
+                         }
+
                          if (FrameReceived != null)
                          {
                               FrameReceived.Invoke(bmp);

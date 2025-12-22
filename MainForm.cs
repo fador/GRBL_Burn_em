@@ -344,6 +344,13 @@ public partial class MainForm : Form
             CameraManager.Instance.StopCamera();
         });
         
+        var itemDebugDots = new ToolStripMenuItem("Debug: Detect Dots", null, (s, e) => 
+        {
+            CameraManager.Instance.DebugDotDetection = !CameraManager.Instance.DebugDotDetection;
+            if (s is ToolStripMenuItem item) item.Checked = CameraManager.Instance.DebugDotDetection;
+        });
+        toolMenu.DropDownItems.Add(itemDebugDots);
+
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         
         toolMenu.DropDownItems.Add("Group", null, (s, e) => 
