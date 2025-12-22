@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="logo.png" />
+    <EmbeddedResource Include="icon.png" />
   </ItemGroup>
 
   <ItemGroup>

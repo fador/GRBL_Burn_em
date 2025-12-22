@@ -156,6 +156,22 @@ public partial class MainForm : Form
         {
             this.Text = "Laser Control Software";
             
+            try
+            {
+               var assembly = Assembly.GetExecutingAssembly();
+               using (var stream = assembly.GetManifestResourceStream("grbl_burn_em.icon.png"))
+               {
+                   if (stream != null)
+                   {
+                       using (var bmp = new Bitmap(stream))
+                       {
+                           this.Icon = Icon.FromHandle(bmp.GetHicon());
+                       }
+                   }
+               }
+            }
+            catch { }
+            
             // Initialize Workbench EARLY to prevent null references in event handlers
             _workbench = new WorkbenchControl
             {
