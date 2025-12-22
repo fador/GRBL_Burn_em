@@ -1712,9 +1712,14 @@ public partial class MainForm : Form
             
             // Generate GCode
             var generator = new Data.Generators.GrblGenerator();
-            var lines = generator.Generate(ProjectState.Instance.Objects);
+            var objects = ProjectState.Instance.Objects.ToList();
+            
+            if (!CheckSafetyBounds(objects)) return;
+
+            var lines = generator.Generate(objects);
             _jobRunner.Start(lines);
         };
+
 
         var btnStop = new Button { Text = "STOP", Width = 200, BackColor = Color.Red, ForeColor = Color.White };
         btnStop.Click += (s, e) => 
@@ -1796,11 +1801,15 @@ public partial class MainForm : Form
             AppConfiguration.Instance.FramingSpeed = (float)numFrameSpeed.Value;
             AppConfiguration.Instance.Save();
             
+            var objects = ProjectState.Instance.Objects.ToList();
+            if (!CheckSafetyBounds(objects)) return;
+            
             var gen = new GrblGenerator();
-            var lines = gen.GenerateFraming(ProjectState.Instance.Objects, AppConfiguration.Instance.FramingPower, AppConfiguration.Instance.FramingSpeed);
+            var lines = gen.GenerateFraming(objects, AppConfiguration.Instance.FramingPower, AppConfiguration.Instance.FramingSpeed);
             
             _jobRunner.Start(lines);
         };
+
         
         btnOutline.Click += (s, e) => 
         {
@@ -1810,12 +1819,15 @@ public partial class MainForm : Form
 
              var gen = new GrblGenerator();
              var objects = ProjectState.Instance.SelectedObjects.Any() ? ProjectState.Instance.SelectedObjects : ProjectState.Instance.Objects.ToList();
+             if (!CheckSafetyBounds(objects)) return;
+
              var lines = gen.GenerateObjectOutlines(objects, AppConfiguration.Instance.FramingPower, AppConfiguration.Instance.FramingSpeed);
              // Make debug window
              //using var dlg = new DebugCodeForm(string.Join("\n", lines));
              //dlg.ShowDialog();
              _jobRunner.Start(lines);
         };
+
 
         btnMark.Click += (s, e) => 
         {
@@ -1825,9 +1837,12 @@ public partial class MainForm : Form
 
              var gen = new GrblGenerator();
              var objects = ProjectState.Instance.SelectedObjects.Any() ? ProjectState.Instance.SelectedObjects : ProjectState.Instance.Objects.ToList();
+             if (!CheckSafetyBounds(objects)) return;
+
              var lines = gen.GenerateCenterMarks(objects, AppConfiguration.Instance.FramingPower, AppConfiguration.Instance.FramingSpeed);
              _jobRunner.Start(lines);
         };
+
 
         flowFraming.Controls.Add(lblPwr);
         flowFraming.Controls.Add(numFramePower);
@@ -2246,7 +2261,10 @@ public partial class MainForm : Form
 
     private void GenerateGCode()
     {
+        if (!CheckSafetyBounds(ProjectState.Instance.Objects.ToList())) return;
+
         string generatorName = AppConfiguration.Instance.GCodeGenerator;
+
         IGCodeGenerator? generator = null;
 
         if (generatorName == "Grbl") generator = new GrblGenerator();
@@ -2274,7 +2292,10 @@ public partial class MainForm : Form
 
     private void ShowPreview()
     {
+        if (!CheckSafetyBounds(ProjectState.Instance.Objects.ToList())) return;
+
         string generatorName = AppConfiguration.Instance.GCodeGenerator;
+
         IGCodeGenerator? generator = null;
 
         if (generatorName == "Grbl") generator = new GrblGenerator();
@@ -2362,4 +2383,40 @@ public partial class MainForm : Form
              }
         }
     }
+    private bool CheckSafetyBounds(IEnumerable<LaserObject> objects)
+    {
+        if (!AppConfiguration.Instance.EnableSafetyBoundsCheck) return true;
+
+        var enabledObjects = objects.Where(o => o.IsEnabled).ToList();
+        if (!enabledObjects.Any()) return true;
+
+        float minX = float.MaxValue;
+        float minY = float.MaxValue;
+        float maxX = float.MinValue;
+        float maxY = float.MinValue;
+
+        foreach (var obj in enabledObjects)
+        {
+            var b = obj.GetBounds();
+            if (b.Left < minX) minX = b.Left;
+            if (b.Top < minY) minY = b.Top;
+            if (b.Right > maxX) maxX = b.Right;
+            if (b.Bottom > maxY) maxY = b.Bottom;
+        }
+
+        float workW = AppConfiguration.Instance.WorkAreaWidth;
+        float workH = AppConfiguration.Instance.WorkAreaHeight;
+
+        bool outOfBounds = minX < 0 || minY < 0 || maxX > workW || maxY > workH;
+
+        if (outOfBounds)
+        {
+            string msg = $"Warning: The job boundbox ({minX:F1}, {minY:F1}) to ({maxX:F1}, {maxY:F1}) exceeds the machine bed limits (0, 0) to ({workW:F1}, {workH:F1}).\n\nDo you want to continue anyway?";
+            var result = MessageBox.Show(msg, "Safety Boundary Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            return result == DialogResult.Yes;
+        }
+
+        return true;
+    }
 }
+

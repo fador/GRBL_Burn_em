@@ -27,6 +27,8 @@ public class OptionsForm : Form
     private Button _btnCancel = null!;
     private NumericUpDown _numSvgQuality = null!;
     private CheckBox _chkEmbedImages = null!;
+    private CheckBox _chkSafetyBounds = null!;
+
 
     private TabControl _tabs = null!;
 
@@ -99,6 +101,10 @@ public class OptionsForm : Form
         tabMachine.Controls.Add(_numHeight);
         tabMachine.Controls.Add(lblOrg);
         tabMachine.Controls.Add(_cbOrigin);
+
+        _chkSafetyBounds = new CheckBox { Text = "Enable Safety Boundary Check", Location = new Point(20, 190), AutoSize = true };
+        tabMachine.Controls.Add(_chkSafetyBounds);
+
         _tabs.TabPages.Add(tabMachine);
 
         // --- Raster / Image Tab ---
@@ -257,7 +263,9 @@ public class OptionsForm : Form
         else _cbOrigin.SelectedIndex = 0;
         
         _chkEmbedImages.Checked = AppConfiguration.Instance.EmbedImagesInProject;
+        _chkSafetyBounds.Checked = AppConfiguration.Instance.EnableSafetyBoundsCheck;
     }
+
 
     private void BtnSave_Click(object? sender, EventArgs e)
     {
@@ -286,6 +294,8 @@ public class OptionsForm : Form
         AppConfiguration.Instance.SkipSplashScreen = _chkSkipSplash.Checked;
         AppConfiguration.Instance.SvgCurveQuality = (float)_numSvgQuality.Value;
         AppConfiguration.Instance.EmbedImagesInProject = _chkEmbedImages.Checked;
+        AppConfiguration.Instance.EnableSafetyBoundsCheck = _chkSafetyBounds.Checked;
+
 
         if(_cbOrigin.SelectedItem != null)
              AppConfiguration.Instance.WorkOrigin = _cbOrigin.SelectedItem.ToString() ?? "BottomLeft";

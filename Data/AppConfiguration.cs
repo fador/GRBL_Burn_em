@@ -31,6 +31,8 @@ public class AppConfiguration
 
     public bool Enable1BitDithering { get; set; } = false;
     public bool EmbedImagesInProject { get; set; } = false;
+    public bool EnableSafetyBoundsCheck { get; set; } = true;
+
 
     // View Settings
     public float LastPanX { get; set; } = 0f;
