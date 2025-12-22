@@ -19,6 +19,8 @@ public class OptionsForm : Form
     private NumericUpDown _numInterval = null!;
     private NumericUpDown _numMinSegment = null!;
     private NumericUpDown _numSnapGrid = null!;
+    private NumericUpDown _numTravelSpeed = null!;
+
     private CheckBox _chkBicubic = null!;
     private CheckBox _chkDither = null!;
     private CheckBox _chkSkipSplash = null!;
@@ -80,18 +82,22 @@ public class OptionsForm : Form
         var tabMachine = new TabPage("Machine");
 
         var lblGen = new Label { Text = "Generator:", Location = new Point(20, 30), AutoSize = true };
-        _cbGenerator = new ComboBox { Location = new Point(140, 27), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cbGenerator = new ComboBox { Location = new Point(160, 27), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
         _cbGenerator.Items.AddRange(new object[] { "Grbl", "GCode", "Dummy" });
 
         var lblW = new Label { Text = "Work Width (mm):", Location = new Point(20, 70), AutoSize = true };
-        _numWidth = new NumericUpDown { Location = new Point(140, 67), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
+        _numWidth = new NumericUpDown { Location = new Point(160, 67), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
         
         var lblH = new Label { Text = "Work Height (mm):", Location = new Point(20, 110), AutoSize = true };
-        _numHeight = new NumericUpDown { Location = new Point(140, 107), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
+        _numHeight = new NumericUpDown { Location = new Point(160, 107), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
 
         var lblOrg = new Label { Text = "Work Origin:", Location = new Point(20, 150), AutoSize = true };
-        _cbOrigin = new ComboBox { Location = new Point(140, 147), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cbOrigin = new ComboBox { Location = new Point(160, 147), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
         _cbOrigin.Items.AddRange(new object[] { "BottomLeft", "TopLeft", "Center" });
+
+        var lblTravel = new Label { Text = "Travel Speed (mm/min):", Location = new Point(20, 190), AutoSize = true };
+        _numTravelSpeed = new NumericUpDown { Location = new Point(160, 187), Width = 150, Minimum = 100, Maximum = 20000, DecimalPlaces = 0, Increment = 100 };
+
 
         tabMachine.Controls.Add(lblGen);
         tabMachine.Controls.Add(_cbGenerator);
@@ -101,8 +107,11 @@ public class OptionsForm : Form
         tabMachine.Controls.Add(_numHeight);
         tabMachine.Controls.Add(lblOrg);
         tabMachine.Controls.Add(_cbOrigin);
+        tabMachine.Controls.Add(lblTravel);
+        tabMachine.Controls.Add(_numTravelSpeed);
 
-        _chkSafetyBounds = new CheckBox { Text = "Enable Safety Boundary Check", Location = new Point(20, 190), AutoSize = true };
+        _chkSafetyBounds = new CheckBox { Text = "Enable Safety Boundary Check", Location = new Point(20, 230), AutoSize = true };
+
         tabMachine.Controls.Add(_chkSafetyBounds);
 
         _tabs.TabPages.Add(tabMachine);
@@ -249,6 +258,8 @@ public class OptionsForm : Form
         _numInterval.Value = (decimal)AppConfiguration.Instance.RasterLineInterval;
         _numMinSegment.Value = (decimal)AppConfiguration.Instance.MinRasterSegmentLength;
         _numSnapGrid.Value = (decimal)AppConfiguration.Instance.SnapGridSize;
+        _numTravelSpeed.Value = (decimal)AppConfiguration.Instance.DefaultTravelSpeed;
+
         _chkBicubic.Checked = AppConfiguration.Instance.EnableBicubicResampling;
         _chkDither.Checked = AppConfiguration.Instance.Enable1BitDithering;
         _chkSkipSplash.Checked = AppConfiguration.Instance.SkipSplashScreen;
@@ -289,6 +300,8 @@ public class OptionsForm : Form
         AppConfiguration.Instance.RasterLineInterval = (float)_numInterval.Value;
         AppConfiguration.Instance.MinRasterSegmentLength = (float)_numMinSegment.Value;
         AppConfiguration.Instance.SnapGridSize = (float)_numSnapGrid.Value;
+        AppConfiguration.Instance.DefaultTravelSpeed = (float)_numTravelSpeed.Value;
+
         AppConfiguration.Instance.EnableBicubicResampling = _chkBicubic.Checked;
         AppConfiguration.Instance.Enable1BitDithering = _chkDither.Checked;
         AppConfiguration.Instance.SkipSplashScreen = _chkSkipSplash.Checked;

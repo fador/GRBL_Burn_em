@@ -20,6 +20,9 @@ public class GrblGenerator : IGCodeGenerator
         // Startup
         yield return "G21"; // Metric
         yield return "G90"; // Absolute positioning
+        float travelSpeed = AppConfiguration.Instance.DefaultTravelSpeed;
+        yield return $"G0 F{travelSpeed:F0}"; // Set default travel speed
+
         yield return "M4 S0"; // Dynamic laser mode, Laser Off
 
         foreach (var obj in objects)

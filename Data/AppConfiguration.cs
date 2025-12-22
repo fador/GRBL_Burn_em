@@ -30,6 +30,7 @@ public class AppConfiguration
     public float SvgCurveQuality { get; set; } = 0.002f; // Lower is better quality (more points)
 
     public bool Enable1BitDithering { get; set; } = false;
+    public float DefaultTravelSpeed { get; set; } = 5000f;
     public bool EmbedImagesInProject { get; set; } = false;
     public bool EnableSafetyBoundsCheck { get; set; } = true;
 
