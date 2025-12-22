@@ -8,6 +8,12 @@ A Windows Forms application designed for controlling laser cutters, built with .
 
 *Everything verified only with Comgrow Z1 Pro 20W diode laser cutter with GRBL 1.1 firmware.*
 
+
+## Screenshots
+
+<img src="./Images/screenshot_1.png" width="200" /><img src="./Images/screenshot_2.png" width="200" /><img src="./Images/screenshot_3.png" width="200" /><img src="./Images/screenshot_4.png" width="200" />
+
+
 ## Key Features
 
 ### Object Management & Design
@@ -132,11 +138,12 @@ dotnet run
 -   **OpenGL**: The application may experience issues with OpenGL on some systems.
 -   **G-code**: The G-code generator is custom and only verified on certain GRBL controllers.
 -   **Text rendering**: The text rendering is not optimal and may not be correct.
-
+-   **Camera**: The camera calibration is still in development.
+-   **SVG** and **PDF** custom importers do not support all features of the original files.
 
 ## License
 
-MIT License
+MIT License, check [LICENSE](LICENSE) file for details.
 
 ## Architecture
 
