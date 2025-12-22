@@ -33,7 +33,21 @@ namespace grbl_burn_em.Controls
         {
             InitializeComponent();
             RefreshDevices();
+            
+            // Subscribe to external stop events (e.g. from Main Menu)
             CameraManager.Instance.CameraStopped += OnCameraStopped;
+            
+            // Sync State if already running
+            if (CameraManager.Instance.IsRunning)
+            {
+                _btnStartStop.Text = "Stop Camera";
+                _btnStartStop.BackColor = Color.Salmon;
+                
+                // Subscribe if not already? 
+                // Wait, if we are recreating Control, we need to resubscribe to FrameReceived!
+                CameraManager.Instance.FrameReceived -= OnFrameReceived;
+                CameraManager.Instance.FrameReceived += OnFrameReceived;
+            }
         }
 
         private void InitializeComponent()
@@ -77,6 +91,7 @@ namespace grbl_burn_em.Controls
             _chkOverlay = new CheckBox { Text = "Enable Overlay", Checked = false, AutoSize = true };
             _chkOverlay.CheckedChanged += (s, e) => 
             {
+                // System.Diagnostics.Debug.WriteLine($"Overlay Checked Changed: {_chkOverlay.Checked}");
                 UpdateConfigFromUI(); // Save state
                 if (MainForm.Instance != null && !_chkOverlay.Checked)
                 {
@@ -288,7 +303,7 @@ namespace grbl_burn_em.Controls
                     AppConfiguration.Instance.Save();
                     
                     CameraManager.Instance.FrameReceived -= OnFrameReceived; // Unsubscribe just in case
-                    CameraManager.Instance.StartCamera(index);
+                    await CameraManager.Instance.StartCameraAsync(index);
                     CameraManager.Instance.FrameReceived += OnFrameReceived;
                     
                     _btnStartStop.Text = "Stop Camera";
@@ -307,30 +322,29 @@ namespace grbl_burn_em.Controls
         {
             if (_chkOverlay.Checked)
             {
-                // We need to pass this bitmap to Main UI.
-                // Warning: Bitmap ownership. WorkbenchControl DrawImage needs a valid bitmap.
-                // If we replace it, we must dispose the old one.
-                
                 try
                 {
-                    // Use BeginInvoke to avoid deadlocks if the UI thread is blocked (e.g. stopping camera)
                     this.BeginInvoke(new Action(() => 
                     {
                         var wb = GetWorkbench();
-                        if (wb != null && !_chkOverlay.IsDisposed) // Double check availability
+                        if (wb != null && !_chkOverlay.IsDisposed)
                         {
+                            // Prevent fighting over the same frame if multiple controls are open
+                            if (wb.OverlayImage == frame) 
+                            {
+                                return;
+                            }
+
                             var old = wb.OverlayImage;
-                            wb.OverlayImage = frame; // Workbench uses this for drawing
+                            wb.OverlayImage = frame;
                             
-                            // Transform
                             var config = AppConfiguration.Instance;
                             wb.OverlayImageOpacity = config.CameraOverlayOpacity;
                             wb.OverlayImagePosition = new PointF(config.CameraOverlayX, config.CameraOverlayY);
                             wb.OverlayImageSize = new SizeF(config.CameraOverlayWidth, config.CameraOverlayHeight);
                             
                             wb.Invalidate();
-                            
-                            old?.Dispose(); // Dispose old frame
+                            old?.Dispose();
                         }
                         else
                         {
@@ -340,7 +354,6 @@ namespace grbl_burn_em.Controls
                 }
                 catch (Exception ex)
                 {
-                    // UI Disposed or Closing
                     System.Diagnostics.Debug.WriteLine($"Overlay Update Error: {ex.Message}");
                     frame.Dispose(); 
                 }
@@ -433,5 +446,24 @@ namespace grbl_burn_em.Controls
              }
              return null;
         }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                // Unsubscribe to preventing 'zombie' controls from stealing/disposing frames
+                CameraManager.Instance.FrameReceived -= OnFrameReceived;
+                CameraManager.Instance.CameraStopped -= OnCameraStopped;
+                
+                // Components dispose (standard)
+                if (components != null)
+                {
+                    components.Dispose();
+                }
+            }
+            base.Dispose(disposing);
+        }
+
+        private System.ComponentModel.IContainer? components = null;
     }
 }

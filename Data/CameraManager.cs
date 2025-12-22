@@ -70,9 +70,14 @@ namespace grbl_burn_em.Data
             }
         }
 
-        public async void StartCamera(int deviceIndex)
+        public void StartCamera(int deviceIndex)
         {
-            await StopCameraAsync();
+             StartCameraAsync(deviceIndex).Wait();
+        }
+
+        public async Task StartCameraAsync(int deviceIndex)
+        {
+            if (_isRunning) await StopCameraAsync();
 
             if (_deviceInfos == null || deviceIndex < 0 || deviceIndex >= _deviceInfos.Count)
                 return;
