@@ -1,18 +1,60 @@
-using laser_gui_test.Controls;
-using laser_gui_test.Data;
-using laser_gui_test.Tools;
+using grbl_burn_em.Controls;
+using grbl_burn_em.Data;
+using grbl_burn_em.Tools;
 using System.ComponentModel;
-using laser_gui_test.Data.Commands;
+using grbl_burn_em.Data.Commands;
 using System.Linq;
-using laser_gui_test.Forms;
-using laser_gui_test.Data.Generators;
+using grbl_burn_em.Forms;
+using grbl_burn_em.Data.Generators;
+using grbl_burn_em.Data.Pdf;
+using System.Text.Json;
+using System.IO;
+using System.Reflection;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 
-namespace laser_gui_test;
+namespace grbl_burn_em;
 
 public partial class MainForm : Form
 {
     private static MainForm? _instance;
     public static MainForm Instance => _instance ??= new MainForm();
+
+    public void EditText(LaserText? textObj = null)
+    {
+        if (textObj == null)
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            textObj = sel.OfType<LaserText>().FirstOrDefault();
+        }
+
+        if (textObj != null)
+        {
+            using (var form = new TextEditorForm(textObj.Text, textObj.FontName, textObj.FontSize, textObj.FontStyle))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    textObj.Text = form.TextValue;
+                    textObj.FontName = form.FontName;
+                    textObj.FontSize = form.FontSize;
+                    textObj.FontStyle = form.FontStyle;
+
+                    // Recalc Size
+                    if (textObj.PathId != Guid.Empty)
+                    {
+                        textObj.UpdateWarpedBounds();
+                    }
+                    else
+                    {
+                        textObj.UpdateTextSize();
+                    }
+
+                    _workbench.Invalidate();
+                    UpdateSelectedObjects();
+                }
+            }
+        }
+    }
 
     private WorkbenchControl _workbench = null!;
     private TabControl _rightTabControl = null!;
@@ -52,6 +94,16 @@ public partial class MainForm : Form
     private ToolStripTextBox _txtContent = null!;
     private ToolStripComboBox _cmbFont = null!;
     private NumericUpDown _nudFontSize = null!;
+    private ToolStripButton _btnBold = null!;
+    private ToolStripButton _btnItalic = null!;
+
+    // Row 4 Controls
+    private TrackBar _trkPathOffset = null!;
+    private NumericUpDown _nudVerticalOffset = null!;
+    private CheckBox _chkReversePath = null!;
+    private CheckBox _chkUpsideDown = null!;
+    private ToolStripComboBox _cmbWarpMethod = null!;
+    private ToolTip _toolTip = new ToolTip();
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -103,6 +155,22 @@ public partial class MainForm : Form
         try
         {
             this.Text = "Laser Control Software";
+            
+            try
+            {
+               var assembly = Assembly.GetExecutingAssembly();
+               using (var stream = assembly.GetManifestResourceStream("grbl_burn_em.icon.png"))
+               {
+                   if (stream != null)
+                   {
+                       using (var bmp = new Bitmap(stream))
+                       {
+                           this.Icon = Icon.FromHandle(bmp.GetHicon());
+                       }
+                   }
+               }
+            }
+            catch { }
             
             // Initialize Workbench EARLY to prevent null references in event handlers
             _workbench = new WorkbenchControl
@@ -177,6 +245,20 @@ public partial class MainForm : Form
             }
         };
 
+        Action unmaskAction = () =>
+        {
+            var sel = ProjectState.Instance.SelectedObjects;
+            var images = sel.OfType<LaserImage>().Where(i => i.MaskId != Guid.Empty).ToList();
+            if (images.Count > 0)
+            {
+                foreach (var img in images)
+                {
+                    img.MaskId = Guid.Empty;
+                }
+                _workbench.Invalidate();
+            }
+        };
+
         
         fileMenu.DropDownItems.Add("New", null, (s, e) => 
         {
@@ -217,8 +299,34 @@ public partial class MainForm : Form
         });
         menuStrip.Items.Add(fileMenu);
 
+        // Edit Menu [NEW]
+        var editMenu = new ToolStripMenuItem("Edit");
+        ((ToolStripMenuItem)editMenu.DropDownItems.Add("Undo", null, (s, e) => CommandManager.Instance.Undo())).ShortcutKeys = Keys.Control | Keys.Z;
+        ((ToolStripMenuItem)editMenu.DropDownItems.Add("Redo", null, (s, e) => CommandManager.Instance.Redo())).ShortcutKeys = Keys.Control | Keys.Y;
+        editMenu.DropDownItems.Add(new ToolStripSeparator());
+        editMenu.DropDownItems.Add("Copy", null, (s, e) => CopySelection()); // Ctrl+C handled by ProcessCmdKey but we can link?
+        editMenu.DropDownItems.Add("Paste", null, (s, e) => PasteSelection()); // Ctrl+V
+        editMenu.DropDownItems.Add("Delete", null, (s, e) => DeleteSelection()); // Del
+        
+        menuStrip.Items.Add(editMenu);
+
+        // Layers Menu [NEW]
+        var layersMenu = new ToolStripMenuItem("Layers");
+        layersMenu.DropDownItems.Add("Scale Output...", null, (s, e) => ShowScaleLayerDialog());
+        menuStrip.Items.Add(layersMenu);
+
+
+
+        // Insert Menu [NEW]
+        var insertMenu = new ToolStripMenuItem("Insert");
+        insertMenu.DropDownItems.Add("Mathematical Shape...", null, (s, e) => ShowMathShapeDialog());
+        menuStrip.Items.Add(insertMenu);
+
         var toolMenu = new ToolStripMenuItem("Tool");
+        toolMenu.DropDownItems.Add("Edit text", null, (s, e) => EditText());
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
         toolMenu.DropDownItems.Add("Mask Image with Shape", null, (s, e) => applyMask());
+        toolMenu.DropDownItems.Add("Unmask Image", null, (s, e) => unmaskAction());
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         toolMenu.DropDownItems.Add("Camera Settings", null, (s, e) => 
         {
@@ -287,6 +395,9 @@ public partial class MainForm : Form
             }
             _workbench.Invalidate();
         });
+
+        toolMenu.DropDownItems.Add(new ToolStripSeparator());
+        toolMenu.DropDownItems.Add("Power/Speed Calibration", null, (s, e) => ShowPowerSpeedCalibrationDialog());
 
         menuStrip.Items.Add(toolMenu);
 
@@ -361,13 +472,17 @@ public partial class MainForm : Form
 
         // Context Menu
         var ctxMenu = new ContextMenuStrip();
+        var itemEditText = new ToolStripMenuItem("Edit text");
         var itemMask = new ToolStripMenuItem("Mask Image with Shape");
+        var itemUnmask = new ToolStripMenuItem("Unmask Image");
         var itemGroup = new ToolStripMenuItem("Group");
         var itemUngroup = new ToolStripMenuItem("Ungroup");
         var itemAttach = new ToolStripMenuItem("Attach to Path");
         var itemDetach = new ToolStripMenuItem("Detach from Path");
 
+        itemEditText.Click += (s, e) => EditText();
         itemMask.Click += (s, e) => applyMask();
+        itemUnmask.Click += (s, e) => unmaskAction();
         itemGroup.Click += (s, e) => 
         {
             var sel = ProjectState.Instance.SelectedObjects;
@@ -404,22 +519,26 @@ public partial class MainForm : Form
              _workbench.Invalidate();
         };
 
-        ctxMenu.Items.AddRange(new ToolStripItem[] { itemMask, new ToolStripSeparator(), itemGroup, itemUngroup, new ToolStripSeparator(), itemAttach, itemDetach });
+        ctxMenu.Items.AddRange(new ToolStripItem[] { itemEditText, new ToolStripSeparator(), itemMask, itemUnmask, new ToolStripSeparator(), itemGroup, itemUngroup, new ToolStripSeparator(), itemAttach, itemDetach });
 
         ctxMenu.Opening += (s, e) => 
         {
-            var sel = _objectList.SelectedRows;
+            var selRows = _objectList.SelectedRows;
+            var selObjects = ProjectState.Instance.SelectedObjects;
+            
+            itemEditText.Enabled = selObjects.Any(o => o is LaserText);
             itemMask.Enabled = false;
-            if (sel.Count == 2)
+            itemUnmask.Enabled = selObjects.OfType<LaserImage>().Any(i => i.MaskId != Guid.Empty);
+
+            if (selRows.Count == 2)
             {
-                var obj1 = ProjectState.Instance.Objects[sel[0].Index];
-                var obj2 = ProjectState.Instance.Objects[sel[1].Index];
+                var obj1 = ProjectState.Instance.Objects[selRows[0].Index];
+                var obj2 = ProjectState.Instance.Objects[selRows[1].Index];
                 bool hasImage = obj1 is LaserImage || obj2 is LaserImage;
                 bool hasShape = obj1 is LaserCircle || obj1 is LaserRectangle || obj2 is LaserCircle || obj2 is LaserRectangle;
                 if (hasImage && hasShape) itemMask.Enabled = true;
             }
         };
-        ctxMenu.Items.Add(itemMask);
         _objectList.ContextMenuStrip = ctxMenu;
         
         // Wire Drag/Drop Events
@@ -989,19 +1108,19 @@ public partial class MainForm : Form
         var tsRow2 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
         
         tsRow2.Items.Add(new ToolStripLabel("X:"));
-        _nudPosX = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -10000, Maximum = 10000, Increment = 10 };
+        _nudPosX = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -100000, Maximum = 100000, Increment = 10 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudPosX));
         
         tsRow2.Items.Add(new ToolStripLabel("Y:"));
-        _nudPosY = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -10000, Maximum = 10000, Increment = 10 };
+        _nudPosY = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = -100000, Maximum = 100000, Increment = 10 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudPosY));
         
         tsRow2.Items.Add(new ToolStripLabel("W:"));
-        _nudSizeW = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = 0, Maximum = 10000, Increment = 10 };
+        _nudSizeW = new NumericUpDown { Width = 60, DecimalPlaces = 2, Minimum = 0, Maximum = 100000, Increment = 10 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudSizeW));
         
         tsRow2.Items.Add(new ToolStripLabel("H:"));
-        _nudSizeH = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 1000, Width = 60 };
+        _nudSizeH = new NumericUpDown { DecimalPlaces = 2, Minimum = 0, Maximum = 100000, Width = 60 };
         tsRow2.Items.Add(new ToolStripControlHost(_nudSizeH));
 
         tsRow2.Items.Add(new ToolStripSeparator());
@@ -1031,10 +1150,38 @@ public partial class MainForm : Form
         tsRow3.Items.Add(_cmbFont);
         
         tsRow3.Items.Add(new ToolStripLabel("Size:"));
-        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 1, Maximum = 1000, DecimalPlaces = 1 };
+        _nudFontSize = new NumericUpDown { Width = 60, Minimum = 0.1m, Maximum = 10000, DecimalPlaces = 2 };
         tsRow3.Items.Add(new ToolStripControlHost(_nudFontSize));
         
-        _topToolbarPanel.Controls.Add(tsRow3);
+        _btnBold = new ToolStripButton ("B") { CheckOnClick = true, Font = new Font(this.Font, FontStyle.Bold) };
+        tsRow3.Items.Add(_btnBold);
+        
+        _btnItalic = new ToolStripButton ("I") { CheckOnClick = true, Font = new Font(this.Font, FontStyle.Italic) };
+        tsRow3.Items.Add(_btnItalic);
+        
+        // Row 4: Path Controls [NEW]
+        var tsRow4 = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
+        
+        tsRow4.Items.Add(new ToolStripLabel("Path Pos:"));
+        _trkPathOffset = new TrackBar { Width = 200, Minimum = 0, Maximum = 1000, TickStyle = TickStyle.None, Height = 20 };
+        tsRow4.Items.Add(new ToolStripControlHost(_trkPathOffset));
+        
+        tsRow4.Items.Add(new ToolStripLabel("V-Offset:"));
+        _nudVerticalOffset = new NumericUpDown { Width = 60, DecimalPlaces = 1, Minimum = -10000, Maximum = 10000, Increment = 0.5m };
+        tsRow4.Items.Add(new ToolStripControlHost(_nudVerticalOffset));
+
+        _chkReversePath = new CheckBox { Text = "Reverse", AutoSize = true };
+        tsRow4.Items.Add(new ToolStripControlHost(_chkReversePath));
+
+        _chkUpsideDown = new CheckBox { Text = "Flip", AutoSize = true };
+        tsRow4.Items.Add(new ToolStripControlHost(_chkUpsideDown));
+        
+        tsRow4.Items.Add(new ToolStripLabel("Method:"));
+        _cmbWarpMethod = new ToolStripComboBox { Width = 80, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cmbWarpMethod.Items.AddRange(new object[] { "Stretch", "Align" });
+        tsRow4.Items.Add(_cmbWarpMethod);
+        
+        _topToolbarPanel.Controls.Add(tsRow4);
         
         this.Controls.Add(_topToolbarPanel); 
         
@@ -1096,12 +1243,14 @@ public partial class MainForm : Form
                 txt.FontSize = (float)_nudFontSize.Value;
                 
                 // Recalc Size
-                 using (var tmpBmp = new Bitmap(1, 1))
-                 using (var g = Graphics.FromImage(tmpBmp))
-                 using (var f = new Font(txt.FontName, txt.FontSize))
-                 {
-                      txt.Size = g.MeasureString(txt.Text, f);
-                 }
+                if (txt.PathId != Guid.Empty)
+                {
+                    txt.UpdateWarpedBounds();
+                }
+                else
+                {
+                    txt.UpdateTextSize();
+                }
                 
                 _workbench.Invalidate();
             }
@@ -1110,6 +1259,94 @@ public partial class MainForm : Form
         _txtContent.TextChanged += textChanged;
         _cmbFont.SelectedIndexChanged += textChanged;
         _nudFontSize.ValueChanged += textChanged;
+
+        _btnBold.Click += (s, e) => 
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                if (_btnBold.Checked) txt.FontStyle |= FontStyle.Bold;
+                else txt.FontStyle &= ~FontStyle.Bold;
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+            }
+        };
+
+        _btnItalic.Click += (s, e) => 
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                if (_btnItalic.Checked) txt.FontStyle |= FontStyle.Italic;
+                else txt.FontStyle &= ~FontStyle.Italic;
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+            }
+        };
+
+        // Wire Path Logic
+        _trkPathOffset.Scroll += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.PathOffset = _trkPathOffset.Value / 10f; // Multiplier for precision
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+            }
+        };
+
+        _nudVerticalOffset.ValueChanged += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.VerticalOffset = (float)_nudVerticalOffset.Value;
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+            }
+        };
+
+        _chkReversePath.CheckedChanged += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.ReversePath = _chkReversePath.Checked;
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+            }
+        };
+
+        _chkUpsideDown.CheckedChanged += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.UpsideDown = _chkUpsideDown.Checked;
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+            }
+        };
+
+        _cmbWarpMethod.SelectedIndexChanged += (s, e) =>
+        {
+            if (_isUpdatingUI) return;
+            var sel = ProjectState.Instance.SelectedObjects;
+            if (sel.Count == 1 && sel[0] is LaserText txt)
+            {
+                txt.WarpMethod = (TextWarpMethod)_cmbWarpMethod.SelectedIndex;
+                txt.UpdateWarpedBounds();
+                _workbench.Invalidate();
+                UpdateSelectedObjects(); // Bounds change
+            }
+        };
     }
 
     private void InitializeLayers()
@@ -1218,29 +1455,59 @@ public partial class MainForm : Form
 
     private void InitializeTools()
     {
-        var toolMap = new Dictionary<string, ToolType>
+        var toolMap = new Dictionary<string, (ToolType Type, string Icon)>
         {
-            { "Select", ToolType.Select },
-            { "Line", ToolType.DrawLine },
-            { "Box", ToolType.DrawBox },
-            { "Circle", ToolType.DrawCircle },
-            { "Bezier", ToolType.DrawBezier },
-            { "Text", ToolType.Text },
-            { "Rotate", ToolType.Rotate },
-            { "Ruler", ToolType.Ruler },
-            { "Move", ToolType.ClickToMove }
+            { "Select", (ToolType.Select, "tool_select.png") },
+            { "Line", (ToolType.DrawLine, "tool_line.png") },
+            { "Box", (ToolType.DrawBox, "tool_box.png") },
+            { "Circle", (ToolType.DrawCircle, "tool_circle.png") },
+            { "Bezier", (ToolType.DrawBezier, "tool_bezier.png") },
+            { "Text", (ToolType.Text, "tool_text.png") },
+            { "Rotate", (ToolType.Rotate, "tool_rotate.png") },
+            { "Ruler", (ToolType.Ruler, "tool_ruler.png") },
+            { "Move Laser", (ToolType.ClickToMove, "tool_move.png") }
         };
 
         foreach (var kvp in toolMap)
         {
             var btn = new Button
             {
-                Text = kvp.Key,
                 Size = new Size(50, 50),
                 Margin = new Padding(2),
-                Tag = kvp.Value
+                Tag = kvp.Value.Type,
+                BackgroundImageLayout = ImageLayout.Zoom
             };
+
+            // Load from Embedded Resource
+            string resourceName = $"grbl_burn_em.Icons.{kvp.Value.Icon}";
+            bool iconLoaded = false;
             
+            try
+            {
+                using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+                {
+                    if (stream != null)
+                    {
+                        using (var originalImage = Image.FromStream(stream))
+                        {
+                           btn.BackgroundImage = ResizeImage(originalImage, 40, 40);
+                        }
+                        iconLoaded = true;
+                    }
+                }
+            }
+            catch(Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to load icon {resourceName}: {ex.Message}");
+            }
+
+            if (!iconLoaded)
+            {
+                btn.Text = kvp.Key;
+            }
+            
+            _toolTip.SetToolTip(btn, kvp.Key);
+
             btn.Click += (s, e) => 
             {
                 ToolManager.Instance.SetTool((ToolType)btn.Tag);
@@ -1251,6 +1518,31 @@ public partial class MainForm : Form
 
             _toolsPanel.Controls.Add(btn);
         }
+    }
+
+    private Image ResizeImage(Image image, int width, int height)
+    {
+        var destRect = new Rectangle(0, 0, width, height);
+        var destImage = new Bitmap(width, height);
+
+        destImage.SetResolution(image.HorizontalResolution, image.VerticalResolution);
+
+        using (var graphics = Graphics.FromImage(destImage))
+        {
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.CompositingQuality = CompositingQuality.HighQuality;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.SmoothingMode = SmoothingMode.HighQuality;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            using (var wrapMode = new ImageAttributes())
+            {
+                wrapMode.SetWrapMode(WrapMode.TileFlipXY);
+                graphics.DrawImage(image, destRect, 0, 0, image.Width, image.Height, GraphicsUnit.Pixel, wrapMode);
+            }
+        }
+
+        return destImage;
     }
 
     private void InitializeControlPanel()
@@ -1543,7 +1835,7 @@ public partial class MainForm : Form
     private void ImportFile()
     {
         using var ofd = new OpenFileDialog();
-        ofd.Filter = "Supported Files|*.bmp;*.jpg;*.jpeg;*.png;*.svg|Images|*.bmp;*.jpg;*.jpeg;*.png|Scalable Vector Graphics|*.svg|All Files|*.*";
+        ofd.Filter = "Supported Files|*.bmp;*.jpg;*.jpeg;*.png;*.svg;*.pdf|Images|*.bmp;*.jpg;*.jpeg;*.png|Scalable Vector Graphics|*.svg|PDF Documents|*.pdf|All Files|*.*";
         if (ofd.ShowDialog() == DialogResult.OK)
         {
             string ext = Path.GetExtension(ofd.FileName).ToLower();
@@ -1565,6 +1857,42 @@ public partial class MainForm : Form
                 catch (Exception ex)
                 {
                     MessageBox.Show($"Failed to import SVG: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else if (ext == ".pdf")
+            {
+                try 
+                {
+                    var result = PdfImporter.Import(ofd.FileName);
+                    
+                    if (result.Objects.Count == 0)
+                    {
+                        if (result.Warnings.Count > 0)
+                        {
+                            string msg = "Import failed / no objects found. Warnings:\n\n" + string.Join("\n", result.Warnings.Take(10));
+                            if (result.Warnings.Count > 10) msg += $"\n...and {result.Warnings.Count - 10} more.";
+                            MessageBox.Show(msg, "PDF Import Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                        else
+                        {
+                            MessageBox.Show("No supported objects found in PDF.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                    }
+                    else
+                    {
+                        var cmd = new AddObjectCommand(result.Objects);
+                        
+                        foreach(var obj in result.Objects)
+                        {
+                            if (ProjectState.Instance.ActiveLayer != null)
+                                 obj.LayerId = ProjectState.Instance.ActiveLayer.Id;
+                        }
+                        CommandManager.Instance.Execute(cmd);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to import PDF: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             else
@@ -1621,6 +1949,21 @@ public partial class MainForm : Form
             CommandManager.Instance.Redo();
             return true;
         }
+        if (keyData == (Keys.Control | Keys.C))
+        {
+             CopySelection();
+             return true;
+        }
+        if (keyData == (Keys.Control | Keys.V))
+        {
+             PasteSelection();
+             return true;
+        }
+        if (keyData == Keys.Delete)
+        {
+             DeleteSelection();
+             return true;
+        }
         if (keyData == (Keys.Control | Keys.G))
         {
             var sel = ProjectState.Instance.SelectedObjects;
@@ -1643,6 +1986,88 @@ public partial class MainForm : Form
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private void CopySelection()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        if (sel.Count > 0)
+        {
+            var dtos = sel.Select(ProjectSerializer.ToDto).ToList();
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            options.Converters.Add(new ColorJsonConverter());
+            var json = JsonSerializer.Serialize(dtos, options);
+            Clipboard.SetText(json);
+        }
+    }
+
+    private void PasteSelection()
+    {
+        if (Clipboard.ContainsText())
+        {
+            try
+            {
+                var json = Clipboard.GetText();
+                if (json.TrimStart().StartsWith("[")) // Basic check
+                {
+                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    options.Converters.Add(new ColorJsonConverter());
+                    var dtos = JsonSerializer.Deserialize<List<LaserObjectDto>>(json, options);
+                    
+                    if (dtos != null && dtos.Count > 0)
+                    {
+                        var newObjects = new List<LaserObject>();
+                        foreach (var dto in dtos)
+                        {
+                            var obj = ProjectSerializer.FromDto(dto);
+                            if (obj != null)
+                            {
+                                obj.Id = Guid.NewGuid();
+                                obj.Position = new PointF(obj.Position.X + 10, obj.Position.Y + 10);
+                                if (obj.Name != null) obj.Name += " (Copy)";
+                                newObjects.Add(obj);
+                            }
+                        }
+                        
+                        if (newObjects.Count > 0)
+                        {
+                            var cmd = new AddObjectCommand(newObjects);
+                            CommandManager.Instance.Execute(cmd);
+                            
+                            ProjectState.Instance.SelectedObjects = newObjects;
+                            _workbench.Invalidate();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Paste failed: {ex.Message}");
+            }
+        }
+    }
+
+    private void DeleteSelection()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        if (sel.Count > 0)
+        {
+            // Use RemoveObjectCommand (we need to implement it or use simple removal inside a command if not exists)
+            // Wait, we probably don't have RemoveObjectCommand exposed in snippets.
+            // Let's check AddObjectCommand... wait, AddObjectCommand has Undo which removes.
+            // We need a RemoveObjectCommand that does the opposite.
+            // I'll implement a logic here, or better, check if RemoveObjectCommand exists.
+            // If not, I can create a generic command here or define it.
+            
+            // Checking CommandManager context... I saw AddObjectCommand.
+            // I should make a RemoveObjectCommand.
+            
+            var cmd = new RemoveObjectCommand(sel);
+            CommandManager.Instance.Execute(cmd);
+            
+            ProjectState.Instance.SelectedObjects = new List<LaserObject>();
+            _workbench.Invalidate();
+        }
     }
 
     public bool UpdateSelectedObjects(bool updateListSelection = true)
@@ -1679,12 +2104,64 @@ public partial class MainForm : Form
                      _cmbFont.SelectedIndex = 0; 
                     
                 _nudFontSize.Value = (decimal)txt.FontSize;
+                _btnBold.Enabled = true;
+                _btnItalic.Enabled = true;
+                _btnBold.Checked = txt.FontStyle.HasFlag(FontStyle.Bold);
+                _btnItalic.Checked = txt.FontStyle.HasFlag(FontStyle.Italic);
+
+                // Path Controls [NEW]
+                _nudVerticalOffset.Enabled = true;
+                _chkReversePath.Enabled = true;
+                _chkUpsideDown.Enabled = true;
+                _nudVerticalOffset.Value = (decimal)txt.VerticalOffset;
+                _chkReversePath.Checked = txt.ReversePath;
+                _chkUpsideDown.Checked = txt.UpsideDown;
+                _cmbWarpMethod.Enabled = true;
+                _cmbWarpMethod.SelectedIndex = (int)txt.WarpMethod;
+
+                if (txt.PathId != Guid.Empty)
+                {
+                    _trkPathOffset.Enabled = true;
+                    var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == txt.PathId);
+                    if (pathObj != null)
+                    {
+                        var backbone = PathWarp.FlattenPath(pathObj);
+                        float totalLen = 0;
+                        for (int i = 0; i < backbone.Count - 1; i++)
+                        {
+                            float dx = backbone[i+1].X - backbone[i].X;
+                            float dy = backbone[i+1].Y - backbone[i].Y;
+                            totalLen += (float)Math.Sqrt(dx*dx + dy*dy);
+                        }
+                        
+                        _trkPathOffset.Maximum = (int)(totalLen * 10); // 0.1mm precision
+                        int val = (int)(txt.PathOffset * 10);
+                        if (val < 0) val = 0;
+                        if (val > _trkPathOffset.Maximum) val = _trkPathOffset.Maximum;
+                        _trkPathOffset.Value = val;
+                    }
+                }
+                else
+                {
+                    _trkPathOffset.Enabled = false;
+                    _trkPathOffset.Value = 0;
+                }
             }
             else
             {
                 _txtContent.Enabled = false;
                 _cmbFont.Enabled = false;
                 _nudFontSize.Enabled = false;
+                _btnBold.Enabled = false;
+                _btnItalic.Enabled = false;
+                _btnBold.Checked = false;
+                _btnItalic.Checked = false;
+                _trkPathOffset.Enabled = false;
+                _nudVerticalOffset.Enabled = false;
+                _chkReversePath.Enabled = false;
+                _chkUpsideDown.Enabled = false;
+                _cmbWarpMethod.Enabled = false;
+                _cmbWarpMethod.SelectedIndex = -1;
                 _txtContent.Text = "";
             }
 
@@ -1710,6 +2187,10 @@ public partial class MainForm : Form
             _txtContent.Enabled = false;
             _cmbFont.Enabled = false;
             _nudFontSize.Enabled = false;
+            _btnBold.Enabled = false;
+            _btnItalic.Enabled = false;
+            _btnBold.Checked = false;
+            _btnItalic.Checked = false;
             
             // Clear or set to 0? NUDs don't support empty string.
             // Just leaving enabled=false is visible enough.
@@ -1801,6 +2282,69 @@ public partial class MainForm : Form
         catch (Exception ex)
         {
             MessageBox.Show($"Preview generation failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void ShowScaleLayerDialog()
+    {
+        var layer = ProjectState.Instance.ActiveLayer;
+        if (layer == null)
+        {
+            MessageBox.Show("Please select a layer first.", "No Layer Selected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dlg = new ScaleLayerForm(ProjectState.Instance.Layers.ToList(), layer);
+        if (dlg.ShowDialog() == DialogResult.OK)
+        {
+            var targetLayer = dlg.TargetLayer;
+            if (dlg.ScaleByPower)
+            {
+                targetLayer.ScaleToPower(dlg.ResultValue);
+            }
+            else
+            {
+                targetLayer.ScaleToSpeed(dlg.ResultValue);
+            }
+            
+            // Refresh UI
+            InitializeLayers(); 
+            _layerList.Refresh();
+            _workbench.Invalidate();
+            UpdateSelectedObjects();
+        }
+    }
+
+    private void ShowMathShapeDialog()
+    {
+        using var dlg = new MathShapeForm();
+        if (dlg.ShowDialog() == DialogResult.OK && dlg.ResultPath != null)
+        {
+            var lp = dlg.ResultPath;
+            if (ProjectState.Instance.ActiveLayer != null)
+            {
+                lp.LayerId = ProjectState.Instance.ActiveLayer.Id;
+            }
+            
+            var cmd = new AddObjectCommand(lp);
+            CommandManager.Instance.Execute(cmd);
+            _workbench.Invalidate();
+        }
+    }
+
+    private void ShowPowerSpeedCalibrationDialog()
+    {
+        using var dlg = new PowerSpeedCalibrationForm();
+        if (dlg.ShowDialog() == DialogResult.OK)
+        {
+             var objects = dlg.Generator.Generate();
+             if (objects.Count > 0)
+             {
+                 var cmd = new AddObjectCommand(objects);
+                 CommandManager.Instance.Execute(cmd);
+                 ProjectState.Instance.SelectedObjects = objects;
+                 _workbench.Invalidate();
+             }
         }
     }
 }

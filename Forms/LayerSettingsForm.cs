@@ -1,9 +1,9 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
-using laser_gui_test.Data;
+using grbl_burn_em.Data;
 
-namespace laser_gui_test.Forms;
+namespace grbl_burn_em.Forms;
 
 public class LayerSettingsForm : Form
 {

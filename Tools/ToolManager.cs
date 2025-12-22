@@ -1,6 +1,6 @@
-using laser_gui_test.Data;
+using grbl_burn_em.Data;
 
-namespace laser_gui_test.Tools;
+namespace grbl_burn_em.Tools;
 
 public enum ToolType
 {

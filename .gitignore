@@ -2,3 +2,5 @@
 /bin
 /*.user
 /.vs
+/Tests/grbl_burn_em.Tests/obj
+/Tests/grbl_burn_em.Tests/bin

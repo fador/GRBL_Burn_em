@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 using System.Drawing;
 using System.IO;
 
-namespace laser_gui_test.Data;
+namespace grbl_burn_em.Data;
 
 public class LayerDto
 {
@@ -21,6 +21,7 @@ public class ProjectDataDto
 {
     public List<LaserObjectDto> Objects { get; set; } = new();
     public List<LayerDto> Layers { get; set; } = new();
+    public List<string> ImageLibrary { get; set; } = new();
 }
 
 [JsonDerivedType(typeof(LaserPathDto), typeDiscriminator: "Path")]
@@ -35,8 +36,10 @@ public abstract class LaserObjectDto
     public string Name { get; set; } = "";
     public Guid LayerId { get; set; }
     public bool IsEnabled { get; set; }
-    public float Power { get; set; }
-    public float Speed { get; set; }
+    public float? Power { get; set; }
+
+    public float? Speed { get; set; }
+    public LayerMode? Mode { get; set; }
     public PointF Position { get; set; }
     public float Rotation { get; set; }
     public SizeF Size { get; set; }
@@ -57,6 +60,7 @@ public class LaserImageDto : LaserObjectDto
 {
     public string ImagePath { get; set; } = "";
     public string Base64Data { get; set; } = "";
+    public int? ImageLibraryIndex { get; set; }
     public Guid MaskId { get; set; }
 }
 
@@ -69,6 +73,8 @@ public class LaserTextDto : LaserObjectDto
     public float PathOffset { get; set; }
     public float VerticalOffset { get; set; }
     public bool ReversePath { get; set; }
+    public bool UpsideDown { get; set; }
+    public FontStyle FontStyle { get; set; }
 }
 
 public class LaserBezierDto : LaserObjectDto
@@ -79,10 +85,188 @@ public class LaserBezierDto : LaserObjectDto
 
 public static class ProjectSerializer
 {
+    public static LaserObjectDto ToDto(LaserObject obj)
+    {
+        LaserObjectDto dto = null!;
+        if (obj is LaserPath p)
+        {
+            dto = new LaserPathDto { Points = p.Points };
+        }
+        else if (obj is LaserRectangle r)
+        {
+            dto = new LaserRectangleDto();
+        }
+        else if (obj is LaserImage i)
+        {
+            var imgDto = new LaserImageDto
+            {
+                ImagePath = i.ImagePath,
+                MaskId = i.MaskId
+            };
+            
+            if (AppConfiguration.Instance.EmbedImagesInProject)
+            {
+                string? base64 = null;
+                try
+                {
+                    if (File.Exists(i.ImagePath))
+                    {
+                        var bytes = File.ReadAllBytes(i.ImagePath);
+                        base64 = Convert.ToBase64String(bytes);
+                    }
+                    else if (i.Image != null)
+                    {
+                        using var ms = new MemoryStream();
+                        i.Image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                        base64 = Convert.ToBase64String(ms.ToArray());
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to embed image: {ex.Message}");
+                }
+
+                if (base64 != null)
+                {
+                    imgDto.Base64Data = base64;
+                }
+            }
+            dto = imgDto;
+        }
+        else if (obj is LaserText t)
+        {
+            dto = new LaserTextDto
+            {
+                Text = t.Text, FontName = t.FontName, FontSize = t.FontSize, PathId = t.PathId, PathOffset = t.PathOffset,
+                VerticalOffset = t.VerticalOffset, ReversePath = t.ReversePath, UpsideDown = t.UpsideDown, FontStyle = t.FontStyle
+            };
+        }
+        else if (obj is LaserCircle c)
+        {
+            dto = new LaserCircleDto();
+        }
+        else if (obj is LaserBezier b)
+        {
+            dto = new LaserBezierDto { Points = b.Points };
+        }
+
+        if (dto != null)
+        {
+            dto.Id = obj.Id;
+            dto.Name = obj.Name;
+            dto.LayerId = obj.LayerId;
+            dto.IsEnabled = obj.IsEnabled;
+            dto.Power = obj.Power;
+
+            dto.Speed = obj.Speed;
+            dto.Mode = obj.Mode;
+            dto.Position = obj.Position;
+            dto.Rotation = obj.Rotation;
+            dto.Size = obj.Size;
+        }
+        return dto!;
+    }
+
+    public static LaserObject? FromDto(LaserObjectDto objDto, List<string>? imageLibrary = null)
+    {
+        LaserObject? obj = null;
+        if (objDto is LaserPathDto p)
+        {
+            var pathObj = new LaserPath();
+            pathObj.Points = p.Points;
+            obj = pathObj;
+        }
+        else if (objDto is LaserRectangleDto r)
+        {
+            obj = new LaserRectangle();
+        }
+        else if (objDto is LaserImageDto i)
+        {
+            var imgObj = new LaserImage { ImagePath = i.ImagePath, MaskId = i.MaskId };
+            
+            string? base64Data = null;
+            if (i.ImageLibraryIndex.HasValue && imageLibrary != null && i.ImageLibraryIndex.Value < imageLibrary.Count)
+            {
+                base64Data = imageLibrary[i.ImageLibraryIndex.Value];
+            }
+            else if (!string.IsNullOrEmpty(i.Base64Data))
+            {
+                base64Data = i.Base64Data;
+            }
+
+            if (!string.IsNullOrEmpty(base64Data))
+            {
+                try
+                {
+                    var bytes = Convert.FromBase64String(base64Data);
+                    using var ms = new MemoryStream(bytes);
+                    using var temp = new Bitmap(ms);
+                    imgObj.Image = new Bitmap(temp);
+                }
+                catch (Exception ex)
+                {
+                     System.Diagnostics.Debug.WriteLine($"Failed to load embedded image: {ex.Message}");
+                }
+            }
+            
+            if (imgObj.Image == null && File.Exists(i.ImagePath))
+            {
+                try 
+                { 
+                    using var fs = new FileStream(i.ImagePath, FileMode.Open, FileAccess.Read);
+                    var temp = new Bitmap(fs); 
+                    imgObj.Image = new Bitmap(temp);
+                } catch {}
+            }
+            obj = imgObj;
+        }
+        else if (objDto is LaserTextDto t)
+        {
+            obj = new LaserText
+            {
+                Text = t.Text,
+                FontName = t.FontName,
+                FontSize = t.FontSize,
+                PathId = t.PathId,
+                PathOffset = t.PathOffset,
+                VerticalOffset = t.VerticalOffset,
+                ReversePath = t.ReversePath,
+                UpsideDown = t.UpsideDown,
+                FontStyle = t.FontStyle
+            };
+        }
+        else if (objDto is LaserCircleDto)
+        {
+            obj = new LaserCircle();
+        }
+        else if (objDto is LaserBezierDto bDto)
+        {
+            obj = new LaserBezier
+            {
+                Points = bDto.Points ?? new List<PointF>()
+            };
+        }
+
+        if (obj != null)
+        {
+            obj.Id = objDto.Id;
+            obj.Name = objDto.Name;
+            obj.LayerId = objDto.LayerId;
+            obj.IsEnabled = objDto.IsEnabled;
+            obj.Power = objDto.Power;
+
+            obj.Speed = objDto.Speed;
+            obj.Mode = objDto.Mode;
+            obj.Position = objDto.Position;
+            obj.Rotation = objDto.Rotation;
+            obj.Size = objDto.Size;
+        }
+        return obj;
+    }
+
     public static void Save(string path)
     {
         var dto = new ProjectDataDto();
-        // Convert Layers to DTOs
         dto.Layers = ProjectState.Instance.Layers.Select(l => new LayerDto 
         {
             Id = l.Id,
@@ -97,84 +281,20 @@ public static class ProjectSerializer
         
         foreach (var obj in ProjectState.Instance.Objects)
         {
-            if (obj is LaserPath p)
+            var objDto = ToDto(obj);
+            if (objDto is LaserImageDto imgDto && !string.IsNullOrEmpty(imgDto.Base64Data))
             {
-                dto.Objects.Add(new LaserPathDto 
-                { 
-                    Id = p.Id, Name = p.Name, LayerId = p.LayerId, IsEnabled = p.IsEnabled,
-                    Power = p.Power, Speed = p.Speed, Position = p.Position, Rotation = p.Rotation, Size = p.Size,
-                    Points = p.Points
-                });
-            }
-            else if (obj is LaserRectangle r)
-            {
-                dto.Objects.Add(new LaserRectangleDto
+                int index = dto.ImageLibrary.IndexOf(imgDto.Base64Data);
+                if (index == -1)
                 {
-                    Id = r.Id, Name = r.Name, LayerId = r.LayerId, IsEnabled = r.IsEnabled,
-                    Power = r.Power, Speed = r.Speed, Position = r.Position, Rotation = r.Rotation, Size = r.Size
-                });
-            }
-            else if (obj is LaserImage i)
-            {
-                var imgDto = new LaserImageDto
-                {
-                    Id = i.Id, Name = i.Name, LayerId = i.LayerId, IsEnabled = i.IsEnabled,
-                    Power = i.Power, Speed = i.Speed, Position = i.Position, Rotation = i.Rotation, Size = i.Size,
-                    ImagePath = i.ImagePath,
-                    MaskId = i.MaskId
-                };
-                
-                if (AppConfiguration.Instance.EmbedImagesInProject)
-                {
-                    try
-                    {
-                        if (File.Exists(i.ImagePath))
-                        {
-                            var bytes = File.ReadAllBytes(i.ImagePath);
-                            imgDto.Base64Data = Convert.ToBase64String(bytes);
-                        }
-                        else if (i.Image != null)
-                        {
-                            using var ms = new MemoryStream();
-                            i.Image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-                            imgDto.Base64Data = Convert.ToBase64String(ms.ToArray());
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Failed to embed image: {ex.Message}");
-                    }
+                    index = dto.ImageLibrary.Count;
+                    dto.ImageLibrary.Add(imgDto.Base64Data);
                 }
-                
-                dto.Objects.Add(imgDto);
+                imgDto.ImageLibraryIndex = index;
+                imgDto.Base64Data = ""; 
             }
-            else if (obj is LaserText t)
-            {
-                dto.Objects.Add(new LaserTextDto
-                {
-                    Id = t.Id, Name = t.Name, LayerId = t.LayerId, IsEnabled = t.IsEnabled,
-                    Power = t.Power, Speed = t.Speed, Position = t.Position, Rotation = t.Rotation, Size = t.Size,
-                    Text = t.Text, FontName = t.FontName, FontSize = t.FontSize, PathId = t.PathId, PathOffset = t.PathOffset,
-                    VerticalOffset = t.VerticalOffset, ReversePath = t.ReversePath
-                });
-            }
-            else if (obj is LaserCircle c)
-            {
-                dto.Objects.Add(new LaserCircleDto
-                {
-                    Id = c.Id, Name = c.Name, LayerId = c.LayerId, IsEnabled = c.IsEnabled,
-                    Power = c.Power, Speed = c.Speed, Position = c.Position, Rotation = c.Rotation, Size = c.Size
-                });
-            }
-            else if (obj is LaserBezier b)
-            {
-                dto.Objects.Add(new LaserBezierDto
-                {
-                    Id = b.Id, Name = b.Name, LayerId = b.LayerId, IsEnabled = b.IsEnabled,
-                    Power = b.Power, Speed = b.Speed, Position = b.Position, Rotation = b.Rotation, Size = b.Size,
-                    Points = b.Points
-                });
-            }
+            
+            if (objDto != null) dto.Objects.Add(objDto);
         }
 
         var options = new JsonSerializerOptions { WriteIndented = true };
@@ -196,7 +316,6 @@ public static class ProjectSerializer
         ProjectState.Instance.Objects.Clear();
         ProjectState.Instance.Layers.Clear();
 
-        // Load Layers from DTOs
         foreach (var lDto in dto.Layers) 
         {
             var l = new Layer(lDto.Name, lDto.Color)
@@ -216,86 +335,8 @@ public static class ProjectSerializer
 
         foreach (var objDto in dto.Objects)
         {
-            LaserObject? obj = null;
-            if (objDto is LaserPathDto p)
-            {
-                var pathObj = new LaserPath();
-                pathObj.Points = p.Points;
-                obj = pathObj;
-            }
-            else if (objDto is LaserRectangleDto r)
-            {
-                obj = new LaserRectangle();
-            }
-            else if (objDto is LaserImageDto i)
-            {
-                var imgObj = new LaserImage { ImagePath = i.ImagePath, MaskId = i.MaskId };
-                
-                if (!string.IsNullOrEmpty(i.Base64Data))
-                {
-                    try
-                    {
-                        var bytes = Convert.FromBase64String(i.Base64Data);
-                        using var ms = new MemoryStream(bytes);
-                        imgObj.Image = new Bitmap(ms); 
-                        var temp = new Bitmap(ms);
-                        imgObj.Image = new Bitmap(temp);
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Failed to load embedded image: {ex.Message}");
-                    }
-                }
-                
-                if (imgObj.Image == null && File.Exists(i.ImagePath))
-                {
-                    try 
-                    { 
-                        using var fs = new FileStream(i.ImagePath, FileMode.Open, FileAccess.Read);
-                        var temp = new Bitmap(fs); 
-                        imgObj.Image = new Bitmap(temp);
-                    } catch {}
-                }
-                obj = imgObj;
-            }
-            else if (objDto is LaserTextDto t)
-            {
-                obj = new LaserText
-                {
-                    Text = t.Text,
-                    FontName = t.FontName,
-                    FontSize = t.FontSize,
-                    PathId = t.PathId,
-                    PathOffset = t.PathOffset,
-                    VerticalOffset = t.VerticalOffset,
-                    ReversePath = t.ReversePath
-                };
-            }
-            else if (objDto is LaserCircleDto)
-            {
-                obj = new LaserCircle();
-            }
-            else if (objDto is LaserBezierDto bDto)
-            {
-                obj = new LaserBezier
-                {
-                    Points = bDto.Points ?? new List<PointF>()
-                };
-            }
-
-            if (obj != null)
-            {
-                obj.Id = objDto.Id;
-                obj.Name = objDto.Name;
-                obj.LayerId = objDto.LayerId;
-                obj.IsEnabled = objDto.IsEnabled;
-                obj.Power = objDto.Power;
-                obj.Speed = objDto.Speed;
-                obj.Position = objDto.Position;
-                obj.Rotation = objDto.Rotation;
-                obj.Size = objDto.Size;
-                ProjectState.Instance.AddObject(obj);
-            }
+            var obj = FromDto(objDto, dto.ImageLibrary);
+            if (obj != null) ProjectState.Instance.AddObject(obj);
         }
     }
 }
@@ -304,9 +345,6 @@ public class ColorJsonConverter : JsonConverter<System.Drawing.Color>
 {
     public override System.Drawing.Color Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        // Simple int ARGB or string name support?
-        // Let's assume we write as specific struct
-        
         if (reader.TokenType == JsonTokenType.StartObject)
         {
             int a = 255, r = 0, g = 0, b = 0;
@@ -329,9 +367,8 @@ public class ColorJsonConverter : JsonConverter<System.Drawing.Color>
                 }
             }
             
-            if (!string.IsNullOrEmpty(name) && name != "0") // "0" is default for unnamed?
+            if (!string.IsNullOrEmpty(name) && name != "0")
             {
-                // Try known color
                 var k = Color.FromName(name);
                 if (k.IsKnownColor) return k;
             }

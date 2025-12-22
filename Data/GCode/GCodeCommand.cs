@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace laser_gui_test.Data.GCode;
+namespace grbl_burn_em.Data.GCode;
 
 public enum CommandType
 {

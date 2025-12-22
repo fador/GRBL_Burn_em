@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.Text.Json.Serialization;
 
-namespace laser_gui_test.Data;
+namespace grbl_burn_em.Data;
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum LayerMode
@@ -33,5 +33,31 @@ public class Layer
     {
         Name = name;
         Color = color;
+    }
+
+    /// <summary>
+    /// Scales the Power to a new value and adjusts Speed linearly to maintain the same energy density.
+    /// Ratio = Power / Speed. New Speed = New Power / Ratio.
+    /// </summary>
+    public void ScaleToPower(float newPower)
+    {
+        if (Power == 0) return; // Prevent division by zero or invalid scaling from 0
+        float ratio = Speed / Power;
+        
+        Power = newPower;
+        Speed = Power * ratio;
+    }
+
+    /// <summary>
+    /// Scales the Speed to a new value and adjusts Power linearly to maintain the same energy density.
+    /// Ratio = Power / Speed. New Power = New Speed * Ratio.
+    /// </summary>
+    public void ScaleToSpeed(float newSpeed)
+    {
+        if (Speed == 0) return; // Prevent division by zero
+        float ratio = Power / Speed;
+
+        Speed = newSpeed;
+        Power = Speed * ratio;
     }
 }

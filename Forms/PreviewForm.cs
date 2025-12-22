@@ -3,11 +3,11 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
-using laser_gui_test.Data.GCode;
-using laser_gui_test.Controls;
-using laser_gui_test.Data.OpenGL;
+using grbl_burn_em.Data.GCode;
+using grbl_burn_em.Controls;
+using grbl_burn_em.Data.OpenGL;
 
-namespace laser_gui_test.Forms;
+namespace grbl_burn_em.Forms;
 
 public class PreviewForm : Form
 {

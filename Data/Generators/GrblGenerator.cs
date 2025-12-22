@@ -3,7 +3,7 @@ using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Text;
 
-namespace laser_gui_test.Data.Generators;
+namespace grbl_burn_em.Data.Generators;
 
 public class GrblGenerator : IGCodeGenerator
 {
@@ -46,9 +46,9 @@ public class GrblGenerator : IGCodeGenerator
         var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId) 
                     ?? ProjectState.Instance.Layers.FirstOrDefault();
         
-        float pwrPercent = layer?.Power ?? obj.Power;
-        float speedVal = layer?.Speed ?? obj.Speed;
-        LayerMode mode = layer?.Mode ?? LayerMode.Cut;
+        float pwrPercent = obj.Power ?? layer?.Power ?? 100f;
+        float speedVal = obj.Speed ?? layer?.Speed ?? 1000f;
+        LayerMode mode = obj.Mode ?? layer?.Mode ?? LayerMode.Cut;
 
         // Force Fill for Images (they are always raster) works naturally
         // But if user sets Image layer to "Cut", what happens? Images can't be cut effectively without vectorizing.
@@ -63,65 +63,9 @@ public class GrblGenerator : IGCodeGenerator
             if (obj is LaserText text)
             {
                 // Generate Vector Path for Text
-                using (var gp = new GraphicsPath())
+                using (var workPath = text.GetPath())
                 {
-                    var family = new FontFamily(text.FontName);
-                    // Use scale 96/72 to match screen
-                    float emSize = text.FontSize * 96f / 72f; 
-                    
-                    int style = (int)FontStyle.Regular;
-                    gp.AddString(text.Text, family, style, emSize, new PointF(0, 0), StringFormat.GenericDefault);
-
-                    // Warp if needed
-                    GraphicsPath workPath = gp;
-                    GraphicsPath? warpedPath = null;
-                    bool checkWarp = false;
-                    
-                    if (text.PathId != Guid.Empty)
-                    {
-                        var pathObj = ProjectState.Instance.Objects.FirstOrDefault(o => o.Id == text.PathId);
-                        if (pathObj != null)
-                        {
-                            var backbone = PathWarp.FlattenPath(pathObj);
-                            if (backbone.Count > 1)
-                            {
-                                if (text.ReversePath)
-                                {
-                                    backbone.Reverse();
-                                }
-
-                                // Fix Orientation LOCALLY for warping
-                                // We need a clone to not mess up the original gp for fallback
-                                using (var warpInput = (GraphicsPath)gp.Clone())
-                                {
-                                    float ascent = family.GetCellAscent((FontStyle)style) * emSize / family.GetEmHeight((FontStyle)style);
-                                    using (var m = new System.Drawing.Drawing2D.Matrix())
-                                    {
-                                        m.Translate(0, -ascent + text.VerticalOffset);
-                                        m.Scale(1, -1);
-                                        m.Rotate(text.Rotation);
-                                        warpInput.Transform(m);
-                                    }
-                                    
-                                    warpedPath = PathWarp.CreateWarpedPath(warpInput, backbone, text.PathOffset);
-                                    workPath = warpedPath;
-                                    checkWarp = true;
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Transform if NOT warped (Placement logic)
-                    // If warped, position is defined by the backbone + offest.
-                    if (!checkWarp)
-                    {
-                         using (var matrix = new System.Drawing.Drawing2D.Matrix())
-                         {
-                              matrix.Translate(text.Position.X, text.Position.Y + text.Size.Height);
-                              matrix.Scale(1, -1);
-                              workPath.Transform(matrix);
-                         }
-                    }
+                    // workPath is already fully transformed and warped in World Coordinates
                     
                     workPath.Flatten(null, 0.05f); // 0.05mm precision
                     
@@ -175,8 +119,6 @@ public class GrblGenerator : IGCodeGenerator
                              }
                          }
                     }
-                    
-                    warpedPath?.Dispose();
                 }
                 yield return "G1 S0";
                 yield break;
@@ -390,104 +332,108 @@ public class GrblGenerator : IGCodeGenerator
         else
         {
             // Vector to Bitmap for Fill
-            var bounds = obj.GetBounds();
-            if (bounds.Width <= 0 || bounds.Height <= 0) yield break;
-
-            // Resolution for Rasterization (Pixels per mm)
-            // AppConfiguration.Instance.RasterLineInterval (mm/line). 
-            // If 0.1 mm, then 10 lines/mm.
-            float interval = AppConfiguration.Instance.RasterLineInterval;
-            if (interval <= 0) interval = 0.1f;
-            float dpmm = 1.0f / interval; 
             
-            // Limit resolution to avoid huge bitmaps
-            // Max 10000x10000?
-            int w = (int)Math.Ceiling(bounds.Width * dpmm);
-            int h = (int)Math.Ceiling(bounds.Height * dpmm);
-            
-            if (w > 0 && h > 0)
+            // 1. Generate Path FIRST to determine actual bounds
+            using (var path = new GraphicsPath())
             {
-                bitmapToRasterize = new Bitmap(w, h);
-                disposeBitmap = true;
-                rasterPos = bounds.Location;
-                rasterSize = bounds.Size;
-
-                using (var g = Graphics.FromImage(bitmapToRasterize))
+                bool hasPath = false;
+                
+                if (obj is LaserRectangle rect)
                 {
-                    g.Clear(Color.White); // Background White (No Burn)
-                    g.ScaleTransform(dpmm, dpmm);
-                    g.TranslateTransform(-bounds.X, -bounds.Y);
-                    
-                    using (var brush = new SolidBrush(Color.Black)) // Black = Burn
+                    path.AddRectangle(new RectangleF(rect.Position, rect.Size));
+                    hasPath = true;
+                }
+                else if (obj is LaserCircle circ)
+                {
+                    path.AddEllipse(circ.Position.X, circ.Position.Y, circ.Size.Width, circ.Size.Height);
+                    hasPath = true;
+                }
+                else if (obj is LaserPath lp)
+                {
+                    if (lp.Points.Count > 1) 
                     {
-                        using (var path = new GraphicsPath())
-                        {
-                            bool hasPath = false;
-                            
-                            if (obj is LaserRectangle rect)
-                            {
-                                path.AddRectangle(new RectangleF(rect.Position, rect.Size));
-                                hasPath = true;
-                            }
-                            else if (obj is LaserCircle circ)
-                            {
-                                path.AddEllipse(circ.Position.X, circ.Position.Y, circ.Size.Width, circ.Size.Height);
-                                hasPath = true;
-                            }
-                            else if (obj is LaserPath lp)
-                            {
-                                if (lp.Points.Count > 1) 
-                                {
-                                    path.AddLines(lp.Points.ToArray());
-                                    path.CloseFigure();
-                                    hasPath = true;
-                                }
-                            }
-                            else if (obj is LaserBezier lb)
-                            {
-                                if (lb.Points.Count >= 4)
-                                {
-                                    int count = lb.Points.Count;
-                                    int valid = count - (count - 1) % 3;
-                                    path.AddBeziers(lb.Points.Take(valid).ToArray());
-                                    path.CloseFigure();
-                                    hasPath = true;
-                                }
-                            }
-                            else if (obj is LaserText lt)
-                            {
-                                var family = new FontFamily(lt.FontName);
-                                float emSize = lt.FontSize * 96f / 72f; 
-                                path.AddString(lt.Text, family, (int)FontStyle.Regular, emSize, new PointF(0, 0), StringFormat.GenericDefault);
-                                
-                                using (var m = new System.Drawing.Drawing2D.Matrix())
-                                {
-                                    float ascent = family.GetCellAscent((int)FontStyle.Regular) * emSize / family.GetEmHeight((int)FontStyle.Regular);
-                                    m.Translate(0, -ascent + lt.VerticalOffset);
-                                    m.Scale(1, -1);
-                                    m.Translate(lt.Position.X, lt.Position.Y + lt.Size.Height, MatrixOrder.Append);
-                                    path.Transform(m);
-                                }
-                                hasPath = true;
-                            }
+                        path.AddLines(lp.Points.ToArray());
+                        path.CloseFigure();
+                        hasPath = true;
+                    }
+                }
+                else if (obj is LaserBezier lb)
+                {
+                    if (lb.Points.Count >= 4)
+                    {
+                        int count = lb.Points.Count;
+                        int valid = count - (count - 1) % 3;
+                        path.AddBeziers(lb.Points.Take(valid).ToArray());
+                        path.CloseFigure();
+                        hasPath = true;
+                    }
+                }
+                else if (obj is LaserText lt)
+                {
+                    using (var gp = lt.GetPath())
+                    {
+                        path.AddPath(gp, false);
+                    }
+                    hasPath = true;
+                }
 
-                            if (hasPath)
-                            {
-                                if (obj.Rotation != 0)
-                                {
-                                    float cx = obj.Position.X + obj.Size.Width / 2f;
-                                    float cy = obj.Position.Y + obj.Size.Height / 2f;
-                                    using (var m = new System.Drawing.Drawing2D.Matrix())
-                                    {
-                                        m.RotateAt(obj.Rotation, new PointF(cx, cy));
-                                        path.Transform(m);
-                                    }
-                                }
-                                g.FillPath(brush, path);
-                            }
+                if (!hasPath) yield break;
+
+                // Apply Object Rotation
+                if (obj.Rotation != 0)
+                {
+                    float cx = obj.Position.X + obj.Size.Width / 2f;
+                    float cy = obj.Position.Y + obj.Size.Height / 2f;
+                    using (var m = new System.Drawing.Drawing2D.Matrix())
+                    {
+                        m.RotateAt(obj.Rotation, new PointF(cx, cy));
+                        path.Transform(m);
+                    }
+                }
+
+                // 2. Get Exact Bounds from Path
+                var exactBounds = path.GetBounds();
+                if (exactBounds.Width <= 0 || exactBounds.Height <= 0) yield break;
+
+                // Add small padding to prevent edge clipping (antialiasing safety)
+                exactBounds.Inflate(1.0f, 1.0f);
+
+                rasterPos = exactBounds.Location;
+                rasterSize = exactBounds.Size;
+
+                // 3. Setup Bitmap
+                float interval = AppConfiguration.Instance.RasterLineInterval;
+                if (interval <= 0) interval = 0.1f;
+                float dpmm = 1.0f / interval; 
+                
+                int w = (int)Math.Ceiling(rasterSize.Width * dpmm);
+                int h = (int)Math.Ceiling(rasterSize.Height * dpmm);
+                
+                if (w > 0 && h > 0)
+                {
+                    bitmapToRasterize = new Bitmap(w, h);
+                    disposeBitmap = true;
+
+                    using (var g = Graphics.FromImage(bitmapToRasterize))
+                    {
+                        g.Clear(Color.White); // Background White (No Burn)
+                        
+                        // Transform World (Y-Up) to Bitmap (Y-Down)
+                        // Be careful with Matrix Order (Prepend is default)
+                        // We want M = Scale * Translate
+                        // Code Order: Translate THEN Scale
+                        
+                        g.ScaleTransform(dpmm, -dpmm);
+                        g.TranslateTransform(-rasterPos.X, -(rasterPos.Y + rasterSize.Height)); 
+                        
+                        using (var brush = new SolidBrush(Color.Black)) // Black = Burn
+                        {
+                             g.FillPath(brush, path);
                         }
                     }
                 }
+                
+                // path is disposed at end of using block
             }
         }
 

@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace laser_gui_test.Data.OpenGL;
+namespace grbl_burn_em.Data.OpenGL;
 
 public static class GL
 {

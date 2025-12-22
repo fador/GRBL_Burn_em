@@ -2,7 +2,7 @@ using RJCP.IO.Ports;
 using System.Diagnostics;
 using System.Text;
 
-namespace laser_gui_test.Data;
+namespace grbl_burn_em.Data;
 
 public class SerialInterface
 {
@@ -210,6 +210,47 @@ public class SerialInterface
          {
              Debug.WriteLine($"Serial RX Error: {ex.Message}");
          }
+    }
+
+    public async Task MoveRelative(float dx, float dy)
+    {
+        if (!IsConnected) return;
+
+        // Ensure Relative Mode or use Incremental Move
+        // Safer to use G91 for the move then G90 back, or just assume user knows.
+        // We will send "$J=G91 X.. Y.." for jogging which is safer as it doesn't change modal state?
+        // Or "G91 G0 X.. Y.. \n G90"
+        
+        // Using G0
+        string cmd = $"G91 G0 X{dx:F3} Y{dy:F3}\nG90\n";
+        Write(cmd);
+        
+        // Wait for Idle
+        await WaitUntilIdle();
+    }
+
+    public async Task WaitUntilIdle()
+    {
+         // Wait for state to be Run then Idle?
+         // Or just wait for Idle.
+         
+         // Give it a moment to register Start
+         await Task.Delay(100);
+         
+         int timeout = 10000; // 10s
+         int waited = 0;
+         while (waited < timeout)
+         {
+             if (MachineState.Equals("Idle", StringComparison.OrdinalIgnoreCase))
+                 return;
+                 
+             if (MachineState.Contains("Alarm"))
+                 throw new Exception("Machine Alarm");
+                 
+             await Task.Delay(100);
+             waited += 100;
+         }
+         throw new TimeoutException("Timed out waiting for machine Idle");
     }
 
     private void ParseStatus(string line)

@@ -1,24 +1,27 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
-using laser_gui_test.Data;
-using laser_gui_test.Forms;
+using grbl_burn_em.Data;
+using grbl_burn_em.Forms;
 
-namespace laser_gui_test.Controls
+namespace grbl_burn_em.Controls
 {
     public class CameraControl : UserControl
     {
-        private ComboBox _cmbDevices;
-        private Button _btnStartStop;
-        private CheckBox _chkOverlay;
-        private TrackBar _trkOpacity;
-        private Button _btnCalibrate;
+        private ComboBox _cmbDevices = null!;
+        private Button _btnStartStop = null!;
+        private CheckBox _chkOverlay = null!;
+        private TrackBar _trkOpacity = null!;
+        private Button _btnCalibrate = null!;
         
         // Manual Adjustments
-        private NumericUpDown _nudX;
-        private NumericUpDown _nudY;
-        private NumericUpDown _nudWidth;
-        private NumericUpDown _nudHeight;
+        private NumericUpDown _nudX = null!;
+        private NumericUpDown _nudY = null!;
+        private NumericUpDown _nudWidth = null!;
+        private NumericUpDown _nudHeight = null!;
+        
+        private Button _btnRefresh = null!;
+        private CheckBox _chkMounted = null!;
 
         public CameraControl()
         {
@@ -87,33 +90,30 @@ namespace laser_gui_test.Controls
             // X
             flowOverlay.Controls.Add(new Label { Text = "X:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 2);
             _nudX = new NumericUpDown { DecimalPlaces = 2, Minimum = -5000, Maximum = 5000, Dock = DockStyle.Fill };
+            _nudX.ValueChanged += (s,e) => { UpdateConfigFromUI(); UpdateOverlay(); };
             flowOverlay.Controls.Add(_nudX, 1, 2);
             
             // Y
             flowOverlay.Controls.Add(new Label { Text = "Y:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 3);
             _nudY = new NumericUpDown { DecimalPlaces = 2, Minimum = -5000, Maximum = 5000, Dock = DockStyle.Fill };
+            _nudY.ValueChanged += (s,e) => { UpdateConfigFromUI(); UpdateOverlay(); };
             flowOverlay.Controls.Add(_nudY, 1, 3);
             
             // W
             flowOverlay.Controls.Add(new Label { Text = "W:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 4);
             _nudWidth = new NumericUpDown { DecimalPlaces = 2, Minimum = 1, Maximum = 10000, Dock = DockStyle.Fill, Value = 100 };
+            _nudWidth.ValueChanged += (s,e) => { UpdateConfigFromUI(); UpdateOverlay(); };
             flowOverlay.Controls.Add(_nudWidth, 1, 4);
 
             // H
             flowOverlay.Controls.Add(new Label { Text = "H:", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 5);
             _nudHeight = new NumericUpDown { DecimalPlaces = 2, Minimum = 1, Maximum = 10000, Dock = DockStyle.Fill, Value = 100 };
+            _nudHeight.ValueChanged += (s,e) => { UpdateConfigFromUI(); UpdateOverlay(); };
             flowOverlay.Controls.Add(_nudHeight, 1, 5);
             
             grpOverlay.Controls.Add(flowOverlay);
             layout.Controls.Add(grpOverlay);
             
-            // Events for NUDs
-            EventHandler updateVal = (s, e) => { UpdateConfigFromUI(); UpdateOverlay(); };
-            _nudX.ValueChanged += updateVal;
-            _nudY.ValueChanged += updateVal;
-            _nudWidth.ValueChanged += updateVal;
-            _nudHeight.ValueChanged += updateVal;
-
             layout.Controls.Add(new Label { Text = "", Height = 10 }); // Spacer
 
             // 4. Calibration & Mounting
@@ -128,9 +128,17 @@ namespace laser_gui_test.Controls
             pnlMount.Controls.Add(_chkMounted);
             layout.Controls.Add(pnlMount);
 
-            _btnCalibrate = new Button { Text = "Calibrate", Dock = DockStyle.Top, Height = 30 };
+            _btnCalibrate = new Button { Text = "Calibrate Alignment", Dock = DockStyle.Top, Height = 30 };
             _btnCalibrate.Click += OnCalibrateClick;
             layout.Controls.Add(_btnCalibrate);
+
+            var btnLensCalib = new Button { Text = "Calibrate Lens (ArUco)", Dock = DockStyle.Top, Height = 30 };
+            btnLensCalib.Click += (s, e) => 
+            {
+                 using var form = new ArucoCalibrationForm();
+                 form.ShowDialog();
+            };
+            layout.Controls.Add(btnLensCalib);
 
             _btnRefresh = new Button { Text = "Scan Workspace", Dock = DockStyle.Top, Height = 30, BackColor = Color.LightSkyBlue };
             _btnRefresh.Click += OnRefreshClick;
@@ -143,8 +151,6 @@ namespace laser_gui_test.Controls
             UpdateUIState();
         }
 
-        private Button _btnRefresh;
-
         private void UpdateUIState()
         {
             var isMounted = _chkMounted.Checked;
@@ -153,72 +159,30 @@ namespace laser_gui_test.Controls
             // For now keep them available for manual tweak.
         }
 
-        private void OnCalibrateClick(object sender, EventArgs e)
+        private void OnCalibrateClick(object? sender, EventArgs e)
         {
-            if (_chkMounted.Checked)
-            {
-                // Head Mounted Calibration
-                // Workflow:
-                // 1. User confirms they are over a target.
-                // 2. We toggle overlay transparency? Or show Crosshair?
-                // 3. User clicks "Confirm".
-                // 4. We calculate offset assuming Target = Current Laser Position?
-                // Wait, if Laser is at X,Y. Camera is at X_cam, Y_cam.
-                // Camera sees Target (which is at X,Y).
-                // Center of Camera Image = X_cam, Y_cam.
-                // If Target is at Center of Image, then Camera Position = Target Position.
-                // So Offset = CameraPos - HeadPos.
-                // Usage: We know HeadPos (Machine Coords). We know Camera sees HeadPos. 
-                // So Camera is Physically at HeadPos. Offset = 0.
-                // BUT, usually Camera is offset from Head.
-                // True Workflow:
-                // 1. Burn Dot at (X0, Y0).
-                // 2. Move Head to (X1, Y1) such that Camera Center is on Dot.
-                // 3. Physical Camera is now at (X0, Y0).
-                // 4. Head is at (X1, Y1).
-                // 5. Offset = PhysicalCamera - Head = (X0 - X1, Y0 - Y1).
-                
-                var laserPos = SerialInterface.Instance.MachinePosition; // This assumes we track position
-                var res = MessageBox.Show(
-                    $"1. Pulse Laser to mark current spot (X:{laserPos.X}, Y:{laserPos.Y}).\n" +
-                    "2. Release button and Jog machine until the Camera Crosshair is EXACTLY on that spot.\n" +
-                    "3. Click OK here.",
-                    "Head Mounted Calibration", MessageBoxButtons.OKCancel);
-                
-                if (res == DialogResult.OK)
-                {
-                     var newPos = SerialInterface.Instance.MachinePosition;
-                     // Offset = OriginalSpot - NewSpot
-                     // We need to know OriginalSpot.
-                     // The User shouldn't move before Step 1? We don't know if they moved.
-                     // Better: "Enter coordinates of the target you are looking at".
-                     // Or assume they started at "Zero" relative to move?
-                     
-                     // Interactive:
-                     // We can't know "OriginalSpot" unless we recorded it before they jogged.
-                     // Let's assume they entered this mode AT the spot.
-                     // So LaserPos IS the Spot.
-                     
-                     float spotX = laserPos.X;
-                     float spotY = laserPos.Y;
-                     
-                     float currentHeadX = newPos.X;
-                     float currentHeadY = newPos.Y;
-                     
-                     float offX = spotX - currentHeadX;
-                     float offY = spotY - currentHeadY;
-                     
-                     AppConfiguration.Instance.CameraOverlayX = offX; // Reuse X/Y for Offset? 
-                     // Or use CalibrationData
-                     CameraManager.Instance.Calibration.OffsetX = offX;
-                     CameraManager.Instance.Calibration.OffsetY = offY;
-                     //AppConfiguration.Instance.Save(); // Save Calibration
-                     
-                     MessageBox.Show($"Calibrated! Offset: {offX}, {offY}");
-                }
-            }
-            else
-            {
+             var menu = new ContextMenuStrip();
+             
+             menu.Items.Add("Lens Calibration (Distortion)", null, (s, args) => 
+             {
+                 using var form = new LensCalibrationForm();
+                 form.ShowDialog();
+             });
+             
+             menu.Items.Add("-");
+
+             menu.Items.Add("Alignment: Head Mounted (Offset)", null, (s, args) => 
+             {
+                 using var form = new OffsetCalibrationForm();
+                 if (form.ShowDialog() == DialogResult.OK)
+                 {
+                     UpdateUIState();
+                     UpdateOverlay();
+                 }
+             });
+
+             menu.Items.Add("Alignment: Stationary (Homography)", null, (s, args) => 
+             {
                 // Stationary Calibration
                 using var form = new CalibrationForm();
                 if (form.ShowDialog() == DialogResult.OK)
@@ -226,13 +190,6 @@ namespace laser_gui_test.Controls
                     var imgPoints = form.SelectedPoints;
                     // Now Ask for World Points.
                     MessageBox.Show("Now click the 4 corresponding points on the Workbench Grid.\nUse the 'Measure' tool or simply Click-to-Select logic (Not implemented yet). \n\nFor now, we will simulate 4 corners of the work area: \n(0,0), (AreaW,0), (AreaW, AreaH), (0, AreaH).", "Step 2");
-                    
-                    // TODO: Interactive World Point Selection.
-                    // For MVP/Demo: Assume they clicked corners of the image which correspond to corners of bed.
-                    // If they fill the camera view with the bed...
-                    
-                    // Let's just create a dummy "World Points" logic for now or rely on user typing them?
-                    // Better: Compute Homography with simulated Bed Corners.
                     
                     var config = AppConfiguration.Instance;
                     // World Points (Bed Corners)
@@ -243,16 +200,15 @@ namespace laser_gui_test.Controls
                         new PointF(0, 0) // Bottom-Left
                     };
                     
-                    // Order matters! CalibrationForm click order must match.
-                    // Re-Sort? Or instruct user: TL, TR, BR, BL.
-                    
                     CameraManager.Instance.ComputeHomography(imgPoints, worldPoints);
                     MessageBox.Show("Homography Computed and Applied.");
                 }
-            }
+             });
+             
+             menu.Show(_btnCalibrate, new Point(0, _btnCalibrate.Height));
         }
         
-        private void OnRefreshClick(object sender, EventArgs e)
+        private void OnRefreshClick(object? sender, EventArgs e)
         {
              // Trigger Grid Scan
              if (MessageBox.Show("Start Workspace Scan? The machine will move to cover the work area.", "Scan", MessageBoxButtons.YesNo) == DialogResult.Yes)
@@ -262,7 +218,7 @@ namespace laser_gui_test.Controls
              }
         }
 
-        private CheckBox _chkMounted;
+
 
         private void LoadSettings()
         {
@@ -308,7 +264,7 @@ namespace laser_gui_test.Controls
             }
         }
 
-        private void OnStartStopClick(object sender, EventArgs e)
+        private void OnStartStopClick(object? sender, EventArgs e)
         {
             if (CameraManager.Instance.IsRunning)
             {
@@ -318,9 +274,9 @@ namespace laser_gui_test.Controls
             else
             {
                 int index = _cmbDevices.SelectedIndex;
-                if (index >= 0)
+                if (index >= 0 && _cmbDevices.SelectedItem != null)
                 {
-                    var deviceName = _cmbDevices.SelectedItem.ToString();
+                    var deviceName = _cmbDevices.SelectedItem.ToString() ?? "";
                     AppConfiguration.Instance.LastCameraDevice = deviceName;
                     AppConfiguration.Instance.Save();
                     

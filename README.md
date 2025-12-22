@@ -12,13 +12,16 @@ A Windows Forms application designed for controlling laser cutters, built with .
 - **Transformations**: Move, resize, and rotate objects. Supports negative scaling (flipping).
 - **Group/Ungroup**: Organize complex designs by grouping multiple objects.
 - **Grid Array**: Replicate selected objects in a configurable Row × Column grid.
-- **Creation Tools**: Draw Lines and Rectangles directly on the canvas.
+- **Creation Tools**: Draw Lines, Rectangles, Circles, and Beziers directly on the canvas. Supports interactive text creation.
+- **Mathematical Shapes**: Generate parametric shapes like Spirals, Sine Waves, Polygons, Stars, Rose curves, and custom formula-based paths.
 - **Ruler Tool**: Measure distances on the workbench for precise alignment.
 - **Snap-to-Grid**: Toggleable alignment aid with configurable grid size.
 - **Object Reordering**: Drag and Drop or use Up/Down arrows in the Object List to change processing order (Top = First).
+- **Edit Operations**: Standard Cut, Copy, Delete, and Paste functionality via the Edit menu.
 
 ### Import & Processing
 - **SVG Import**: Vector import with configurable curve smoothness (flatness control) for circles and ellipses.
+- **PDF Import**: Supports parsing PDF optional content groups (OCGs) to respect layer visibility.
 - **Image Rasterization**: Import bitmaps (PNG, JPG, BMP) with raster settings:
   - Configurable Line Interval (resolution).
   - Minimum Segment Length optimization.
@@ -33,12 +36,20 @@ A Windows Forms application designed for controlling laser cutters, built with .
 - **Serial Connection**: Direct COM port streaming using `RJCP.SerialPortStream`.
 - **Sender Thread**: Background thread for G-code transmission.
 - **Error Handling**: GRBL alarm messages and buffer synchronization.
-- **G-Code Preview**: Debug viewer to inspect the generated G-code before sending.
+- **G-Code Preview**: Debug viewer to inspect the generated G-code. Supports per-item G-code management with visibility toggling for individual design elements.
+
+### Calibration & Testing
+- **Power/Speed Calibration Grid**: Generate a customizable test grid to find optimal settings for your material.
+  - Supports **Cut (Vector)** and **Engrave (Raster)** modes.
+  - **Engrave Mode** optimizations: Swaps axes (Speed along Y, Power along X) for efficient scanning and sets objects to Fill mode.
+  - Customizable ranges for Power (%), Speed (mm/min), grid dimensions, and cell spacing.
+- **Camera Calibration**: Integrated lens distortion correction using Zhang's method for accurate camera framing.
 
 ### Quality of Life
 - **Undo/Redo**: History support for modification actions.
 - **Interactive Workbench**: Smooth Pan (Right-click dragging) and Zoom (Scroll wheel) navigation. **View state (Zoom/Pan) is saved between sessions.**
-- **Project Persistence**: Save and Load full project states via JSON.
+- **Project Persistence**: Save and Load full project states via JSON. **Optimized for image-heavy projects by automatically deduplicating identical image resources in a project-wide library.**
+- **Laser Splash Screen**: A simulated laser engraving effect of the logo during startup.
 - **Customizable Options**: Configure workspace dimensions, origin point, connection defaults, and UI preferences (e.g., Skip Splash Screen).
 
 ## Project Structure
@@ -63,6 +74,9 @@ Custom User Interface controls:
 - **OptionsForm**: Comprehensive settings dialog for Machine, Connection, Import, and View preferences.
 - **DebugCodeForm**: Viewer for generated G-code.
 - **GridArrayForm**: Dialog for parameterizing array creation.
+- **PowerSpeedCalibrationForm**: Tool for generating laser parameter test grids.
+- **MathShapeForm**: Parametric shape generator.
+- **Camera Forms**: `LensCalibrationForm` (Zhang's method), `ArucoCalibrationForm`, `OffsetCalibrationForm`.
 - **SplashForm**: Laser simulation loading screen.
 
 ### `Tools/`
@@ -101,10 +115,15 @@ dotnet run
 4.  **Modification**:
     -   Use the **Control Panel** (Right) to precisely set X, Y, Width, and Height.
     -   **Group/Ungroup** and **Array** buttons help manage complex compositions.
+    -   **Insert**: Use `Insert -> Math Shape` to generate parametric curves.
 5.  **Output**:
     -   **Framing**: Set Power/Speed and click "Frame Bounds" to preview the job area.
     -   **Generate G-Code**: Create and view the text file for the machine.
+    -   **Center Finding**: Use "Center Marks" or "Object Outlines" to project alignment guides.
     -   **Connect**: Establish serial connection to stream the job.
+6.  **Calibration**:
+    -   **Power/Speed Grid**: Go to `Tool -> Power/Speed Calibration`, select mode (Cut/Engrave), and generate a test pattern.
+    -   **Camera**: Use `Tool -> Camera Settings` to align and calibrate your workspace camera.
 
 ## Known issues
 
@@ -116,3 +135,4 @@ dotnet run
 
 -   **Command Pattern**: All state-modifying actions use `MoveCommand`, `GroupCommand`, `ResizeCommand`, etc., ensuring Undo/Redo capability.
 -   **Singleton State**: `ProjectState` and `AppConfiguration` provide centralized access to the application data and settings.
+-   **Math Evaluator**: Custom expression parser for parametric shape generation without external dependencies.

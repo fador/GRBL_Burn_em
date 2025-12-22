@@ -1,4 +1,4 @@
-namespace laser_gui_test.Forms;
+namespace grbl_burn_em.Forms;
 
 using System.ComponentModel;
 using System.Drawing;
