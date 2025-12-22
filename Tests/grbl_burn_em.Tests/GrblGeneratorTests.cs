@@ -128,4 +128,74 @@ public class GrblGeneratorTests
         // Should only have startup/shutdown
         Assert.DoesNotContain(gcode, s => s.Contains("X") && !s.Contains("X0 Y0"));
     }
+
+    [Fact]
+    public void TestGroupHoleFilling()
+    {
+        var layerId = Guid.NewGuid();
+        SetupDefaultLayer(layerId);
+        
+        // Ensure Fill Mode for this layer/test
+         var layer = ProjectState.Instance.Layers.First(l => l.Id == layerId);
+         layer.Mode = LayerMode.Fill;
+
+        var group = new LaserGroup
+        {
+            LayerId = layerId,
+            IsEnabled = true,
+            Mode = LayerMode.Fill // Force Fill
+        };
+
+        // Outer Box 20x20
+        var outer = new LaserRectangle
+        {
+            LayerId = layerId,
+            Position = new PointF(0, 0),
+            Size = new SizeF(20, 20),
+            IsEnabled = true
+        };
+
+        // Inner Box 10x10 (Hole)
+        var inner = new LaserRectangle
+        {
+            LayerId = layerId,
+            Position = new PointF(5, 5),
+            Size = new SizeF(10, 10),
+            IsEnabled = true
+        };
+
+        group.Children.Add(outer);
+        group.Children.Add(inner);
+
+        // Generate
+        var gcode = _generator.Generate(new[] { group }).ToList();
+
+        // Verification Logic
+        bool foundHole = false;
+        
+        // Iterate through gcode, look for patterns
+        for(int i=0; i<gcode.Count - 2; i++)
+        {
+            string l1 = gcode[i];
+            string l2 = gcode[i+1];
+            string l3 = gcode[i+2];
+
+            // Example sequence:
+            // ... S1000 (Burn)
+            // ... S0 (Off/Travel) OR G0 ... (Travel)
+            // ... S1000 (Burn)
+            
+            bool isBurn1 = l1.Contains("S1000") || (l1.StartsWith("G1") && !l1.Contains("S0"));
+            bool isOff = l2.Contains("S0") || l2.StartsWith("G0");
+            bool isBurn2 = l3.Contains("S1000") || (l3.StartsWith("G1") && !l3.Contains("S0"));
+            
+            if (isBurn1 && isOff && isBurn2)
+            {
+                foundHole = true;
+                break;
+            }
+        }
+        
+        Assert.True(foundHole, "Should find a gap (hole) in the raster lines.");
+    }
 }
