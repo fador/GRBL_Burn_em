@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using laser_gui_test.Data;
-using laser_gui_test.Data.Pdf;
+using grbl_burn_em.Data;
+using grbl_burn_em.Data.Pdf;
 using Xunit;
 
-namespace laser_gui_test.Tests
+namespace grbl_burn_em.Tests
 {
     public class PdfFixesTests
     {

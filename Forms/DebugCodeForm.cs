@@ -1,4 +1,4 @@
-namespace laser_gui_test.Forms;
+namespace grbl_burn_em.Forms;
 
 public class DebugCodeForm : Form
 {

@@ -14,9 +14,9 @@ using Windows.Media.Core;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 
-using laser_gui_test.Tools;
+using grbl_burn_em.Tools;
 
-namespace laser_gui_test.Data
+namespace grbl_burn_em.Data
 {
     public class CameraManager : IDisposable
     {

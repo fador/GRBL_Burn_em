@@ -1,4 +1,4 @@
-﻿namespace laser_gui_test;
+﻿namespace grbl_burn_em;
 
 partial class MainForm
 {

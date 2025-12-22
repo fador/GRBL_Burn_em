@@ -1,9 +1,9 @@
 using System;
 using System.ComponentModel;
 using System.Windows.Forms;
-using laser_gui_test.Data.OpenGL;
+using grbl_burn_em.Data.OpenGL;
 
-namespace laser_gui_test.Controls;
+namespace grbl_burn_em.Controls;
 
 public class OpenGLControl : Control
 {

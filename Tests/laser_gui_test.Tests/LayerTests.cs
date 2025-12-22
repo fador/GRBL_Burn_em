@@ -1,8 +1,8 @@
 using System.Drawing;
-using laser_gui_test.Data;
+using grbl_burn_em.Data;
 using Xunit;
 
-namespace laser_gui_test.Tests
+namespace grbl_burn_em.Tests
 {
     public class LayerTests
     {

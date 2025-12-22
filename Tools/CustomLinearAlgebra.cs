@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace laser_gui_test.Tools
+namespace grbl_burn_em.Tools
 {
     public class MyMatrix
     {

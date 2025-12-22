@@ -6,7 +6,7 @@ using System.Drawing.Drawing2D;
 
 [assembly: SupportedOSPlatform("windows")]
 
-namespace laser_gui_test.Data;
+namespace grbl_burn_em.Data;
 
 public enum LaserObjectType
 {

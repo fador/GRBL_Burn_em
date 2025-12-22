@@ -1,12 +1,12 @@
 using Xunit;
-using laser_gui_test.Data;
+using grbl_burn_em.Data;
 using System.Drawing.Drawing2D;
 using System.Drawing;
 using System.Collections.Generic;
 using System.Linq;
 using System;
 
-namespace laser_gui_test.Tests;
+namespace grbl_burn_em.Tests;
 
 public class PathWarpTests
 {

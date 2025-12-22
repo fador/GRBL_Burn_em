@@ -4,10 +4,10 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using System.ComponentModel;
-using laser_gui_test.Data;
-using laser_gui_test.Data.Generators;
+using grbl_burn_em.Data;
+using grbl_burn_em.Data.Generators;
 
-namespace laser_gui_test.Forms
+namespace grbl_burn_em.Forms
 {
     public class MathShapeForm : Form
     {

@@ -2,7 +2,7 @@ using System.Drawing;
 using System.Linq;
 using System.Collections.Generic;
 
-namespace laser_gui_test.Data.Commands;
+namespace grbl_burn_em.Data.Commands;
 
 public class CloneArrayCommand : ICommand
 {

@@ -1,11 +1,11 @@
 using Xunit;
-using laser_gui_test.Data;
+using grbl_burn_em.Data;
 using System.Linq;
 using System.IO;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
-namespace laser_gui_test.Tests
+namespace grbl_burn_em.Tests
 {
     public class SvgTextTransformTests
     {

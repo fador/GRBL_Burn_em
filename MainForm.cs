@@ -1,19 +1,19 @@
-using laser_gui_test.Controls;
-using laser_gui_test.Data;
-using laser_gui_test.Tools;
+using grbl_burn_em.Controls;
+using grbl_burn_em.Data;
+using grbl_burn_em.Tools;
 using System.ComponentModel;
-using laser_gui_test.Data.Commands;
+using grbl_burn_em.Data.Commands;
 using System.Linq;
-using laser_gui_test.Forms;
-using laser_gui_test.Data.Generators;
-using laser_gui_test.Data.Pdf;
+using grbl_burn_em.Forms;
+using grbl_burn_em.Data.Generators;
+using grbl_burn_em.Data.Pdf;
 using System.Text.Json;
 using System.IO;
 using System.Reflection;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 
-namespace laser_gui_test;
+namespace grbl_burn_em;
 
 public partial class MainForm : Form
 {
@@ -1463,7 +1463,7 @@ public partial class MainForm : Form
             };
 
             // Load from Embedded Resource
-            string resourceName = $"laser_gui_test.Icons.{kvp.Value.Icon}";
+            string resourceName = $"grbl_burn_em.Icons.{kvp.Value.Icon}";
             bool iconLoaded = false;
             
             try

@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Linq;
 
-namespace laser_gui_test.Forms
+namespace grbl_burn_em.Forms
 {
     public class TextEditorForm : Form
     {

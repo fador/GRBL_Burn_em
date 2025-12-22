@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace laser_gui_test.Data.Pdf
+namespace grbl_burn_em.Data.Pdf
 {
     public enum PdfObjectType
     {

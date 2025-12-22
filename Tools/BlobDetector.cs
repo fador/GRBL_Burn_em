@@ -4,7 +4,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 
-namespace laser_gui_test.Tools
+namespace grbl_burn_em.Tools
 {
     public class BlobDetector
     {

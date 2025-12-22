@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using Xunit;
-using laser_gui_test.Tools;
+using grbl_burn_em.Tools;
 
-namespace laser_gui_test.Tests
+namespace grbl_burn_em.Tests
 {
     public class LensDistortionTests
     {

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace laser_gui_test.Data;
+namespace grbl_burn_em.Data;
 
 public class AppConfiguration
 {

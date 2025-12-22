@@ -2,5 +2,5 @@
 /bin
 /*.user
 /.vs
-/Tests/laser_gui_test.Tests/obj
-/Tests/laser_gui_test.Tests/bin
+/Tests/grbl_burn_em.Tests/obj
+/Tests/grbl_burn_em.Tests/bin

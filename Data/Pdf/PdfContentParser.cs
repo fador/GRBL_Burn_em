@@ -7,7 +7,7 @@ using System.Text;
 using System.Runtime.InteropServices;
 
 
-namespace laser_gui_test.Data.Pdf
+namespace grbl_burn_em.Data.Pdf
 {
     public class PdfContentParser
     {

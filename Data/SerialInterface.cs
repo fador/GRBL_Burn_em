@@ -2,7 +2,7 @@ using RJCP.IO.Ports;
 using System.Diagnostics;
 using System.Text;
 
-namespace laser_gui_test.Data;
+namespace grbl_burn_em.Data;
 
 public class SerialInterface
 {

@@ -5,7 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace laser_gui_test.Tests.Utilities;
+namespace grbl_burn_em.Tests.Utilities;
 
 public class GCodeSimulator
 {

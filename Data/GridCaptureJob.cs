@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using laser_gui_test.Controls;
+using grbl_burn_em.Controls;
 
-namespace laser_gui_test.Data
+namespace grbl_burn_em.Data
 {
     public class GridCaptureJob
     {

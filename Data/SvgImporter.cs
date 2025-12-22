@@ -10,7 +10,7 @@ using System.IO;
 
 using System.Runtime.Versioning;
 
-namespace laser_gui_test.Data;
+namespace grbl_burn_em.Data;
 
 [SupportedOSPlatform("windows")]
 #pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type.

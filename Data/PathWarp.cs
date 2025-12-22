@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace laser_gui_test.Data
+namespace grbl_burn_em.Data
 {
     public static class PathWarp
     {

@@ -2,14 +2,14 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Collections.Generic;
-using laser_gui_test.Data;
+using grbl_burn_em.Data;
 
 // Avoid ambiguity between System.Drawing.Size and OpenCvSharp.Size
 using Size = System.Drawing.Size;
 using Point = System.Drawing.Point;
 using Timer = System.Windows.Forms.Timer;
 
-namespace laser_gui_test.Forms
+namespace grbl_burn_em.Forms
 {
     public class LensCalibrationForm : Form
     {

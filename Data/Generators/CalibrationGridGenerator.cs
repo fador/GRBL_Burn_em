@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using laser_gui_test.Data;
+using grbl_burn_em.Data;
 
-namespace laser_gui_test.Data.Generators;
+namespace grbl_burn_em.Data.Generators;
 
 public class CalibrationGridGenerator
 {
@@ -98,7 +98,7 @@ public class CalibrationGridGenerator
                     {
                         Text = $"{xVal:0}",
                         FontSize = 3,
-                        Position = new PointF(currentX, StartY - 8),
+                        Position = new PointF(currentX, StartY - 3),
                         Rotation = 0
                     };
                     lblX.UpdateTextSize();
@@ -113,7 +113,7 @@ public class CalibrationGridGenerator
             {
                 Text = $"{yVal:0}",
                 FontSize = 3,
-                Position = new PointF(StartX - 15, currentY + CellSize/2 - 1.5f)
+                Position = new PointF(StartX - 7, currentY + CellSize/2 - 1.5f)
             };
             lblY.UpdateTextSize();
             result.Add(lblY);
@@ -126,7 +126,7 @@ public class CalibrationGridGenerator
         {
             Text = xTitle,
             FontSize = 4,
-            Position = new PointF(StartX, StartY - 15)
+            Position = new PointF(StartX, StartY - 8)
         };
         titleX.UpdateTextSize();
         result.Add(titleX);
@@ -135,7 +135,7 @@ public class CalibrationGridGenerator
         {
             Text = yTitle,
             FontSize = 4,
-            Position = new PointF(StartX - 25, StartY + (Rows * (CellSize + Spacing)) / 2),
+            Position = new PointF(StartX - 15, StartY + (Rows * (CellSize + Spacing)) / 2),
             Rotation = -90
         };
         titleY.UpdateTextSize();

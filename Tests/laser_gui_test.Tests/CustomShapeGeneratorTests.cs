@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
-using laser_gui_test.Data.Generators;
+using grbl_burn_em.Data.Generators;
 
-namespace laser_gui_test.Tests
+namespace grbl_burn_em.Tests
 {
     public class CustomShapeGeneratorTests
     {

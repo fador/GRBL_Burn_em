@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 
-namespace laser_gui_test.Data;
+namespace grbl_burn_em.Data;
 
 public class JobRunner
 {

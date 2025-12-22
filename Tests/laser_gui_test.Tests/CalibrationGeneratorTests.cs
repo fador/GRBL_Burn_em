@@ -1,9 +1,9 @@
 using Xunit;
-using laser_gui_test.Data;
-using laser_gui_test.Data.Generators;
+using grbl_burn_em.Data;
+using grbl_burn_em.Data.Generators;
 using System.Linq;
 
-namespace laser_gui_test.Tests;
+namespace grbl_burn_em.Tests;
 
 public class CalibrationGeneratorTests
 {

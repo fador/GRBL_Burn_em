@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace laser_gui_test.Data.Generators
+namespace grbl_burn_em.Data.Generators
 {
     public class MathEvaluator
     {

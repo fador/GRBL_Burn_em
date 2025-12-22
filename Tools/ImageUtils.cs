@@ -2,7 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 
-namespace laser_gui_test.Tools
+namespace grbl_burn_em.Tools
 {
     public static class ImageUtils
     {

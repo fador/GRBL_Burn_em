@@ -1,7 +1,7 @@
 using Xunit;
-using laser_gui_test.Data;
+using grbl_burn_em.Data;
 
-namespace laser_gui_test.Tests;
+namespace grbl_burn_em.Tests;
 
 public class GrblErrorTests
 {

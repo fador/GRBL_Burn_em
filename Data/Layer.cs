@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.Text.Json.Serialization;
 
-namespace laser_gui_test.Data;
+namespace grbl_burn_em.Data;
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum LayerMode

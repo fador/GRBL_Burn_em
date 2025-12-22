@@ -1,10 +1,10 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
-using laser_gui_test.Data;
-using laser_gui_test.Forms;
+using grbl_burn_em.Data;
+using grbl_burn_em.Forms;
 
-namespace laser_gui_test.Controls
+namespace grbl_burn_em.Controls
 {
     public class CameraControl : UserControl
     {

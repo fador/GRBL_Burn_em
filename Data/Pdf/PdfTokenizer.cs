@@ -4,7 +4,7 @@ using System.Text;
 using System.IO;
 using System.Globalization;
 
-namespace laser_gui_test.Data.Pdf
+namespace grbl_burn_em.Data.Pdf
 {
     public class PdfTokenizer
     {

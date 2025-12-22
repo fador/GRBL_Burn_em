@@ -3,7 +3,7 @@ using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Text;
 
-namespace laser_gui_test.Data.Generators;
+namespace grbl_burn_em.Data.Generators;
 
 public class GrblGenerator : IGCodeGenerator
 {

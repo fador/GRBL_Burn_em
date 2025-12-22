@@ -9,7 +9,7 @@ using System.Drawing.Drawing2D; // For Matrix
 // Add missing usings if references valid
 // Provided context implies System.Drawing is available (LaserObject uses it)
 
-namespace laser_gui_test.Data.Pdf
+namespace grbl_burn_em.Data.Pdf
 {
     public class PdfImportResult
     {

@@ -1,8 +1,8 @@
 using System;
 using System.Windows.Forms;
-using laser_gui_test.Controls;
+using grbl_burn_em.Controls;
 
-namespace laser_gui_test.Forms
+namespace grbl_burn_em.Forms
 {
     public class CameraSettingsForm : Form
     {

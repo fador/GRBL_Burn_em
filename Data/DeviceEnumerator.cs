@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 
-namespace laser_gui_test.Data
+namespace grbl_burn_em.Data
 {
     public class DirectShowDeviceInfo
     {

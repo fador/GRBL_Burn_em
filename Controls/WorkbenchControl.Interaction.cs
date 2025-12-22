@@ -4,12 +4,12 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using System.Linq;
-using laser_gui_test.Data;
-using laser_gui_test.Tools;
-using laser_gui_test.Data.Commands;
-using laser_gui_test.Forms;
+using grbl_burn_em.Data;
+using grbl_burn_em.Tools;
+using grbl_burn_em.Data.Commands;
+using grbl_burn_em.Forms;
 
-namespace laser_gui_test.Controls
+namespace grbl_burn_em.Controls
 {
     public partial class WorkbenchControl
     {

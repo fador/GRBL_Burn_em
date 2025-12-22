@@ -1,7 +1,7 @@
-using laser_gui_test.Forms;
-using laser_gui_test.Data;
+using grbl_burn_em.Forms;
+using grbl_burn_em.Data;
 
-namespace laser_gui_test;
+namespace grbl_burn_em;
 
 static class Program
 {

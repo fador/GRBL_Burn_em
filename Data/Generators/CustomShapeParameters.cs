@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.Linq;
-using laser_gui_test.Forms;
+using grbl_burn_em.Forms;
 
-namespace laser_gui_test.Data.Generators
+namespace grbl_burn_em.Data.Generators
 {
     public class CustomShapeParameters : ShapeParameters, ICustomTypeDescriptor
     {

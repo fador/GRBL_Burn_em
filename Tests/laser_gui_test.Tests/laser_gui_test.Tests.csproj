@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\laser_gui_test.csproj" />
+    <ProjectReference Include="..\..\grbl_burn_em.csproj" />
   </ItemGroup>
 
 </Project>

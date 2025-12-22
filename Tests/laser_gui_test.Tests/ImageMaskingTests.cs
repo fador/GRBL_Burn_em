@@ -1,12 +1,12 @@
 using Xunit;
-using laser_gui_test.Data;
-using laser_gui_test.Data.Generators;
-using laser_gui_test.Tests.Utilities;
+using grbl_burn_em.Data;
+using grbl_burn_em.Data.Generators;
+using grbl_burn_em.Tests.Utilities;
 using System.Drawing;
 using System.Linq;
 using System;
 
-namespace laser_gui_test.Tests;
+namespace grbl_burn_em.Tests;
 
 public class ImageMaskingTests
 {

@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Drawing;
-using laser_gui_test.Data;
+using grbl_burn_em.Data;
 
-namespace laser_gui_test.Data.Commands;
+namespace grbl_burn_em.Data.Commands;
 
 public class ResizeCommand : ICommand
 {
