@@ -24,6 +24,7 @@ public partial class WorkbenchControl : Control
     private PointF _panOffset = new PointF(0, 0);
     private Point _lastMousePos;
     private bool _isPanning = false;
+    private Point _rightClickDownPos;
 
     // Grid settings
     private const float GridSizeMm = 10.0f; // 10 mm

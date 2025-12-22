@@ -217,54 +217,8 @@ public partial class MainForm : Form
         var menuStrip = new MenuStrip();
         var fileMenu = new ToolStripMenuItem("File");
 
-        // Shared Actions
-        Action applyMask = () => 
-        {
-            var sel = _objectList.SelectedRows;
-            if (sel.Count != 2) 
-            {
-                MessageBox.Show("Please select exactly one Image and one Shape (Circle/Rectangle) to create a mask.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            
-            var obj1 = ProjectState.Instance.Objects[sel[0].Index];
-            var obj2 = ProjectState.Instance.Objects[sel[1].Index];
-            
-            LaserImage? img = obj1 as LaserImage ?? obj2 as LaserImage;
-            LaserObject? shape = (obj1 is LaserCircle || obj1 is LaserRectangle) ? obj1 :
-                                 (obj2 is LaserCircle || obj2 is LaserRectangle) ? obj2 : null;
-                                 
-            if (img != null && shape != null && img != shape)
-            {
-                 if (img.MaskId == shape.Id)
-                 {
-                     img.MaskId = Guid.Empty;
-                 }
-                 else
-                 {
-                     img.MaskId = shape.Id;
-                 }
-                 _workbench.Invalidate();
-            }
-            else
-            {
-                MessageBox.Show("Selection must include one Image and one Shape.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        };
+        // Shared Action Delegates removed in favor of public methods
 
-        Action unmaskAction = () =>
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            var images = sel.OfType<LaserImage>().Where(i => i.MaskId != Guid.Empty).ToList();
-            if (images.Count > 0)
-            {
-                foreach (var img in images)
-                {
-                    img.MaskId = Guid.Empty;
-                }
-                _workbench.Invalidate();
-            }
-        };
 
         
         fileMenu.DropDownItems.Add("New", null, (s, e) => 
@@ -330,8 +284,8 @@ public partial class MainForm : Form
         var toolMenu = new ToolStripMenuItem("Tool");
         toolMenu.DropDownItems.Add("Edit text", null, (s, e) => EditText());
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
-        toolMenu.DropDownItems.Add("Mask Image with Shape", null, (s, e) => applyMask());
-        toolMenu.DropDownItems.Add("Unmask Image", null, (s, e) => unmaskAction());
+        toolMenu.DropDownItems.Add("Mask Image with Shape", null, (s, e) => MaskSelectedImage());
+        toolMenu.DropDownItems.Add("Unmask Image", null, (s, e) => UnmaskSelectedImage());
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         toolMenu.DropDownItems.Add("Camera Settings", null, (s, e) => 
         {
@@ -360,60 +314,17 @@ public partial class MainForm : Form
 
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         
-        toolMenu.DropDownItems.Add("Group", null, (s, e) => 
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
-        });
+        toolMenu.DropDownItems.Add("Group", null, (s, e) => GroupSelection());
         
-        toolMenu.DropDownItems.Add("Ungroup", null, (s, e) => 
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
-        });
+        toolMenu.DropDownItems.Add("Ungroup", null, (s, e) => UngroupSelection());
 
-        toolMenu.DropDownItems.Add("Array Modifier", null, (s, e) =>
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count == 0) return;
-            
-            using var dlg = new GridArrayForm();
-            if (dlg.ShowDialog() == DialogResult.OK)
-            {
-                var cmd = new CloneArrayCommand(sel, dlg.Rows, dlg.Cols, dlg.GapX, dlg.GapY);
-                CommandManager.Instance.Execute(cmd);
-                if (_workbench != null) _workbench.Invalidate();
-            }
-        });
+        toolMenu.DropDownItems.Add("Array Modifier", null, (s, e) => ShowArrayModifierDialog());
         
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         
-        toolMenu.DropDownItems.Add("Attach to Path", null, (s, e) =>
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count == 2)
-            {
-                var txt = sel.OfType<LaserText>().FirstOrDefault();
-                var path = sel.FirstOrDefault(o => o is LaserPath || o is LaserBezier || o is LaserCircle);
-                if (txt != null && path != null && txt != path)
-                {
-                    txt.PathId = path.Id;
-                    // Auto-calculate offset based on text position
-                    txt.PathOffset = PathWarp.GetClosestOffset(path, txt.Position);
-                    _workbench.Invalidate();
-                }
-            }
-        });
+        toolMenu.DropDownItems.Add("Attach to Path", null, (s, e) => AttachSelectedTextToPath());
 
-        toolMenu.DropDownItems.Add("Detach from Path", null, (s, e) =>
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            foreach (var txt in sel.OfType<LaserText>())
-            {
-                txt.PathId = Guid.Empty;
-            }
-            _workbench.Invalidate();
-        });
+        toolMenu.DropDownItems.Add("Detach from Path", null, (s, e) => DetachSelectedTextFromPath());
 
         toolMenu.DropDownItems.Add(new ToolStripSeparator());
         toolMenu.DropDownItems.Add("Power/Speed Calibration", null, (s, e) => ShowPowerSpeedCalibrationDialog());
@@ -501,6 +412,9 @@ public partial class MainForm : Form
 
         // Context Menu
         var ctxMenu = new ContextMenuStrip();
+        var itemCopy = new ToolStripMenuItem("Copy");
+        var itemPaste = new ToolStripMenuItem("Paste");
+        var itemArray = new ToolStripMenuItem("Array Modifier");
         var itemEditText = new ToolStripMenuItem("Edit text");
         var itemMask = new ToolStripMenuItem("Mask Image with Shape");
         var itemUnmask = new ToolStripMenuItem("Unmask Image");
@@ -509,52 +423,33 @@ public partial class MainForm : Form
         var itemAttach = new ToolStripMenuItem("Attach to Path");
         var itemDetach = new ToolStripMenuItem("Detach from Path");
 
-        itemEditText.Click += (s, e) => EditText();
-        itemMask.Click += (s, e) => applyMask();
-        itemUnmask.Click += (s, e) => unmaskAction();
-        itemGroup.Click += (s, e) => 
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
-        };
-        itemUngroup.Click += (s, e) => 
-        {
-            var sel = ProjectState.Instance.SelectedObjects;
-            if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
-        };
-        itemAttach.Click += (s, e) => 
-        {
-             var sel = ProjectState.Instance.SelectedObjects;
-             if (sel.Count == 2)
-             {
-                 var txt = sel.OfType<LaserText>().FirstOrDefault();
-                 var path = sel.FirstOrDefault(o => o is LaserPath || o is LaserBezier || o is LaserCircle);
-                 if (txt != null && path != null && txt != path)
-                 {
-                     txt.PathId = path.Id;
-                     // Auto-calculate offset based on text position
-                     txt.PathOffset = PathWarp.GetClosestOffset(path, txt.Position);
-                     _workbench.Invalidate();
-                 }
-             }
-        };
-        itemDetach.Click += (s, e) =>
-        {
-             var sel = ProjectState.Instance.SelectedObjects;
-             foreach (var txt in sel.OfType<LaserText>())
-             {
-                 txt.PathId = Guid.Empty;
-             }
-             _workbench.Invalidate();
-        };
+        itemCopy.Click += (s, e) => CopySelection();
+        itemPaste.Click += (s, e) => PasteSelection();
+        itemArray.Click += (s, e) => ShowArrayModifierDialog();
 
-        ctxMenu.Items.AddRange(new ToolStripItem[] { itemEditText, new ToolStripSeparator(), itemMask, itemUnmask, new ToolStripSeparator(), itemGroup, itemUngroup, new ToolStripSeparator(), itemAttach, itemDetach });
+        itemEditText.Click += (s, e) => EditText();
+        itemMask.Click += (s, e) => MaskSelectedImage();
+        itemUnmask.Click += (s, e) => UnmaskSelectedImage();
+        itemGroup.Click += (s, e) => GroupSelection();
+        itemUngroup.Click += (s, e) => UngroupSelection();
+        itemAttach.Click += (s, e) => AttachSelectedTextToPath();
+        itemDetach.Click += (s, e) => DetachSelectedTextFromPath();
+
+        ctxMenu.Items.AddRange(new ToolStripItem[] { 
+            itemCopy, itemPaste, new ToolStripSeparator(), 
+            itemEditText, new ToolStripSeparator(), 
+            itemArray, new ToolStripSeparator(),
+            itemMask, itemUnmask, new ToolStripSeparator(), 
+            itemGroup, itemUngroup, new ToolStripSeparator(), 
+            itemAttach, itemDetach 
+        });
 
         ctxMenu.Opening += (s, e) => 
         {
             var selRows = _objectList.SelectedRows;
             var selObjects = ProjectState.Instance.SelectedObjects;
             
+            itemPaste.Enabled = Clipboard.ContainsText();
             itemEditText.Enabled = selObjects.Any(o => o is LaserText);
             itemMask.Enabled = false;
             itemUnmask.Enabled = selObjects.OfType<LaserImage>().Any(i => i.MaskId != Guid.Empty);
@@ -2032,7 +1927,7 @@ public partial class MainForm : Form
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
-    private void CopySelection()
+    public void CopySelection()
     {
         var sel = ProjectState.Instance.SelectedObjects;
         if (sel.Count > 0)
@@ -2045,7 +1940,7 @@ public partial class MainForm : Form
         }
     }
 
-    private void PasteSelection()
+    public void PasteSelection()
     {
         if (Clipboard.ContainsText())
         {
@@ -2091,7 +1986,7 @@ public partial class MainForm : Form
         }
     }
 
-    private void DeleteSelection()
+    public void DeleteSelection()
     {
         var sel = ProjectState.Instance.SelectedObjects;
         if (sel.Count > 0)
@@ -2111,6 +2006,107 @@ public partial class MainForm : Form
             
             ProjectState.Instance.SelectedObjects = new List<LaserObject>();
             _workbench.Invalidate();
+        }
+    }
+
+    public void GroupSelection()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        if (sel.Count > 1) CommandManager.Instance.Execute(new GroupCommand(sel));
+    }
+
+    public void UngroupSelection()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        if (sel.Any(o => o is LaserGroup)) CommandManager.Instance.Execute(new UngroupCommand(sel));
+    }
+
+    public void MaskSelectedImage()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        if (sel.Count != 2) 
+        {
+            MessageBox.Show("Please select exactly one Image and one Shape (Circle/Rectangle) to create a mask.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        
+        var obj1 = sel[0];
+        var obj2 = sel[1];
+        
+        LaserImage? img = obj1 as LaserImage ?? obj2 as LaserImage;
+        LaserObject? shape = (obj1 is LaserCircle || obj1 is LaserRectangle) ? obj1 :
+                             (obj2 is LaserCircle || obj2 is LaserRectangle) ? obj2 : null;
+                             
+        if (img != null && shape != null && img != shape)
+        {
+             if (img.MaskId == shape.Id)
+             {
+                 img.MaskId = Guid.Empty;
+             }
+             else
+             {
+                 img.MaskId = shape.Id;
+             }
+             _workbench.Invalidate();
+        }
+        else
+        {
+            MessageBox.Show("Selection must include one Image and one Shape.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    public void UnmaskSelectedImage()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        var images = sel.OfType<LaserImage>().Where(i => i.MaskId != Guid.Empty).ToList();
+        if (images.Count > 0)
+        {
+            foreach (var img in images)
+            {
+                img.MaskId = Guid.Empty;
+            }
+            _workbench.Invalidate();
+        }
+    }
+
+    public void AttachSelectedTextToPath()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        if (sel.Count == 2)
+        {
+            var txt = sel.OfType<LaserText>().FirstOrDefault();
+            var path = sel.FirstOrDefault(o => o is LaserPath || o is LaserBezier || o is LaserCircle || o is LaserRectangle);
+            if (txt != null && path != null && txt != path)
+            {
+                txt.PathId = path.Id;
+                // Auto-calculate offset based on text position
+                txt.PathOffset = PathWarp.GetClosestOffset(path, txt.Position);
+                _workbench.Invalidate();
+            }
+        }
+    }
+
+    public void DetachSelectedTextFromPath()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        foreach (var txt in sel.OfType<LaserText>())
+        {
+            txt.PathId = Guid.Empty;
+        }
+        _workbench.Invalidate();
+    }
+
+    public void ShowArrayModifierDialog()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        if (sel.Count == 0) return;
+        
+        using var dlg = new GridArrayForm();
+        if (dlg.ShowDialog() == DialogResult.OK)
+        {
+            var cmd = new CloneArrayCommand(sel, dlg.Rows, dlg.Cols, dlg.GapX, dlg.GapY);
+            CommandManager.Instance.Execute(cmd);
+            if (_workbench != null) _workbench.Invalidate();
         }
     }
 

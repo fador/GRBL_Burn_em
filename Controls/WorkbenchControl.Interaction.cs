@@ -42,6 +42,7 @@ namespace grbl_burn_em.Controls
                 
                 _isPanning = true;
                 _lastMousePos = e.Location;
+                _rightClickDownPos = e.Location;
                 Cursor = Cursors.SizeAll;
                 return;
             }
@@ -488,9 +489,19 @@ namespace grbl_burn_em.Controls
             
             if (e.Button == MouseButtons.Right)
             {
-                _isPanning = false;
-                Cursor = Cursors.Default;
-                return;
+                if (_isPanning)
+                {
+                    _isPanning = false;
+                    Cursor = Cursors.Default;
+                    
+                    float dx = e.X - _rightClickDownPos.X;
+                    float dy = e.Y - _rightClickDownPos.Y;
+                    if (Math.Abs(dx) < 5 && Math.Abs(dy) < 5)
+                    {
+                        ShowContextMenu(e.Location);
+                    }
+                    return;
+                }
             }
 
             if (_isRotating)
@@ -954,3 +965,4 @@ namespace grbl_burn_em.Controls
         }
     }
 }
+

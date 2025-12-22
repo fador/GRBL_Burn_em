@@ -513,7 +513,7 @@ public class LaserText : LaserObject
     public float VerticalOffset { get; set; } = 0f;
     public bool ReversePath { get; set; } = false;
     public bool UpsideDown { get; set; } = false;
-    public TextWarpMethod WarpMethod { get; set; } = TextWarpMethod.Stretch;
+    public TextWarpMethod WarpMethod { get; set; } = TextWarpMethod.Align;
     public FontStyle FontStyle { get; set; } = FontStyle.Regular;
     public TextAnchor Anchor { get; set; } = TextAnchor.Start;
 
