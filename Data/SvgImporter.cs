@@ -405,7 +405,7 @@ public class SvgImporter
         float x = ParseDimension(elem.Attribute("x")?.Value, 0);
         float y = ParseDimension(elem.Attribute("y")?.Value, 0);
         float fontSize = ParseDimension(GetStyleOrAttribute(elem, "font-size"), 12);
-        string fontFamily = GetStyleOrAttribute(elem, "font-family") ?? "Arial";
+        string fontFamily = ValidateFont(GetStyleOrAttribute(elem, "font-family"));
         string textAnchor = GetStyleOrAttribute(elem, "text-anchor")?.ToLower() ?? "start";
 
         var lText = new LaserText()
@@ -530,7 +530,7 @@ public class SvgImporter
         if (string.IsNullOrEmpty(txt)) return;
 
         float fontSize = ParseDimension(GetStyleOrAttribute(textElem, "font-size"), 12);
-        string fontFamily = GetStyleOrAttribute(textElem, "font-family") ?? "Arial";
+        string fontFamily = ValidateFont(GetStyleOrAttribute(textElem, "font-family"));
         
         FontFamily ffm;
         try { ffm = new FontFamily(fontFamily); } catch { ffm = FontFamily.GenericSansSerif; }
@@ -1156,5 +1156,30 @@ public class SvgImporter
             }
         }
         return mat;
+    }
+    private static string ValidateFont(string? fontFamily)
+    {
+        if (string.IsNullOrEmpty(fontFamily)) return "Arial";
+        
+        // Remove quotes if present
+        fontFamily = fontFamily.Trim('\'', '"');
+        
+        // Common generic names map
+        if (fontFamily.Equals("sans-serif", StringComparison.OrdinalIgnoreCase)) return FontFamily.GenericSansSerif.Name;
+        if (fontFamily.Equals("serif", StringComparison.OrdinalIgnoreCase)) return FontFamily.GenericSerif.Name;
+        if (fontFamily.Equals("monospace", StringComparison.OrdinalIgnoreCase)) return FontFamily.GenericMonospace.Name;
+
+        try
+        {
+            using (var ff = new FontFamily(fontFamily))
+            {
+                return ff.Name;
+            }
+        }
+        catch
+        {
+            // Fallback
+            return "Arial";
+        }
     }
 }
