@@ -132,6 +132,9 @@ public class GrblGeneratorTests
     [Fact]
     public void TestGroupHoleFilling()
     {
+        AppConfiguration.Reset();
+        AppConfiguration.Instance.RasterLineInterval = 1.0f; // Coarse interval for easier testing
+        
         var layerId = Guid.NewGuid();
         SetupDefaultLayer(layerId);
         
@@ -171,31 +174,111 @@ public class GrblGeneratorTests
         var gcode = _generator.Generate(new[] { group }).ToList();
 
         // Verification Logic
-        bool foundHole = false;
+        // We look for a line that traverses the hole (Y approx 10).
+        // On that line, we should see Burn -> Travel (or S0) -> Burn.
         
-        // Iterate through gcode, look for patterns
-        for(int i=0; i<gcode.Count - 2; i++)
+        bool foundHoleLine = false;
+        
+        foreach(var line in gcode)
         {
-            string l1 = gcode[i];
-            string l2 = gcode[i+1];
-            string l3 = gcode[i+2];
+            // Parse typical G1 X... Y... S...
+            if (!line.StartsWith("G1") && !line.StartsWith("X")) continue;
 
-            // Example sequence:
-            // ... S1000 (Burn)
-            // ... S0 (Off/Travel) OR G0 ... (Travel)
-            // ... S1000 (Burn)
+            // Simple parsing to check if we are in the hole Y area
+            // Note: This is fragile if format changes, but sufficient for now.
+            // Expected format: G1 X10.000 Y10.000 S1000 or X15.000 S0
             
-            bool isBurn1 = l1.Contains("S1000") || (l1.StartsWith("G1") && !l1.Contains("S0"));
-            bool isOff = l2.Contains("S0") || l2.StartsWith("G0");
-            bool isBurn2 = l3.Contains("S1000") || (l3.StartsWith("G1") && !l3.Contains("S0"));
-            
-            if (isBurn1 && isOff && isBurn2)
+            // We really just want to scan the file for a sequence that indicates we skipped the middle.
+            // Let's look for travel moves (S0 or simple Move) inside the X range 5-15 while Y is ~10.
+            // But G-code is stateful.
+        }
+
+        // Better Approach:
+        // Use a state machine to track current Y.
+        // If Y is between 6 and 14, we check X moves.
+        
+        float currentY = -1;
+        float currentX = 0;
+        bool inHoleY = false;
+        bool foundGapInHole = false;
+
+        foreach(var l in gcode)
+        {
+            // Parse Y
+            if (l.Contains("Y"))
             {
-                foundHole = true;
-                break;
+                var parts = l.Split(' ');
+                foreach(var p in parts)
+                {
+                    if (p.StartsWith("Y"))
+                    {
+                        if (float.TryParse(p.Substring(1), out float yVal))
+                        {
+                            currentY = yVal;
+                            inHoleY = (currentY > 6 && currentY < 14);
+                        }
+                    }
+                    if (p.StartsWith("X"))
+                    {
+                         if (float.TryParse(p.Substring(1), out float xVal))
+                        {
+                            currentX = xVal;
+                        }
+                    }
+                }
+            }
+
+            if (inHoleY)
+            {
+                // We are in the Y range of the hole.
+                // Check if we have a Travel or S0 command that spans the hole interval (5 to 15).
+                
+                bool isTravel = l.Contains("S0") || l.StartsWith("G0");
+                bool isBurn = l.Contains("S") && !l.Contains("S0") && !l.StartsWith("G0");
+                
+                // If we see a Travel/Off move that ends > 5 and < 15, that might be entering or inside the hole?
+                // Actually, the GAP is characterized by NOT burning between X=5 and X=15.
+                // So reliable check:
+                // If we burn, we must be <= 5 or >= 15.
+                // If we find a burn segment that crosses 5..15, then we FAILED.
+                // If we traverse 5..15 without burning, GOOD.
+                
+                // BUT, parsing "traverse without burning" is hard from just lines.
+                // EASIER: Check if we find a G0/Travel G1 S0 to somewhere inside the hole or crossing it?
+                // Actually, rasterizer probably skips the hole.
+                // So we should see:
+                // G1 X5 S1000
+                // G1 X15 S0 (Travel to other side)
+                // G1 X20 S1000
+                
+                // OR
+                // X5 S1000
+                // X15 S0
+                // X20 S1000
+                
+                if (l.Contains("S0") && l.Contains("X"))
+                {
+                    // Travel move. Check X destination.
+                    var parts = l.Split(' ');
+                    foreach(var p in parts)
+                    {
+                        if (p.StartsWith("X"))
+                        {
+                            if (float.TryParse(p.Substring(1), out float xDest))
+                            {
+                                // If we traveled to X=15 (right side of hole)
+                                if (Math.Abs(xDest - 15) < 0.1 || Math.Abs(xDest - 5) < 0.1)
+                                {
+                                    // This is likely the skip
+                                    foundGapInHole = true;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         
-        Assert.True(foundHole, "Should find a gap (hole) in the raster lines.");
+        Assert.True(foundGapInHole, "Should find a gap (travel move) crossing the hole.");
     }
 }

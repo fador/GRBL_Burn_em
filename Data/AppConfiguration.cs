@@ -13,6 +13,11 @@ public class AppConfiguration
     private static AppConfiguration? _instance;
     public static AppConfiguration Instance => _instance ??= Load();
 
+    public static void Reset()
+    {
+        _instance = new AppConfiguration();
+    }
+
     public string LastPortName { get; set; } = "";
     public int BaudRate { get; set; } = 115200;
     public string GCodeGenerator { get; set; } = "Grbl";
