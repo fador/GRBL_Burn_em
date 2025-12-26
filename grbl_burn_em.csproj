@@ -17,6 +17,8 @@
     <None Remove="Tests\**" />
     <Compile Remove="Emulator\**" />
     <None Remove="Emulator\**" />
+    <Compile Remove="StarPlugin\**" />
+    <None Remove="StarPlugin\**" />
   </ItemGroup>
 
   <ItemGroup>

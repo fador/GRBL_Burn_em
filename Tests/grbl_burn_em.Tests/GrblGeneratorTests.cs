@@ -177,7 +177,6 @@ public class GrblGeneratorTests
         // We look for a line that traverses the hole (Y approx 10).
         // On that line, we should see Burn -> Travel (or S0) -> Burn.
         
-        bool foundHoleLine = false;
         
         foreach(var line in gcode)
         {

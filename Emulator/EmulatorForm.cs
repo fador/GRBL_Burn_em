@@ -6,8 +6,8 @@ namespace grbl_burn_em_emulator;
 
 public partial class EmulatorForm : Form
 {
-    private PictureBox _workArea;
-    private TextBox _logBox;
+    private PictureBox _workArea = null!;
+    private TextBox _logBox = null!;
     private Bitmap _bedBitmap;
     private Graphics _bedGraphics;
     
@@ -53,7 +53,7 @@ public partial class EmulatorForm : Form
         // Start Repaint Timer
         var timer = new System.Windows.Forms.Timer();
         timer.Interval = 33; // ~30fps
-        timer.Tick += (s, e) => _workArea.Invalidate();
+        timer.Tick += (s, e) => _workArea?.Invalidate();
         timer.Start();
     }
 

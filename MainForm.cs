@@ -111,6 +111,67 @@ public partial class MainForm : Form
     private ToolStripComboBox _cmbWarpMethod = null!;
     private ToolTip _toolTip = new ToolTip();
 
+    // Plugin Support
+    private ContextMenuStrip _contextMenu = null!;
+    private List<(string Name, Action<LaserObject> Action)> _pluginContextActions = new();
+    private List<IGCodeGenerator> _gcodeGenerators = new();
+
+    public List<string> GetRegisteredGeneratorNames()
+    {
+        var names = new List<string> { "Grbl", "GCode", "Dummy" };
+        foreach (var gen in _gcodeGenerators)
+        {
+            if (!names.Contains(gen.Name))
+                names.Add(gen.Name);
+        }
+        return names;
+    }
+
+    public void RegisterGCodeGenerator(IGCodeGenerator generator)
+    {
+        _gcodeGenerators.Add(generator);
+    }
+
+    public void AddMenuItem(string menuPath, string menuItemName, Action action)
+    {
+        if (MainMenuStrip == null) return;
+
+        var pathParts = menuPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        ToolStripItemCollection currentItems = MainMenuStrip.Items;
+        ToolStripMenuItem? currentParent = null;
+
+        foreach (var part in pathParts)
+        {
+            var found = currentItems.Cast<ToolStripItem>().OfType<ToolStripMenuItem>().FirstOrDefault(i => i.Text == part);
+            if (found == null)
+            {
+                found = new ToolStripMenuItem(part);
+                currentItems.Add(found);
+            }
+            currentParent = found;
+            currentItems = found.DropDownItems;
+        }
+
+        var newItem = new ToolStripMenuItem(menuItemName, null, (s, e) => action());
+        currentItems.Add(newItem);
+    }
+
+    public void AddContextMenuItem(string text, Action<LaserObject> action)
+    {
+        _pluginContextActions.Add((text, action));
+    }
+
+    public void RefreshObjectList()
+    {
+        _objectList?.Refresh();
+        UpdateSelectedObjects();
+    }
+
+    public void InvalidateWorkbench()
+    {
+        _workbench?.Invalidate();
+    }
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         try
@@ -213,7 +274,6 @@ public partial class MainForm : Form
         }
 
         // 1. Menu Strip
-        // 1. Menu Strip
         var menuStrip = new MenuStrip();
         var fileMenu = new ToolStripMenuItem("File");
 
@@ -255,7 +315,7 @@ public partial class MainForm : Form
         fileMenu.DropDownItems.Add(new ToolStripSeparator());
         fileMenu.DropDownItems.Add("Options", null, (s, e) => 
         {
-            using var dlg = new OptionsForm();
+            using var dlg = new OptionsForm(GetRegisteredGeneratorNames());
             dlg.ShowDialog();
         });
         menuStrip.Items.Add(fileMenu);
@@ -390,7 +450,7 @@ public partial class MainForm : Form
             Dock = DockStyle.Right,
             Width = 300,
             Orientation = Orientation.Horizontal,
-            SplitterDistance = 100,
+            SplitterDistance = 150,
             //FixedPanel = FixedPanel.Panel2 // Keep Control Panel (Bottom) fixed size when resizing form
         };
 
@@ -411,7 +471,7 @@ public partial class MainForm : Form
         };
 
         // Context Menu
-        var ctxMenu = new ContextMenuStrip();
+        _contextMenu = new ContextMenuStrip();
         var itemCopy = new ToolStripMenuItem("Copy");
         var itemPaste = new ToolStripMenuItem("Paste");
         var itemArray = new ToolStripMenuItem("Array Modifier");
@@ -435,7 +495,7 @@ public partial class MainForm : Form
         itemAttach.Click += (s, e) => AttachSelectedTextToPath();
         itemDetach.Click += (s, e) => DetachSelectedTextFromPath();
 
-        ctxMenu.Items.AddRange(new ToolStripItem[] { 
+        _contextMenu.Items.AddRange(new ToolStripItem[] { 
             itemCopy, itemPaste, new ToolStripSeparator(), 
             itemEditText, new ToolStripSeparator(), 
             itemArray, new ToolStripSeparator(),
@@ -444,7 +504,7 @@ public partial class MainForm : Form
             itemAttach, itemDetach 
         });
 
-        ctxMenu.Opening += (s, e) => 
+        _contextMenu.Opening += (s, e) => 
         {
             var selRows = _objectList.SelectedRows;
             var selObjects = ProjectState.Instance.SelectedObjects;
@@ -462,8 +522,33 @@ public partial class MainForm : Form
                 bool hasShape = obj1 is LaserCircle || obj1 is LaserRectangle || obj2 is LaserCircle || obj2 is LaserRectangle;
                 if (hasImage && hasShape) itemMask.Enabled = true;
             }
+
+            // Plugin Actions
+            for (int i = _contextMenu.Items.Count - 1; i >= 0; i--)
+            {
+                if (_contextMenu.Items[i].Tag is string mTag && mTag == "Plugin")
+                {
+                    _contextMenu.Items.RemoveAt(i);
+                }
+            }
+
+            if (_pluginContextActions.Any())
+            {
+                _contextMenu.Items.Add(new ToolStripSeparator { Tag = "Plugin" });
+                foreach(var pa in _pluginContextActions)
+                {
+                    var pItem = new ToolStripMenuItem(pa.Name);
+                    pItem.Tag = "Plugin";
+                    pItem.Click += (sender, args) => 
+                    {
+                        var target = ProjectState.Instance.SelectedObject;
+                        if(target != null) pa.Action(target);
+                    };
+                    _contextMenu.Items.Add(pItem);
+                }
+            }
         };
-        _objectList.ContextMenuStrip = ctxMenu;
+        _objectList.ContextMenuStrip = _contextMenu;
         
         // Wire Drag/Drop Events
         Rectangle dragBoxFromMouseDown = Rectangle.Empty;
@@ -702,7 +787,7 @@ public partial class MainForm : Form
         var pnlControl = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, AutoScroll = true, Padding = new Padding(10) };
         
         // Jogging
-        var grpJog = new GroupBox { Text = "Jog", Width = 250, Height = 180 };
+        var grpJog = new GroupBox { Text = "Jog", Width = 250, Height = 120 };
         var gridJog = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3 };
         // 0,0  0,1(Up) 0,2
         // 1,0(L) 1,1   1,2(R)
@@ -797,6 +882,9 @@ public partial class MainForm : Form
         var pnlInput = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
         pnlInput.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         pnlInput.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 60));
+
+        // Initialize Plugins
+        PluginManager.Instance.Initialize(this);
         
         var txtInput = new TextBox { Dock = DockStyle.Fill };
         var btnSend = new Button { Text = "Send", Dock = DockStyle.Fill };
@@ -983,6 +1071,11 @@ public partial class MainForm : Form
         };
         InitializeControlPanel();
         rightSplit.Panel2.Controls.Add(_controlPanel);
+
+        // Fix splitter distance not applying by setting it after load
+        this.Load += (s, e) => { rightSplit.SplitterDistance = 150; };
+
+        
 
         this.Controls.Add(rightSplit);
 
@@ -2282,6 +2375,12 @@ public partial class MainForm : Form
 
         if (generator == null)
         {
+             // Check plugins
+             generator = _gcodeGenerators.FirstOrDefault(g => g.Name == generatorName);
+        }
+
+        if (generator == null)
+        {
              // Default
              generator = new GrblGenerator();
         }
@@ -2305,8 +2404,23 @@ public partial class MainForm : Form
         if (!CheckSafetyBounds(ProjectState.Instance.Objects.ToList())) return;
 
         string generatorName = AppConfiguration.Instance.GCodeGenerator;
-
+        
         IGCodeGenerator? generator = null;
+
+        if (generatorName == "Grbl") generator = new GrblGenerator();
+        // Add others here
+
+        if (generator == null)
+        {
+             // Check plugins
+             generator = _gcodeGenerators.FirstOrDefault(g => g.Name == generatorName);
+        }
+
+        if (generator == null)
+        {
+             // Default
+             generator = new GrblGenerator();
+        }
 
         if (generatorName == "Grbl") generator = new GrblGenerator();
         // Add others here

@@ -23,7 +23,7 @@ public class CameraServer
         {
             _listener = new TcpListener(IPAddress.Any, port);
             _listener.Start();
-            Task.Run(ListenLoop);
+            _ = Task.Run(ListenLoop);
         }
         catch (Exception ex)
         {
@@ -38,7 +38,7 @@ public class CameraServer
             try
             {
                 var client = await _listener!.AcceptTcpClientAsync();
-                Task.Run(() => HandleClient(client));
+                _ = Task.Run(() => HandleClient(client));
             }
             catch { break; }
         }

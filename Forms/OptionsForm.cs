@@ -46,9 +46,17 @@ public class OptionsForm : Form
         }
     }
 
-    public OptionsForm()
+    public OptionsForm(IEnumerable<string>? extraGenerators = null)
     {
         InitializeComponent();
+        if (extraGenerators != null)
+        {
+            foreach (var gen in extraGenerators)
+            {
+                if (!_cbGenerator.Items.Contains(gen))
+                    _cbGenerator.Items.Add(gen);
+            }
+        }
         LoadSettings();
     }
 

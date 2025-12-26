@@ -29,7 +29,6 @@ public class EmulatorLogic
     public event Action<float, float, float>? BurnMark;
 
     private System.Collections.Concurrent.ConcurrentQueue<string> _commandQueue = new();
-    private bool _isProcessing = false;
     private CancellationTokenSource? _moveCts;
 
     public EmulatorLogic()
