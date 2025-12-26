@@ -13,6 +13,8 @@ A Windows Forms application designed for controlling laser cutters, built with .
 
 <img src="./Images/screenshot_1.png" width="200" /><img src="./Images/screenshot_2.png" width="200" /><img src="./Images/screenshot_3.png" width="200" /><img src="./Images/screenshot_4.png" width="200" />
 
+## Plugins
+ See [PLUGINS.md](PLUGINS.md) for more information.
 
 ## Key Features
 
