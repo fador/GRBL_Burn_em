@@ -6,6 +6,7 @@
  */
 using RJCP.IO.Ports;
 using System.Diagnostics;
+using System.Net.Sockets;
 using System.Text;
 
 namespace grbl_burn_em.Data;
@@ -16,7 +17,9 @@ public class SerialInterface
     public static SerialInterface Instance => _instance ??= new SerialInterface();
 
     private SerialPortStream? _serialPort;
-    public bool IsConnected => _serialPort != null && _serialPort.IsOpen;
+    private TcpClient? _tcpClient;
+    private NetworkStream? _netStream;
+    public bool IsConnected => (_serialPort != null && _serialPort.IsOpen) || (_tcpClient != null && _tcpClient.Connected);
     
     public event Action<string>? DataReceived;
     public event Action<string>? LineReceived;
@@ -26,6 +29,9 @@ public class SerialInterface
 
     public string MachineState { get; private set; } = "Unknown";
     public PointF MachinePosition { get; private set; } = new PointF(0, 0);
+    
+    private StringBuilder _rxBuffer = new StringBuilder();
+    public event Action<int, int>? BufferLimitsReceived;
 
     private System.Threading.Timer? _pollTimer;
     private bool _isPolling = false;
@@ -34,7 +40,7 @@ public class SerialInterface
     public SerialInterface()
     {
         _serialPort = new SerialPortStream();
-        DataReceivedEvent += _serialPort_DataReceived;
+        //_serialPort.DataReceived += _serialPort_DataReceived; // We subscribe in Connect
     }
 
     public int BytesToWrite()
@@ -57,13 +63,27 @@ public class SerialInterface
     public void Connect(string portName, int baudRate)
     {
         Disconnect();
+        
+        // Check for Emulator
+        // Check for Emulator or TCP
+        if (portName.StartsWith("TCP:", StringComparison.OrdinalIgnoreCase))
+        {
+             ConnectTcp(portName.Substring(4));
+             return;
+        }
+        if (portName.Contains(":")) // Assume IP:Port
+        {
+             ConnectTcp(portName);
+             return;
+        }
+
         try
         {
             if(_serialPort == null) _serialPort = new SerialPortStream();
             _serialPort.PortName = portName;
             _serialPort.BaudRate = baudRate;
             _serialPort.WriteTimeout = 10; // Prevent UI freeze on blocked write
-            _serialPort.DataReceived += DataReceivedEvent;
+            _serialPort.DataReceived += _serialPort_DataReceived;
             _serialPort.Open();
             _serialPort.DiscardInBuffer(); // Clear any existing data
             
@@ -89,6 +109,56 @@ public class SerialInterface
         }
     }
 
+    private void ConnectTcp(string hostPort)
+    {
+        try
+        {
+            var parts = hostPort.Split(':');
+            string host = parts[0];
+            int port = parts.Length > 1 ? int.Parse(parts[1]) : 2345;
+            
+            _tcpClient = new TcpClient();
+            _tcpClient.Connect(host, port);
+            _netStream = _tcpClient.GetStream();
+            
+            ConnectionStatusChanged?.Invoke(true);
+            StartPolling();
+            
+            // Start Read Loop
+            Task.Run(TcpReadLoop);
+            
+             // Initialize Grbl
+            Write("\u0018"); 
+            Thread.Sleep(100);
+            Write("$X\n");
+            Write("?");
+        }
+        catch (Exception ex)
+        {
+             Debug.WriteLine($"TCP Connect Error: {ex.Message}");
+             Disconnect();
+             throw;
+        }
+    }
+
+    private async Task TcpReadLoop()
+    {
+        byte[] buffer = new byte[4096];
+        while (IsConnected && _netStream != null)
+        {
+            try
+            {
+                int bytesRead = await _netStream.ReadAsync(buffer, 0, buffer.Length);
+                if (bytesRead == 0) break; // Disconnected
+                
+                string data = Encoding.ASCII.GetString(buffer, 0, bytesRead);
+                ProcessIncomingData(data);
+            }
+            catch { break; }
+        }
+        Disconnect();
+    }
+
     public void Disconnect()
     {
         if (_serialPort != null)
@@ -102,10 +172,18 @@ public class SerialInterface
             finally
             {
                 _serialPort = null;
-                _serialPort = null;
-                ConnectionStatusChanged?.Invoke(false);
             }
         }
+        if (_tcpClient != null)
+        {
+            try 
+            {
+                _tcpClient.Close();
+                _tcpClient = null;
+                _netStream = null;
+            } catch {}
+        }
+        ConnectionStatusChanged?.Invoke(false);
     }
 
     public void StartPolling()
@@ -134,17 +212,30 @@ public class SerialInterface
 
     public bool Write(string data)
     {
-        if (IsConnected && _serialPort != null)
+        if (IsConnected)
         {
-            if(data.Length > _serialPort.WriteBufferSize - _serialPort.BytesToWrite)
-            {                
-                return false;
+            if (_serialPort != null)
+            {
+                if(data.Length > _serialPort.WriteBufferSize - _serialPort.BytesToWrite)
+                {                
+                    return false;
+                }
             }
+            
             try 
             { 
                  lock (_writeLock)
                  {
-                     _serialPort.Write(data);
+                     if (_serialPort != null && _serialPort.IsOpen)
+                     {
+                        _serialPort.Write(data);
+                     }
+                     else if (_netStream != null)
+                     {
+                        byte[] bytes = Encoding.ASCII.GetBytes(data);
+                        _netStream.Write(bytes, 0, bytes.Length);
+                        _netStream.Flush();
+                     }
                  }
                  if(data != "?") LineSent?.Invoke(data.Trim()); // Invoke event
             }
@@ -162,60 +253,61 @@ public class SerialInterface
         return true;
     }
 
-    public string[] GetAvailablePorts()
-    {
-        return _serialPort?.GetPortNames() ?? Array.Empty<string>();
-    }
-
-    private StringBuilder _rxBuffer = new StringBuilder();
-
-    public event Action<int, int>? BufferLimitsReceived; // Planner, Rx
-
-    public event EventHandler<SerialDataReceivedEventArgs> DataReceivedEvent;
-
     protected virtual void _serialPort_DataReceived(object? sender, SerialDataReceivedEventArgs args)
     {
          if (_serialPort == null || !_serialPort.IsOpen) return;
-         
          try
          {
              string data = _serialPort.ReadExisting();
-             if (!string.IsNullOrEmpty(data))
-             {
-                 DataReceived?.Invoke(data);
-
-                 // Process Lines
-                 foreach(char c in data)
-                 {
-                     if (c == '\n' || c == '\r')
-                     {
-                         if (_rxBuffer.Length > 0)
-                         {
-                             //Debug.WriteLine($"Line Received: {_rxBuffer.ToString()}");
-                             string line = _rxBuffer.ToString().Trim();
-                             _rxBuffer.Clear();
-                             if (string.IsNullOrEmpty(line)) continue;
-                             
-                             // Parse
-                             if (line.StartsWith("<"))
-                             {
-                                 ParseStatus(line);
-                             } else {
-                                LineReceived?.Invoke(line);
-                             }
-                         }
-                     }
-                     else
-                     {
-                         _rxBuffer.Append(c);
-                     }
-                 }
-             }
+             ProcessIncomingData(data);
          }
          catch (Exception ex)
          {
              Debug.WriteLine($"Serial RX Error: {ex.Message}");
          }
+    }
+
+    private void ProcessIncomingData(string data)
+    {
+         if (!string.IsNullOrEmpty(data))
+         {
+             DataReceived?.Invoke(data);
+
+             // Process Lines
+             foreach(char c in data)
+             {
+                 if (c == '\n' || c == '\r')
+                 {
+                     if (_rxBuffer.Length > 0)
+                     {
+                         string line = _rxBuffer.ToString().Trim();
+                         _rxBuffer.Clear();
+                         if (string.IsNullOrEmpty(line)) continue;
+                         
+                         if (line.StartsWith("<"))
+                         {
+                             ParseStatus(line);
+                         } 
+                         else 
+                         {
+                            LineReceived?.Invoke(line);
+                         }
+                     }
+                 }
+                 else
+                 {
+                     _rxBuffer.Append(c);
+                 }
+             }
+         }
+    }
+
+    public string[] GetAvailablePorts()
+    {
+         var ports = _serialPort?.GetPortNames() ?? Array.Empty<string>();
+         var list = new List<string>(ports);
+         list.Add("TCP:127.0.0.1:2345"); // Emulator Option
+         return list.ToArray();
     }
 
     public async Task MoveRelative(float dx, float dy)

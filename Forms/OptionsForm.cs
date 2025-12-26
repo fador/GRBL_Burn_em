@@ -66,7 +66,7 @@ public class OptionsForm : Form
         // --- Connection Tab ---
         var tabConnection = new TabPage("Connection");
         var lblPort = new Label { Text = "COM Port:", Location = new Point(20, 30), AutoSize = true };
-        _cbPorts = new ComboBox { Location = new Point(120, 27), Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cbPorts = new ComboBox { Location = new Point(120, 27), Width = 180, DropDownStyle = ComboBoxStyle.DropDown };
         
         var lblBaud = new Label { Text = "Baud Rate:", Location = new Point(20, 70), AutoSize = true };
         _cbBaud = new ComboBox { Location = new Point(120, 67), Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -222,9 +222,14 @@ public class OptionsForm : Form
 
         // Select Configured Port
         string lastPort = AppConfiguration.Instance.LastPortName;
-        if (!string.IsNullOrEmpty(lastPort) && _cbPorts.Items.Contains(lastPort))
+        if (!string.IsNullOrEmpty(lastPort))
         {
-            _cbPorts.SelectedItem = lastPort;
+             if (!_cbPorts.Items.Contains(lastPort))
+             {
+                 _cbPorts.Items.Add(lastPort);
+             }
+             _cbPorts.SelectedItem = lastPort;
+             _cbPorts.Text = lastPort;
         }
         else if (_cbPorts.Items.Count > 0)
         {
@@ -280,9 +285,9 @@ public class OptionsForm : Form
 
     private void BtnSave_Click(object? sender, EventArgs e)
     {
-        if (_cbPorts.SelectedItem != null)
+        if (!string.IsNullOrEmpty(_cbPorts.Text))
         {
-            AppConfiguration.Instance.LastPortName = _cbPorts.SelectedItem.ToString() ?? "";
+            AppConfiguration.Instance.LastPortName = _cbPorts.Text;
         }
         
         if (_cbBaud.SelectedItem != null && int.TryParse(_cbBaud.SelectedItem.ToString(), out int baud))

@@ -10,8 +10,6 @@ using System.Text.Json.Serialization;
 using System.Runtime.Versioning;
 using System.Drawing.Drawing2D;
 
-[assembly: SupportedOSPlatform("windows")]
-
 namespace grbl_burn_em.Data;
 
 public enum LaserObjectType

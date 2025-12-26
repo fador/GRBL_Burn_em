@@ -12,7 +12,11 @@ using System.Drawing.Imaging;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.InteropServices;
+using System.Net.Sockets;
+using System.IO;
 
 using Windows.Devices.Enumeration;
 using Windows.Media.Capture;
@@ -61,7 +65,9 @@ namespace grbl_burn_em.Data
                 task.Wait();
                 var devices = task.Result;
                 _deviceInfos = devices.ToList();
-                return _deviceInfos.Select(d => d.Name).ToList();
+                var list = _deviceInfos.Select(d => d.Name).ToList();
+                list.Add("Network Camera (Emulator)"); 
+                return list;
             }
             catch (Exception ex)
             {
@@ -79,7 +85,16 @@ namespace grbl_burn_em.Data
         {
             if (_isRunning) await StopCameraAsync();
 
-            if (_deviceInfos == null || deviceIndex < 0 || deviceIndex >= _deviceInfos.Count)
+            if (_deviceInfos == null) return;
+            
+            // Check if Network Camera (Index out of range of _deviceInfos)
+            if (deviceIndex == _deviceInfos.Count)
+            {
+                 await ConnectToEmulatorAsync("127.0.0.1", 2346);
+                 return;
+            }
+            
+            if (deviceIndex < 0 || deviceIndex >= _deviceInfos.Count)
                 return;
 
             try
@@ -126,6 +141,58 @@ namespace grbl_burn_em.Data
                 _mediaCapture = null;
                 _isRunning = false;
             }
+        }
+
+        private async Task ConnectToEmulatorAsync(string host, int port)
+        {
+             _isRunning = true;
+             await Task.Run(async () => 
+             {
+                 while (_isRunning)
+                 {
+                     try
+                     {
+                         using (var client = new TcpClient())
+                         {
+                             await client.ConnectAsync(host, port);
+                             using (var stream = client.GetStream())
+                             using (var writer = new BinaryWriter(stream))
+                             using (var reader = new BinaryReader(stream))
+                             {
+                                 while(_isRunning && client.Connected)
+                                 {
+                                     // Request Frame
+                                     writer.Write((byte)'S');
+                                     writer.Flush();
+                                     
+                                     // Read Length
+                                     int len = reader.ReadInt32();
+                                     if (len > 0)
+                                     {
+                                         byte[] data = reader.ReadBytes(len);
+                                         using (var ms = new MemoryStream(data))
+                                         {
+                                             Bitmap bmp = new Bitmap(ms);
+                                             if (DebugDotDetection)
+                                             {
+                                                  try { DetectDotPattern(bmp, bmp, 5, 4, CalibrationPatternType.Circles); } catch {}
+                                             }
+                                             FrameReceived?.Invoke(bmp);
+                                         }
+                                     }
+                                     
+                                     await Task.Delay(33); // ~30 FPS
+                                 }
+                             }
+                         }
+                     }
+                     catch (Exception ex)
+                     {
+                         System.Diagnostics.Debug.WriteLine($"NetCam Error: {ex.Message}");
+                         await Task.Delay(1000); // Retry delay
+                     }
+                 }
+             });
         }
         
         public bool DebugDotDetection { get; set; } = false;
