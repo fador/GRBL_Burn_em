@@ -36,6 +36,7 @@ public class ProjectDataDto
 [JsonDerivedType(typeof(LaserTextDto), typeDiscriminator: "Text")]
 [JsonDerivedType(typeof(LaserCircleDto), typeDiscriminator: "Circle")]
 [JsonDerivedType(typeof(LaserBezierDto), typeDiscriminator: "Bezier")]
+[JsonDerivedType(typeof(LaserGroupDto), typeDiscriminator: "Group")]
 public abstract class LaserObjectDto
 {
     public Guid Id { get; set; }
@@ -86,6 +87,11 @@ public class LaserTextDto : LaserObjectDto
 public class LaserBezierDto : LaserObjectDto
 {
     public List<PointF> Points { get; set; } = new();
+}
+
+public class LaserGroupDto : LaserObjectDto
+{
+    public List<LaserObjectDto> Children { get; set; } = new();
 }
 
 
@@ -154,6 +160,16 @@ public static class ProjectSerializer
         else if (obj is LaserBezier b)
         {
             dto = new LaserBezierDto { Points = b.Points };
+        }
+        else if (obj is LaserGroup g)
+        {
+            var gDto = new LaserGroupDto();
+            foreach(var child in g.Children)
+            {
+                var childDto = ToDto(child);
+                if (childDto != null) gDto.Children.Add(childDto);
+            }
+            dto = gDto;
         }
 
         if (dto != null)
@@ -251,6 +267,19 @@ public static class ProjectSerializer
             {
                 Points = bDto.Points ?? new List<PointF>()
             };
+        }
+        else if (objDto is LaserGroupDto gDto)
+        {
+            var groupObj = new LaserGroup();
+            foreach(var childDto in gDto.Children)
+            {
+                var child = FromDto(childDto, imageLibrary);
+                if (child != null)
+                {
+                    groupObj.Children.Add(child);
+                }
+            }
+            obj = groupObj;
         }
 
         if (obj != null)
