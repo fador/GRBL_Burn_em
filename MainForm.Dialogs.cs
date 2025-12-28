@@ -118,4 +118,24 @@ public partial class MainForm
             }
         }
     }
+    public void ShowNestingDialog()
+    {
+        var sel = ProjectState.Instance.SelectedObjects;
+        var objects = sel.Any() ? sel : ProjectState.Instance.Objects.ToList();
+        
+        if (objects.Count == 0)
+        {
+            MessageBox.Show("No objects to pack.", "Nesting", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using (var dlg = new NestingForm(objects))
+        {
+            if (dlg.ShowDialog(this) == DialogResult.OK)
+            {
+                _workbench.Invalidate();
+                UpdateSelectedObjects(); // In case positions changed
+            }
+        }
+    }
 }

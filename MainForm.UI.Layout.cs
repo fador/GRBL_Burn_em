@@ -158,6 +158,7 @@ public partial class MainForm
             toolMenu.DropDownItems.Add("Group", null, (s, e) => GroupSelection());
             toolMenu.DropDownItems.Add("Ungroup", null, (s, e) => UngroupSelection());
             toolMenu.DropDownItems.Add("Array Modifier", null, (s, e) => ShowArrayModifierDialog());
+            toolMenu.DropDownItems.Add("Nesting / Packing...", null, (s, e) => ShowNestingDialog());
             toolMenu.DropDownItems.Add(new ToolStripSeparator());
             toolMenu.DropDownItems.Add("Attach to Path", null, (s, e) => AttachSelectedTextToPath());
             toolMenu.DropDownItems.Add("Detach from Path", null, (s, e) => DetachSelectedTextFromPath());
