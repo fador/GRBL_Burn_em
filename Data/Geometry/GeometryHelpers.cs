@@ -153,6 +153,26 @@ namespace grbl_burn_em.Data.Geometry
             return lower;
         }
 
+        public static bool IsPolygonInside(Polygon inner, Polygon outer)
+        {
+            // 1. Bounds Check
+            if (!BoundsIntersect(inner.Bounds, outer.Bounds)) return false; // Must intersect to be inside
+            if (inner.Bounds.MinX < outer.Bounds.MinX || inner.Bounds.MaxX > outer.Bounds.MaxX ||
+                inner.Bounds.MinY < outer.Bounds.MinY || inner.Bounds.MaxY > outer.Bounds.MaxY) return false;
+
+            // 2. Check first point
+            if (inner.Points.Count > 0)
+            {
+                if (!IsPointInPolygon(inner.Points[0], outer)) return false;
+            }
+            
+            // 3. For robustness, maybe check all? 
+            // For optimization requests ("very very slow"), checking one valid point is usually a sufficient heuristic 
+            // for "Holes inside a Part". If one point is inside and bounds are inside, it's inside 
+            // (assuming no self-intersections or crossing boundaries, which would be a collision anyway).
+            return true;
+        }
+
         private static bool CrossProductSign(PointD o, PointD a, PointD b)
         {
             return (a.X - o.X) * (b.Y - o.Y) - (a.Y - o.Y) * (b.X - o.X) > 0;

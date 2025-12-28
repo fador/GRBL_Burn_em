@@ -315,6 +315,7 @@ namespace grbl_burn_em.Data.Generators
              
              parts.Sort((a, b) => b.Polygon.Area.CompareTo(a.Polygon.Area));
              var placedWrappers = new List<PolyWrapper>();
+             var unplacedWrappers = new List<PolyWrapper>();
 
              int total = parts.Count;
              for(int i=0; i<total; i++)
@@ -416,10 +417,67 @@ namespace grbl_burn_em.Data.Generators
                  else
                  {
                      Log($"Could not place {wrapper.Original.Name}");
+                     // Add to unplaced list
+                     unplacedWrappers.Add(wrapper);
                  }
                  
                  // Yield occasionally
                  if (i % 5 == 0) await Task.Delay(1);
+             }
+             
+             // Arrange unplaced objects outside the area
+             if (unplacedWrappers.Count > 0)
+             {
+                 double cursorX = SheetSize.Width + 10; // Start 10 units to the right
+                 double cursorY = 0;
+                 double rowHeight = 0;
+                 double maxH = SheetSize.Height;
+                 
+                 foreach(var wrapper in unplacedWrappers)
+                 {
+                     if (token.IsCancellationRequested) break;
+                     
+                     var poly = wrapper.Polygon; // Original polygon (0 rotation)
+                     
+                     // Move to current cursor
+                     // Align Top-Left of poly to cursor
+                     double dx = cursorX - poly.Bounds.MinX;
+                     double dy = cursorY - poly.Bounds.MinY;
+                     
+                     var placed = poly.Translate(dx, dy);
+                     
+                     // Update row height
+                     if (placed.Bounds.Height > rowHeight) rowHeight = placed.Bounds.Height;
+                     
+                     // Add to results
+                     results.Add(new NestingResult
+                     {
+                         OriginalObject = wrapper.Original,
+                         PlacedPolygon = placed,
+                         Rotation = 0
+                     });
+                     
+                     // Fire update so user sees them
+                     OnPartPlaced?.Invoke(placed);
+                     
+                     // Advance cursor
+                     cursorX += placed.Bounds.Width + 5; // 5mm gap
+                     
+                     // Wrap if too wide? Nah, just strip to right.
+                     // Or maybe Wrap if we want a grid?
+                     // Let's do simple row / column.
+                     // Actually, vertical column is safer if width is unknown.
+                     // But user said "outside". Right side is standard.
+                     
+                     // Let's check max Width. If we have many items, we might go very far right.
+                     // Let's wrap to next row if X > SheetW * 2 (arbitrary)
+                     if (cursorX > SheetSize.Width * 2.5)
+                     {
+                         cursorX = SheetSize.Width + 10;
+                         cursorY += rowHeight + 5;
+                         rowHeight = 0;
+                     }
+                 }
              }
              
              return results;
@@ -539,17 +597,40 @@ namespace grbl_burn_em.Data.Generators
             }
             else if (obj is LaserGroup group)
             {
-               // Composite Polygon Approach
-               var children = new List<Polygon>();
-               CollectPolygons(group, new System.Drawing.Drawing2D.Matrix(), children);
+               // Container-First Approach
+               var allChildren = new List<Polygon>();
+               CollectPolygons(group, new System.Drawing.Drawing2D.Matrix(), allChildren);
                
-               if (children.Count == 0) return null;
+               if (allChildren.Count == 0) return null;
                
-               var poly = new Polygon(new List<PointD>()); // Empty points = Container
-               poly.Children.AddRange(children);
-               poly.Tag = obj;
-               poly.RecomputeBounds();
-               return poly;
+               // 1. Sort by Area Descending to find the "Container" (Base Object)
+               allChildren.Sort((a, b) => b.Area.CompareTo(a.Area));
+               
+               var primary = allChildren[0];
+               var keptChildren = new List<Polygon>();
+               
+               // 2. Filter remaining objects
+               for (int i = 1; i < allChildren.Count; i++)
+               {
+                   var candidate = allChildren[i];
+                   // If candidate is inside the Primary, strictly ignore it (it's a hole/detail)
+                   // If it's outside, it's a disjoint part of the group, so keep it.
+                   if (!GeometryHelpers.IsPolygonInside(candidate, primary))
+                   {
+                        // Check redundancy against already kept children? 
+                        // For now, simple primary check is sufficient for "Base Object" request.
+                        keptChildren.Add(candidate);
+                   }
+               }
+               
+               // 3. Construct Result
+               // We reuse 'primary' as the main polygon representing the group
+               primary.Children.AddRange(keptChildren);
+               primary.Tag = obj; // IMPORTANT: Link back to the GROUP, not the child part
+               
+               if (keptChildren.Count > 0) primary.RecomputeBounds();
+               
+               return primary;
             }
             // Add return null for unsupported types or check logic
             else if (obj == null) return null;
