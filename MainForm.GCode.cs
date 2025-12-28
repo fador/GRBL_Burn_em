@@ -15,7 +15,9 @@ public partial class MainForm
         IGCodeGenerator? generator = null;
 
         if (generatorName == "Grbl") generator = new GrblGenerator();
+        else if (generatorName == "Marlin") generator = new MarlinGenerator();
         // Add others here
+
 
         if (generator == null)
         {
@@ -52,7 +54,9 @@ public partial class MainForm
         IGCodeGenerator? generator = null;
 
         if (generatorName == "Grbl") generator = new GrblGenerator();
+        else if (generatorName == "Marlin") generator = new MarlinGenerator();
         // Add others here
+
 
         if (generator == null)
         {

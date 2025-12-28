@@ -21,6 +21,12 @@ public class OptionsForm : Form
     private NumericUpDown _numSnapGrid = null!;
     private NumericUpDown _numTravelSpeed = null!;
 
+    // Marlin Controls
+    private TextBox _txtToolOn = null!;
+    private TextBox _txtToolOff = null!;
+    private CheckBox _chkEnablePwm = null!;
+
+
     private CheckBox _chkBicubic = null!;
     private CheckBox _chkDither = null!;
     private CheckBox _chkSkipSplash = null!;
@@ -91,7 +97,8 @@ public class OptionsForm : Form
 
         var lblGen = new Label { Text = "Generator:", Location = new Point(20, 30), AutoSize = true };
         _cbGenerator = new ComboBox { Location = new Point(160, 27), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
-        _cbGenerator.Items.AddRange(new object[] { "Grbl", "GCode", "Dummy" });
+        _cbGenerator.Items.AddRange(new object[] { "Grbl", "Marlin", "Dummy" });
+
 
         var lblW = new Label { Text = "Work Width (mm):", Location = new Point(20, 70), AutoSize = true };
         _numWidth = new NumericUpDown { Location = new Point(160, 67), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
@@ -118,7 +125,21 @@ public class OptionsForm : Form
         tabMachine.Controls.Add(lblTravel);
         tabMachine.Controls.Add(_numTravelSpeed);
 
-        _chkSafetyBounds = new CheckBox { Text = "Enable Safety Boundary Check", Location = new Point(20, 230), AutoSize = true };
+        var lblOn = new Label { Text = "Tool ON Cmd:", Location = new Point(20, 230), AutoSize = true };
+        _txtToolOn = new TextBox { Location = new Point(160, 227), Width = 150 };
+
+        var lblOff = new Label { Text = "Tool OFF Cmd:", Location = new Point(20, 270), AutoSize = true };
+        _txtToolOff = new TextBox { Location = new Point(160, 267), Width = 150 };
+
+        _chkEnablePwm = new CheckBox { Text = "Enable PWM (S-values)", Location = new Point(160, 300), AutoSize = true };
+
+        tabMachine.Controls.Add(lblOn);
+        tabMachine.Controls.Add(_txtToolOn);
+        tabMachine.Controls.Add(lblOff);
+        tabMachine.Controls.Add(_txtToolOff);
+        tabMachine.Controls.Add(_chkEnablePwm);
+
+        _chkSafetyBounds = new CheckBox { Text = "Enable Safety Boundary Check", Location = new Point(20, 330), AutoSize = true };
 
         tabMachine.Controls.Add(_chkSafetyBounds);
 
@@ -288,7 +309,12 @@ public class OptionsForm : Form
         
         _chkEmbedImages.Checked = AppConfiguration.Instance.EmbedImagesInProject;
         _chkSafetyBounds.Checked = AppConfiguration.Instance.EnableSafetyBoundsCheck;
+
+        _txtToolOn.Text = AppConfiguration.Instance.ToolOnCommand;
+        _txtToolOff.Text = AppConfiguration.Instance.ToolOffCommand;
+        _chkEnablePwm.Checked = AppConfiguration.Instance.EnablePWM;
     }
+
 
 
     private void BtnSave_Click(object? sender, EventArgs e)
@@ -321,6 +347,10 @@ public class OptionsForm : Form
         AppConfiguration.Instance.SvgCurveQuality = (float)_numSvgQuality.Value;
         AppConfiguration.Instance.EmbedImagesInProject = _chkEmbedImages.Checked;
         AppConfiguration.Instance.EnableSafetyBoundsCheck = _chkSafetyBounds.Checked;
+
+        AppConfiguration.Instance.ToolOnCommand = _txtToolOn.Text;
+        AppConfiguration.Instance.ToolOffCommand = _txtToolOff.Text;
+        AppConfiguration.Instance.EnablePWM = _chkEnablePwm.Checked;
 
 
         if(_cbOrigin.SelectedItem != null)

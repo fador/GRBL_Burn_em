@@ -38,6 +38,13 @@ public class AppConfiguration
     public float DefaultTravelSpeed { get; set; } = 5000f;
     public bool EmbedImagesInProject { get; set; } = false;
     public bool EnableSafetyBoundsCheck { get; set; } = true;
+    
+    // Marlin / Plotter Settings
+    public string ToolOnCommand { get; set; } = "M3";
+    public string ToolOffCommand { get; set; } = "M5";
+    public bool EnablePWM { get; set; } = true;
+
+
 
 
     // View Settings
