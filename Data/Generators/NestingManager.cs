@@ -336,92 +336,42 @@ namespace grbl_burn_em.Data.Generators
                  // Rotations
                  var rotations = new List<double>();
                  for (double angle = 0; angle < 360; angle += Theta) rotations.Add(angle);
+
+                 // Check for "0 degrees" first preference? 
+                 // The sorted gridPoints prioritize distance. 
+                 // We multiply GridPoints x Rotations.
                  
-                 Polygon? bestPoly = null;
-                 double bestAngle = 0;
+                 // Parallel Search
+                 // We want the FIRST valid candidate in the sorted order of (GridPos, Angle).
+                 // Since we want to prioritize Position over Angle (?), or just the combination order.
+                 // gridPoints are sorted by Distance.
+                 // We should iterate GridPoints, then Rotations.
+                 // So the sequence is (G1, R1), (G1, R2)... (G2, R1)...
                  
-                 bool found = false;
+                 var searchSpace = gridPoints.SelectMany(gp => rotations.Select(r => new { Pt = gp, Angle = r }));
                  
-                 foreach(var pt in gridPoints)
+                 var bestResult = searchSpace
+                     .AsParallel()
+                     .AsOrdered()
+                     .WithCancellation(token)
+                     .Select(candidate => TryPlacePart(candidate.Pt, candidate.Angle, part, placedWrappers, d))
+                     .Where(res => res != null)
+                     .FirstOrDefault();
+
+                 if (bestResult != null)
                  {
-                     if (token.IsCancellationRequested) break;
-                     foreach(var angle in rotations)
-                     {
-                         // Transform:
-                         // 1. Center at Origin (Top-Left based on Bounds)
-                         var centered = part.Translate(-part.Bounds.MinX, -part.Bounds.MinY);
-                         // 2. Rotate
-                         var rotated = centered.Rotate(angle, new PointD(0,0));
-                         // 3. Move to Grid
-                         var candidate = rotated.Translate(pt.X, pt.Y);
-                         
-                         if (!GeometryHelpers.IsWithinSheet(candidate, SheetSize.Width, SheetSize.Height)) continue;
-                         
-                         if (!CheckOverlap(candidate, placedWrappers, d))
-                         {
-                             // Try Nudging if overlap? 
-                             // Wait, JS logic: "if overlaps... try shifts". 
-                             // My CheckOverlap helper should NOT recurse.
-                             
-                             // Re-read JS:
-                             // "if (overlaps) { shifts... if (!shiftOverlaps) { candidate=shifted; overlaps=false; } }"
-                             
-                             // Let's implement the nudge here
-                             bool overlaps = IsOverlapping(candidate, placedWrappers);
-                             if (overlaps)
-                             {
-                                 var shifts = new[] 
-                                 { 
-                                     new { dx = 0.0, dy = d }, 
-                                     new { dx = d, dy = 0.0 }, 
-                                     new { dx = 0.0, dy = -d }, 
-                                     new { dx = -d, dy = 0.0 } 
-                                 };
-                                 
-                                 foreach(var s in shifts)
-                                 {
-                                     var shifted = candidate.Translate(s.dx, s.dy);
-                                     if (GeometryHelpers.IsWithinSheet(shifted, SheetSize.Width, SheetSize.Height) &&
-                                         !IsOverlapping(shifted, placedWrappers))
-                                     {
-                                         candidate = shifted;
-                                         overlaps = false;
-                                         break;
-                                     }
-                                 }
-                             }
-                             
-                             if (!overlaps)
-                             {
-                                 bestPoly = candidate;
-                                 bestAngle = angle;
-                                 found = true;
-                                 goto FoundMatch;
-                             }
-                         }
-                     }
-                 }
-                 
-                 FoundMatch:
-                 if (found)
-                 {
-                     placedWrappers.Add(new PolyWrapper { Polygon = bestPoly!, Original = wrapper.Original });
-                     if (bestPoly != null) OnPartPlaced?.Invoke(bestPoly); // Fire live update
-                     results.Add(new NestingResult 
-                     { 
-                         OriginalObject = wrapper.Original, 
-                         PlacedPolygon = bestPoly!,
-                         Rotation = bestAngle 
-                     });
+                     bestResult.OriginalObject = wrapper.Original;
+                     placedWrappers.Add(new PolyWrapper { Polygon = bestResult.PlacedPolygon, Original = wrapper.Original });
+                     OnPartPlaced?.Invoke(bestResult.PlacedPolygon); // Fire live update
+                     results.Add(bestResult);
                  }
                  else
                  {
                      Log($"Could not place {wrapper.Original.Name}");
-                     // Add to unplaced list
                      unplacedWrappers.Add(wrapper);
                  }
                  
-                 // Yield occasionally
+                 // Yield occasionally to keep UI responsive
                  if (i % 5 == 0) await Task.Delay(1);
              }
              
@@ -431,7 +381,6 @@ namespace grbl_burn_em.Data.Generators
                  double cursorX = SheetSize.Width + 10; // Start 10 units to the right
                  double cursorY = 0;
                  double rowHeight = 0;
-                 double maxH = SheetSize.Height;
                  
                  foreach(var wrapper in unplacedWrappers)
                  {
@@ -440,7 +389,6 @@ namespace grbl_burn_em.Data.Generators
                      var poly = wrapper.Polygon; // Original polygon (0 rotation)
                      
                      // Move to current cursor
-                     // Align Top-Left of poly to cursor
                      double dx = cursorX - poly.Bounds.MinX;
                      double dy = cursorY - poly.Bounds.MinY;
                      
@@ -454,7 +402,8 @@ namespace grbl_burn_em.Data.Generators
                      {
                          OriginalObject = wrapper.Original,
                          PlacedPolygon = placed,
-                         Rotation = 0
+                         Rotation = 0,
+                         Translation = new PointD(dx, dy)
                      });
                      
                      // Fire update so user sees them
@@ -463,14 +412,6 @@ namespace grbl_burn_em.Data.Generators
                      // Advance cursor
                      cursorX += placed.Bounds.Width + 5; // 5mm gap
                      
-                     // Wrap if too wide? Nah, just strip to right.
-                     // Or maybe Wrap if we want a grid?
-                     // Let's do simple row / column.
-                     // Actually, vertical column is safer if width is unknown.
-                     // But user said "outside". Right side is standard.
-                     
-                     // Let's check max Width. If we have many items, we might go very far right.
-                     // Let's wrap to next row if X > SheetW * 2 (arbitrary)
                      if (cursorX > SheetSize.Width * 2.5)
                      {
                          cursorX = SheetSize.Width + 10;
@@ -481,6 +422,55 @@ namespace grbl_burn_em.Data.Generators
              }
              
              return results;
+        }
+
+        private NestingResult? TryPlacePart(GridPoint pt, double angle, Polygon part, List<PolyWrapper> placedWrappers, double d)
+        {
+             // Transform:
+             // 1. Center at Origin (Top-Left based on Bounds)
+             var centered = part.Translate(-part.Bounds.MinX, -part.Bounds.MinY);
+             // 2. Rotate
+             var rotated = centered.Rotate(angle, new PointD(0,0));
+             // 3. Move to Grid
+             var candidate = rotated.Translate(pt.X, pt.Y);
+             
+             if (!GeometryHelpers.IsWithinSheet(candidate, SheetSize.Width, SheetSize.Height)) return null;
+             
+             bool overlaps = IsOverlapping(candidate, placedWrappers);
+             if (overlaps)
+             {
+                 var shifts = new[] 
+                 { 
+                     new { dx = 0.0, dy = d }, 
+                     new { dx = d, dy = 0.0 }, 
+                     new { dx = 0.0, dy = -d }, 
+                     new { dx = -d, dy = 0.0 } 
+                 };
+                 
+                 foreach(var s in shifts)
+                 {
+                     var shifted = candidate.Translate(s.dx, s.dy);
+                     if (GeometryHelpers.IsWithinSheet(shifted, SheetSize.Width, SheetSize.Height) &&
+                         !IsOverlapping(shifted, placedWrappers))
+                     {
+                         return new NestingResult 
+                         { 
+                             // We don't have the original object here easily, but we fill it in the caller
+                             // Wait, TryPlacePart needs to return the PlacedPolygon mostly.
+                             PlacedPolygon = shifted,
+                             Rotation = angle
+                         };
+                     }
+                 }
+                 // All shifts failed
+                 return null;
+             }
+             
+             return new NestingResult 
+             { 
+                 PlacedPolygon = candidate,
+                 Rotation = angle
+             };
         }
 
         private bool IsOverlapping(Polygon candidate, List<PolyWrapper> existing)
