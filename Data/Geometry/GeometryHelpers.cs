@@ -51,6 +51,30 @@ namespace grbl_burn_em.Data.Geometry
             // 1. Fast Fail: AABB
             if (!BoundsIntersect(polyA.Bounds, polyB.Bounds)) return false;
 
+            // Composite Check A
+            if (polyA.Children.Count > 0)
+            {
+               foreach(var child in polyA.Children)
+               {
+                   if (DoPolygonsIntersect(child, polyB)) return true;
+               }
+               // Check A (Hull) vs B?
+               // If A has children, does Points represent the Hull? usually.
+               // If Points is just a Hull, we don't need to check it if we checked children?
+               // BUT if Points represents valid geometry too, we should check it.
+               if (polyA.Points.Count == 0) return false; // Composite Container only
+            }
+
+            // Composite Check B
+            if (polyB.Children.Count > 0)
+            {
+               foreach(var child in polyB.Children)
+               {
+                   if (DoPolygonsIntersect(polyA, child)) return true;
+               }
+               if (polyB.Points.Count == 0) return false;
+            }
+
             // 2. Vertex inside check (covers containment)
             foreach (var p in polyA.Points)
             {
@@ -84,10 +108,54 @@ namespace grbl_burn_em.Data.Geometry
 
         public static bool IsWithinSheet(Polygon poly, double sheetW, double sheetH)
         {
-            return poly.Bounds.MinX >= 0 &&
-                   poly.Bounds.MinY >= 0 &&
-                   poly.Bounds.MaxX <= sheetW &&
-                   poly.Bounds.MaxY <= sheetH;
+             return poly.Bounds.MinX >= 0 &&
+                    poly.Bounds.MinY >= 0 &&
+                    poly.Bounds.MaxX <= sheetW &&
+                    poly.Bounds.MaxY <= sheetH;
+        }
+
+        public static List<PointD> GetConvexHull(List<PointD> points)
+        {
+            if (points.Count <= 2) return new List<PointD>(points);
+
+            // Sort by X then Y
+            var sorted = new List<PointD>(points);
+            sorted.Sort((a, b) => a.X == b.X ? a.Y.CompareTo(b.Y) : a.X.CompareTo(b.X));
+
+            // Lower Hull
+            var lower = new List<PointD>();
+            foreach (var p in sorted)
+            {
+                while (lower.Count >= 2 && !CrossProductSign(lower[lower.Count - 2], lower[lower.Count - 1], p))
+                {
+                    lower.RemoveAt(lower.Count - 1);
+                }
+                lower.Add(p);
+            }
+
+            // Upper Hull
+            var upper = new List<PointD>();
+            for (int i = sorted.Count - 1; i >= 0; i--)
+            {
+                var p = sorted[i];
+                while (upper.Count >= 2 && !CrossProductSign(upper[upper.Count - 2], upper[upper.Count - 1], p))
+                {
+                    upper.RemoveAt(upper.Count - 1);
+                }
+                upper.Add(p);
+            }
+
+            // Concatenate (remove last point of each as they are duplicates of the start of the other)
+            lower.RemoveAt(lower.Count - 1);
+            upper.RemoveAt(upper.Count - 1);
+
+            lower.AddRange(upper);
+            return lower;
+        }
+
+        private static bool CrossProductSign(PointD o, PointD a, PointD b)
+        {
+            return (a.X - o.X) * (b.Y - o.Y) - (a.Y - o.Y) * (b.X - o.X) > 0;
         }
     }
 }

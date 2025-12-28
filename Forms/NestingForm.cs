@@ -14,6 +14,7 @@ using System.Windows.Forms;
 using grbl_burn_em.Data;
 using grbl_burn_em.Data.Generators;
 using grbl_burn_em.Data.Geometry;
+using grbl_burn_em.Data.Commands;
 
 namespace grbl_burn_em.Forms
 {
@@ -184,16 +185,17 @@ namespace grbl_burn_em.Forms
             // Create a Command to apply changes (Undo support would be nice, but for now direct)
             // Ideally we wrap this in a Command.
             // Let's modify the objects directly.
+            var cmd = new NestingApplyCommand();
             
             foreach (var res in _finalResults)
             {
                 var obj = res.OriginalObject;
                 if (obj is LaserPath path)
                 {
-                    path.Points = new List<PointF>();
-                    foreach(var p in res.PlacedPolygon.Points) path.Points.Add(new PointF((float)p.X, (float)p.Y));
-                    path.UpdateBounds();
-                    path.Rotation = 0;
+                    var newPoints = new List<PointF>();
+                    foreach(var p in res.PlacedPolygon.Points) newPoints.Add(new PointF((float)p.X, (float)p.Y));
+                    
+                    cmd.AddChange(path, path.Position, 0, newPoints);
                 }
                 else if (obj is LaserGroup group)
                 {
@@ -207,7 +209,7 @@ namespace grbl_burn_em.Forms
                     var shift = new PointF((float)newCenter.X - cx, (float)newCenter.Y - cy);
                     float angle = (float)res.Rotation;
                     
-                    ApplyTransformRecursive(group, pivot, angle, shift);
+                    ApplyTransformRecursive(group, pivot, angle, shift, cmd);
                 }
                 else
                 {
@@ -217,8 +219,7 @@ namespace grbl_burn_em.Forms
                     // Center alignment logic (as before)
                     var oldPos = obj.Position;
                     float oldRot = obj.Rotation;
-                    obj.Rotation = newRotation;
-                    
+                                        
                     var currentBounds = obj.GetBounds(); 
                     float currentCX = currentBounds.X + currentBounds.Width / 2f;
                     float currentCY = currentBounds.Y + currentBounds.Height / 2f;
@@ -230,22 +231,27 @@ namespace grbl_burn_em.Forms
                     float dx = targetCX - currentCX;
                     float dy = targetCY - currentCY;
                     
-                    obj.Position = new PointF(obj.Position.X + dx, obj.Position.Y + dy);
+                    var newPos = new PointF(obj.Position.X + dx, obj.Position.Y + dy);
+                    
+                    cmd.AddChange(obj, newPos, newRotation);
                 }
             }
+            
+            // Execute via CommandManager
+            CommandManager.Instance.Execute(cmd);
             
             // Notify Main
             this.DialogResult = DialogResult.OK;
             this.Close();
         }
 
-        private void ApplyTransformRecursive(LaserObject obj, PointF pivot, float angle, PointF translation)
+        private void ApplyTransformRecursive(LaserObject obj, PointF pivot, float angle, PointF translation, NestingApplyCommand cmd)
         {
             if (obj is LaserGroup group)
             {
                 foreach(var child in group.Children)
                 {
-                    ApplyTransformRecursive(child, pivot, angle, translation);
+                    ApplyTransformRecursive(child, pivot, angle, translation, cmd);
                 }
             }
             else
@@ -262,10 +268,66 @@ namespace grbl_burn_em.Forms
                 
                 float rx = (float)(dx * cos - dy * sin);
                 float ry = (float)(dx * sin + dy * cos);
-                
+
                 // 3. Translate back + Shift
-                obj.Position = new PointF(pivot.X + rx + translation.X, pivot.Y + ry + translation.Y);
-                obj.Rotation += angle;
+                var newPos = new PointF(pivot.X + rx + translation.X, pivot.Y + ry + translation.Y);
+                var newRot = obj.Rotation + angle;
+                
+                List<PointF>? newPoints = null;
+
+                if (obj is LaserPath path)
+                {
+                     // Special handling for LaserPath to bake transforms
+                     // LaserPath uses Absolute Points + Rotation. To move it orbitally, we must move the points.
+                     // And since we rotate the points, we should ideally bake the original rotation too or handle it carefully.
+                     // Simplest robust method: Bake EVERYTHING into new Points and set Rotation to 0.
+                     
+                     var currentPoints = new List<PointF>(path.Points);
+                     
+                     // A. Unwrap internal rotation if any to get "true world" points
+                     if (path.Rotation != 0)
+                     {
+                         var cx = path.Position.X + path.Size.Width / 2f;
+                         var cy = path.Position.Y + path.Size.Height / 2f;
+                         using (var mat = new System.Drawing.Drawing2D.Matrix())
+                         {
+                             mat.RotateAt(path.Rotation, new PointF(cx, cy));
+                             var ptsArr = currentPoints.ToArray();
+                             mat.TransformPoints(ptsArr);
+                             currentPoints = new List<PointF>(ptsArr);
+                         }
+                     }
+                     
+                     // B. Apply Group Transform (Rotate around Group Pivot + Translate)
+                     newPoints = new List<PointF>();
+                     
+                     double grpRad = angle * Math.PI / 180.0;
+                     double gCos = Math.Cos(grpRad);
+                     double gSin = Math.Sin(grpRad);
+
+                     foreach(var p in currentPoints)
+                     {
+                        // 1. Relative to Group Pivot
+                        double px = p.X - pivot.X;
+                        double py = p.Y - pivot.Y;
+
+                        // 2. Rotate by Group Angle
+                        double rotX = px * gCos - py * gSin;
+                        double rotY = px * gSin + py * gCos;
+
+                        // 3. Translate back + Shift
+                        float finalX = (float)(pivot.X + rotX + translation.X);
+                        float finalY = (float)(pivot.Y + rotY + translation.Y);
+                        
+                        newPoints.Add(new PointF(finalX, finalY));
+                     }
+                     
+                     // Points are now fully transformed (baked). Rotation should be 0.
+                     newRot = 0;
+                     // New Position will be calculated by UpdateBounds() later, so passed newPos is essentially ignored/overwritten but needed for Command struct.
+                }
+
+                cmd.AddChange(obj, newPos, newRot, newPoints);
             }
         }
 
@@ -305,8 +367,8 @@ namespace grbl_burn_em.Forms
             float marginX = (_canvas.Width - sw * scale) / 2f;
             float marginY = (_canvas.Height - sh * scale) / 2f;
 
-            g.TranslateTransform(marginX, marginY);
-            g.ScaleTransform(scale, scale);
+            g.TranslateTransform(marginX, marginY + sh * scale);
+            g.ScaleTransform(scale, -scale);
 
             // Draw Sheet
             using (var brush = new SolidBrush(Color.White))
@@ -321,20 +383,30 @@ namespace grbl_burn_em.Forms
 
             foreach (var poly in toDraw)
             {
-                if (poly.Points.Count < 2) continue;
+                DrawPolygonRecursive(g, poly, scale);
+            }
+        }
+        
+        private void DrawPolygonRecursive(Graphics g, Polygon poly, float scale)
+        {
+            if (poly.Points.Count >= 2)
+            {
                 var pts = new PointF[poly.Points.Count];
                 for(int i=0; i<poly.Points.Count; i++) pts[i] = new PointF((float)poly.Points[i].X, (float)poly.Points[i].Y);
 
-                // Determine Color
                 Color c = Color.CornflowerBlue;
-                // Golden Angle coloring
-                // int idx = Array.IndexOf(toDraw, poly);
-                // c = ColorFromHSV((idx * 137.5) % 360, 0.7, 0.6);
-
                 using (var brush = new SolidBrush(Color.FromArgb(100, c)))
                     g.FillPolygon(brush, pts);
                 using (var pen = new Pen(Color.DarkBlue, 1 / scale))
                     g.DrawPolygon(pen, pts);
+            }
+            
+            if (poly.Children.Count > 0)
+            {
+                foreach(var child in poly.Children)
+                {
+                    DrawPolygonRecursive(g, child, scale);
+                }
             }
         }
 

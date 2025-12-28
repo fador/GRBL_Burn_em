@@ -539,27 +539,23 @@ namespace grbl_burn_em.Data.Generators
             }
             else if (obj is LaserGroup group)
             {
-               // Bounding Box approach for V1
-               var bounds = group.GetBounds();
-               if (bounds.IsEmpty) return null;
+               // Composite Polygon Approach
+               var children = new List<Polygon>();
+               CollectPolygons(group, new System.Drawing.Drawing2D.Matrix(), children);
                
-               // Note: Group.GetBounds returns the axis-aligned bounding box of children.
-               // It doesn't account for Group Level rotation if that concept existed (it doesn't seem to yet).
-               // So we just take the rect.
-               points.Add(new PointD(bounds.Left, bounds.Top));
-               points.Add(new PointD(bounds.Right, bounds.Top));
-               points.Add(new PointD(bounds.Right, bounds.Bottom));
-               points.Add(new PointD(bounds.Left, bounds.Bottom));
+               if (children.Count == 0) return null;
+               
+               var poly = new Polygon(new List<PointD>()); // Empty points = Container
+               poly.Children.AddRange(children);
+               poly.Tag = obj;
+               poly.RecomputeBounds();
+               return poly;
             }
             // Add return null for unsupported types or check logic
             else if (obj == null) return null;
             else
             {
                // Image or Text -> treat as Box
-                // LaserImage/Text GetBounds returns the OBB or AABB?
-                // GetBounds() is virtual.
-                // LaserObject.GetBoundsHelper returns Rotated Bounds AABB?
-                // Let's us OBB corners manually like Rectangle
                 float x = obj.Position.X;
                 float y = obj.Position.Y;
                 float w = obj.Size.Width;
@@ -580,6 +576,26 @@ namespace grbl_burn_em.Data.Generators
             }
 
             return points.Count > 2 ? new Polygon(points) { Tag = obj } : null;
+        }
+
+        private void CollectPolygons(LaserObject obj, System.Drawing.Drawing2D.Matrix parentMat, List<Polygon> collector)
+        {
+            if (obj is LaserGroup group)
+            {
+                 foreach(var child in group.Children)
+                 {
+                     CollectPolygons(child, parentMat, collector);
+                 }
+            }
+            else
+            {
+                // Convert simple object
+                var poly = ConvertToPolygon(obj);
+                if (poly != null && poly.Points.Count > 2) 
+                {
+                    collector.Add(poly);
+                }
+            }
         }
 
         private struct GridPoint
