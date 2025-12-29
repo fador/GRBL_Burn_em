@@ -21,6 +21,9 @@ public class MarlinGenerator : IGCodeGenerator
         string toolOn = AppConfiguration.Instance.ToolOnCommand;
         string toolOff = AppConfiguration.Instance.ToolOffCommand;
         bool usePwm = AppConfiguration.Instance.EnablePWM;
+        string pwmCmd = AppConfiguration.Instance.PwmCommand;
+        if (string.IsNullOrWhiteSpace(pwmCmd)) pwmCmd = "S";
+
         float travelSpeed = AppConfiguration.Instance.DefaultTravelSpeed;
 
         // Startup
@@ -30,24 +33,28 @@ public class MarlinGenerator : IGCodeGenerator
         yield return $"G0 F{travelSpeed:F0}"; // Set default travel speed
 
         // Initial Tool Off
-        yield return toolOff;
+        foreach(var line in toolOff.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            yield return line;
 
         foreach (var obj in objects)
         {
             if (!obj.IsEnabled) continue;
             
-            foreach (var line in GenerateObject(obj, toolOn, toolOff, usePwm))
+            foreach (var line in GenerateObject(obj, toolOn, toolOff, usePwm, pwmCmd))
             {
                 yield return line;
             }
         }
 
         // Shutdown
-        yield return toolOff; 
+        foreach(var line in toolOff.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            yield return line; 
+            
         yield return "G0 X0 Y0"; // Return to home
     }
 
-    private IEnumerable<string> GenerateObject(LaserObject obj, string toolOn, string toolOff, bool usePwm)
+    private IEnumerable<string> GenerateObject(LaserObject obj, string toolOn, string toolOff, bool usePwm, string pwmCmd)
+
     {
         var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId) 
                     ?? ProjectState.Instance.Layers.FirstOrDefault();
@@ -58,10 +65,11 @@ public class MarlinGenerator : IGCodeGenerator
         {
             foreach (var child in group.Children)
             {
-                foreach (var line in GenerateObject(child, toolOn, toolOff, usePwm)) yield return line;
+                foreach (var line in GenerateObject(child, toolOn, toolOff, usePwm, pwmCmd)) yield return line;
             }
             yield break;
         }
+
 
         float pwrPercent = obj.Power ?? layer?.Power ?? 100f;
         float speedVal = obj.Speed ?? layer?.Speed ?? 1000f;
@@ -124,22 +132,30 @@ public class MarlinGenerator : IGCodeGenerator
                              // 3. Tool ON
                              // 4. G1 ...
                              
-                             yield return toolOff;
+                             foreach(var line in toolOff.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                                yield return line;
+                                
                              yield return $"G0 X{p.X:F3} Y{p.Y:F3}";
                              
                              // Update Feedrate for upcoming cut
                              yield return $"G1 F{fVal:F0}"; 
                              
-                             yield return toolOn + (usePwm ? $" S{sVal:F0}" : "");
+                             // Tool On (Multiline support)
+                             var onLines = toolOn.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                             foreach(var line in onLines)
+                             {
+                                 yield return line;
+                             }
                          }
                          else 
                          {
                              // Line (G1)
                              if (usePwm)
-                                yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                                yield return $"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}";
                              else
                                 yield return $"G1 X{p.X:F3} Y{p.Y:F3}";
                          }
+
                          
                          lastPos = p;
 
@@ -148,7 +164,7 @@ public class MarlinGenerator : IGCodeGenerator
                              // Draw line back to subpath start
                              // This is a CUT move
                              if (usePwm)
-                                yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} S{sVal:F0}";
+                                yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} {pwmCmd}{sVal:F0}";
                              else
                                 yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3}";
                              
@@ -156,9 +172,11 @@ public class MarlinGenerator : IGCodeGenerator
                          }
                      }
                      // End of object: Turn Tool Off
-                     yield return toolOff;
+                     foreach(var line in toolOff.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                        yield return line;
                 }
             }
+
         }
         else
         {
@@ -170,24 +188,14 @@ public class MarlinGenerator : IGCodeGenerator
             // If PWM is disabled (Pen Plotter), Raster is bad idea, but we can try to generate it as dots/lines?
             // For now, let's implement standard Raster logic similar to GrblGenerator but with configurable commands.
             
-            yield return toolOff;
+            foreach(var line in toolOff.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                yield return line;
 
-            // Reuse existing raster logic helpers or copy-paste?
-            // Since Rasterizer returns G-Code strings, we might need to interpret them or duplicate logic.
-            // The existing Rasterizer helper seems to generate specific G1 lines.
-            // Let's look at `Rasterizer` class if accessible.
-            // Assuming we need to replicate the bitmap generation logic.
-            
-            // ... (Bitmap generation logic same as GrblGenerator) ...
              Bitmap? bitmapToRasterize = null;
              bool disposeBitmap = false;
              PointF rasterPos = obj.Position;
              SizeF rasterSize = obj.Size;
 
-             // ... [Duplicate Bitmap Setup Logic to avoid public access issues if methods are private] ...
-             // For brevity, I will call a shared helper if possible, but GrblGenerator logic is private.
-             // I will duplicate the bitmap setup for now.
-             
             if (obj is LaserImage img)
             {
                  if (img.Image != null)
@@ -271,36 +279,26 @@ public class MarlinGenerator : IGCodeGenerator
                     Power = pwrPercent,
                     Speed = speedVal
                 };
-
-                // NOTE: Rasterizer.Rasterize yields Grbl-specific G1 lines usually? 
-                // We might need to implement our own Rasterizer or parse the output.
-                // Or better, if EnablePWM is true, Rasterizer output (lots of G1 ... Sxxx) is fine.
-                // If EnablePWM is false, Rasterizing is basically "Dot matrix" or impossible.
-                // For now, let's assume if they want Raster, they use PWM. 
-                // If they don't use PWM, we probably shouldn't rasterize or it will just be ON/OFF banging which is violent.
                 
                 if (usePwm)
                 {
-                     // Use standard rasterizer
-                     // But we need to inject our ToolOn/Off? 
-                     // Standard Rasterizer often assumes "M4 S0" is active and just varies S.
-                     
-                     yield return toolOn; // M3/M4
+                     foreach(var line in toolOn.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                        yield return line;
                      
                      foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval, minSeg, bicubic, dither))
                      {
-                         yield return line;
+                         if(pwmCmd != "S")
+                            yield return line.Replace("S", pwmCmd);
+                         else
+                            yield return line;
                      }
-                     yield return toolOff;
+                     
+                     foreach(var line in toolOff.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                        yield return line;
                 }
                 else
                 {
                     // No PWM raster? 
-                    // Support Stippling? Too complex for now.
-                    // Just skipping raster for non-PWM mode to be safe, or warning?
-                    // Let's generate it but without S words? That would just be a solid block of burnt area.
-                    // Probably not what user wants.
-                    // For now: omit raster in non-PWM mode or do simple constant burn.
                 }
 
                 if (disposeBitmap) bitmapToRasterize.Dispose();

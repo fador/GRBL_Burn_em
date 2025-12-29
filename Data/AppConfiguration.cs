@@ -43,6 +43,8 @@ public class AppConfiguration
     public string ToolOnCommand { get; set; } = "M3";
     public string ToolOffCommand { get; set; } = "M5";
     public bool EnablePWM { get; set; } = true;
+    public string PwmCommand { get; set; } = "S";
+
 
 
 
