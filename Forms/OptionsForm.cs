@@ -85,7 +85,7 @@ public class OptionsForm : Form
         _cbPorts = new ComboBox { Location = new Point(120, 27), Width = 180, DropDownStyle = ComboBoxStyle.DropDown };
         
         var lblBaud = new Label { Text = "Baud Rate:", Location = new Point(20, 70), AutoSize = true };
-        _cbBaud = new ComboBox { Location = new Point(120, 67), Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cbBaud = new ComboBox { Location = new Point(120, 67), Width = 180, DropDownStyle = ComboBoxStyle.DropDown };
         _cbBaud.Items.AddRange(new object[] { 9600, 19200, 38400, 57600, 115200, 230400, 250000 });
 
         tabConnection.Controls.Add(lblPort);
@@ -280,7 +280,8 @@ public class OptionsForm : Form
         }
         else
         {
-            _cbBaud.SelectedItem = 115200;
+            _cbBaud.Text = baud.ToString();
+            _cbBaud.SelectedItem = baud.ToString();
         }
 
         // Select Configured Generator
@@ -333,7 +334,7 @@ public class OptionsForm : Form
             AppConfiguration.Instance.LastPortName = _cbPorts.Text;
         }
         
-        if (_cbBaud.SelectedItem != null && int.TryParse(_cbBaud.SelectedItem.ToString(), out int baud))
+        if (!string.IsNullOrEmpty(_cbBaud.Text) && int.TryParse(_cbBaud.Text, out int baud))
         {
             AppConfiguration.Instance.BaudRate = baud;
         }
