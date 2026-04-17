@@ -24,6 +24,8 @@ namespace grbl_burn_em.Data;
 #pragma warning disable CS8604 // Possible null reference argument.
 public class SvgImporter
 {
+    private static readonly Regex FuncRegex = new Regex(@"(\w+)\s*\(([^)]+)\)", RegexOptions.Compiled);
+
     public static List<LaserObject> Import(string filePath)
     {
         var laserObjects = new List<LaserObject>();
@@ -1108,8 +1110,7 @@ public class SvgImporter
         if (string.IsNullOrWhiteSpace(t)) return mat;
         
         // Regex to get "func(args)"
-        string funcPattern = @"(\w+)\s*\(([^)]+)\)";
-        var matches = Regex.Matches(t, funcPattern);
+        var matches = FuncRegex.Matches(t);
         
         // Transforms are applied: if string is "T R S", effect is T * R * S * point.
         // Matrix multiplication in GDI+ (and accumulation):
