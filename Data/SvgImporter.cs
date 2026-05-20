@@ -11,6 +11,7 @@ using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Xml;
 using System.Xml.Linq;
 using System.IO;
 
@@ -32,7 +33,13 @@ public class SvgImporter
         
         try
         {
-            var xml = XDocument.Load(filePath);
+            var settings = new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null
+            };
+            using var reader = XmlReader.Create(filePath, settings);
+            var xml = XDocument.Load(reader);
             var svg = xml.Root;
             if (svg == null || svg.Name.LocalName != "svg") return laserObjects;
 
