@@ -479,4 +479,59 @@ public partial class MainForm
 
         return true;
     }
+
+    private void ExportSvg()
+    {
+        var selectedCount = ProjectState.Instance.SelectedObjects.Count;
+        List<LaserObject> objects;
+
+        if (selectedCount > 0)
+        {
+            var result = MessageBox.Show(
+                $"Export {selectedCount} selected object(s) to SVG?\n\nClick Yes to export selection only.\nClick No to export all objects.",
+                "Export SVG",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Cancel)
+                return;
+
+            objects = result == DialogResult.Yes
+                ? new List<LaserObject>(ProjectState.Instance.SelectedObjects)
+                : ProjectState.Instance.Objects.ToList();
+        }
+        else
+        {
+            objects = ProjectState.Instance.Objects.ToList();
+        }
+
+        if (objects.Count == 0)
+        {
+            MessageBox.Show("No objects to export.", "Export SVG",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var sfd = new SaveFileDialog
+        {
+            Filter = "SVG File|*.svg",
+            DefaultExt = ".svg",
+            Title = $"Export {objects.Count} object(s) to SVG"
+        };
+
+        if (sfd.ShowDialog() == DialogResult.OK)
+        {
+            try
+            {
+                SvgExporter.Export(objects, sfd.FileName);
+                MessageBox.Show($"Exported {objects.Count} object(s) successfully.",
+                    "Export SVG", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Export failed: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
 }

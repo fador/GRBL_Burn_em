@@ -7,7 +7,7 @@ public partial class MainForm
 {
     public List<string> GetRegisteredGeneratorNames()
     {
-        var names = new List<string> { "Grbl", "GCode", "Dummy" };
+        var names = new List<string> { "Grbl", "Dummy" };
         foreach (var gen in _gcodeGenerators)
         {
             if (!names.Contains(gen.Name))

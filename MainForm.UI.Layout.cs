@@ -97,6 +97,7 @@ public partial class MainForm
 
             fileMenu.DropDownItems.Add(new ToolStripSeparator());
             fileMenu.DropDownItems.Add("Import File", null, (s, e) => ImportFile());
+            fileMenu.DropDownItems.Add("Export SVG...", null, (s, e) => ExportSvg());
             fileMenu.DropDownItems.Add(new ToolStripSeparator());
             fileMenu.DropDownItems.Add("Options", null, (s, e) => 
             {
