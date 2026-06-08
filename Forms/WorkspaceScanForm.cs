@@ -1,0 +1,186 @@
+/*
+ * Copyright (c) 2025 Marko Viitanen (Fador) and the project contributors. All rights reserved.
+ * Licensed under the MIT License. See LICENSE file in the project root for full license information.
+ *
+ * This file is part of the GRBL Burn'Em laser control software
+ */
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using grbl_burn_em.Data;
+
+namespace grbl_burn_em.Forms;
+
+public partial class WorkspaceScanForm : Form
+{
+    private Label _lblStatus = null!;
+    private ProgressBar _progressBar = null!;
+    private NumericUpDown _nudOverlap = null!;
+    private Button _btnStart = null!;
+    private Button _btnCancel = null!;
+    private Button _btnClear = null!;
+
+    private bool _cancelRequested;
+
+    public WorkspaceScanForm()
+    {
+        InitializeComponent();
+    }
+
+    private void InitializeComponent()
+    {
+        Text = "Workspace Scan";
+        Size = new Size(400, 250);
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = false;
+        StartPosition = FormStartPosition.CenterParent;
+
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(15) };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        layout.Controls.Add(new Label { Text = "Grid Scan: Moves machine, captures frames at each grid point,\nreconstructs full work area image.", AutoSize = true }, 0, 0);
+
+        var pnlOverlap = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true };
+        pnlOverlap.Controls.Add(new Label { Text = "Overlap (%):", AutoSize = true });
+        _nudOverlap = new NumericUpDown { Minimum = 0, Maximum = 90, Value = 20, Width = 60 };
+        pnlOverlap.Controls.Add(_nudOverlap);
+        layout.Controls.Add(pnlOverlap, 0, 1);
+
+        _progressBar = new ProgressBar { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee };
+        _progressBar.Visible = false;
+        layout.Controls.Add(_progressBar, 0, 2);
+
+        var pnlBtns = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true };
+        _btnStart = new Button { Text = "Start Scan", Width = 100, Height = 35 };
+        _btnStart.Click += async (s, e) => await StartScanAsync();
+        _btnCancel = new Button { Text = "Cancel", Width = 80, Enabled = false };
+        _btnCancel.Click += (s, e) => { _cancelRequested = true; };
+        _btnClear = new Button { Text = "Clear Scan", Width = 100 };
+        _btnClear.Click += (s, e) => { CameraManager.Instance.CapturedFrames.Clear(); };
+
+        pnlBtns.Controls.Add(_btnStart);
+        pnlBtns.Controls.Add(_btnCancel);
+        pnlBtns.Controls.Add(_btnClear);
+        layout.Controls.Add(pnlBtns, 0, 3);
+
+        _lblStatus = new Label { Text = "Ready", Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopCenter };
+        layout.Controls.Add(_lblStatus, 0, 4);
+
+        Controls.Add(layout);
+    }
+
+    private async Task StartScanAsync()
+    {
+        if (!SerialInterface.Instance.IsConnected)
+        {
+            MessageBox.Show("Machine not connected.", "Error");
+            return;
+        }
+
+        _cancelRequested = false;
+        _btnStart.Enabled = false;
+        _btnCancel.Enabled = true;
+        _progressBar.Visible = true;
+
+        try
+        {
+            var store = CalibrationStore.Load();
+            var config = AppConfiguration.Instance;
+            float workW = config.WorkAreaWidth;
+            float workH = config.WorkAreaHeight;
+
+            float fovW = config.CameraOverlayWidth;
+            float fovH = config.CameraOverlayHeight;
+
+            if (store.HasIntrinsics && store.Offset != null)
+            {
+                var engine = new CameraCalibrationEngine(store.BoardConfig ?? new CharucoBoardConfig());
+                var fov = engine.ComputeFovMm(store.Offset.OffsetZ, store.Intrinsics!);
+                if (!fov.IsEmpty)
+                {
+                    fovW = fov.Width;
+                    fovH = fov.Height;
+                }
+            }
+
+            if (fovW <= 10) fovW = config.CameraOverlayWidth;
+            if (fovH <= 10) fovH = config.CameraOverlayHeight;
+            if (fovW <= 10 || fovH <= 10)
+            {
+                MessageBox.Show("Camera FOV not defined. Configure overlay size or calibrate camera first.", "Error");
+                return;
+            }
+
+            float overlap = (float)_nudOverlap.Value / 100f;
+            float stepX = fovW * (1f - overlap);
+            float stepY = fovH * (1f - overlap);
+
+            float offX = store.Offset?.OffsetX ?? config.CameraOverlayX;
+            float offY = store.Offset?.OffsetY ?? config.CameraOverlayY;
+
+            var points = new List<PointF>();
+            for (float y = fovH / 2; y < workH + fovH / 2; y += stepY)
+                for (float x = fovW / 2; x < workW + fovW / 2; x += stepX)
+                    points.Add(new PointF(x + offX, y + offY));
+
+            CameraManager.Instance.CapturedFrames.Clear();
+            int total = points.Count;
+
+            for (int i = 0; i < total; i++)
+            {
+                if (_cancelRequested) break;
+
+                var pt = points[i];
+                string cmd = $"$J=G90 X{pt.X:F2} Y{pt.Y:F2} F{config.FramingSpeed}";
+                SerialInterface.Instance.Write(cmd + "\n");
+
+                await WaitForPosition(pt.X, pt.Y);
+                await Task.Delay(500);
+
+                CameraManager.Instance.CaptureCurrentFrame(pt.X - offX, pt.Y - offY, fovW, fovH);
+
+                this.BeginInvoke(new Action(() =>
+                {
+                    _lblStatus.Text = $"Scanning... {i + 1}/{total}";
+                }));
+            }
+
+            this.BeginInvoke(new Action(() =>
+            {
+                _lblStatus.Text = _cancelRequested
+                    ? $"Cancelled. {CameraManager.Instance.CapturedFrames.Count} frames captured."
+                    : $"Done. {CameraManager.Instance.CapturedFrames.Count} frames captured.";
+            }));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Scan error: {ex.Message}", "Error");
+        }
+        finally
+        {
+            _btnStart.Enabled = true;
+            _btnCancel.Enabled = false;
+            _progressBar.Visible = false;
+        }
+    }
+
+    private static async Task WaitForPosition(float targetX, float targetY)
+    {
+        int timeout = 10000;
+        while (timeout > 0)
+        {
+            var pos = SerialInterface.Instance.MachinePosition;
+            float dist = (float)Math.Sqrt(
+                Math.Pow(pos.X - targetX, 2) + Math.Pow(pos.Y - targetY, 2));
+            if (dist < 1.0f) return;
+            await Task.Delay(100);
+            timeout -= 100;
+        }
+    }
+}

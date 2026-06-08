@@ -8,237 +8,191 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using grbl_burn_em.Data;
-using Point = System.Drawing.Point;
+using grbl_burn_em.Tools;
 
-namespace grbl_burn_em.Forms
+namespace grbl_burn_em.Forms;
+
+public partial class OffsetCalibrationForm : Form
 {
-    public class OffsetCalibrationForm : Form
+    private PictureBox _picPreview = null!;
+    private Label _lblInfo = null!;
+    private Label _lblOffset = null!;
+    private Label _lblHeight = null!;
+    private Button _btnChArUco = null!;
+    private Button _btnManual = null!;
+    private Button _btnSave = null!;
+
+    private float _offsetX, _offsetY, _offsetZ;
+
+    public OffsetCalibrationForm()
     {
-        private PictureBox _pbCam = null!;
-        private PointF _startPos;
-        private Label _lblPos = null!;
-        
-        public OffsetCalibrationForm()
+        InitializeComponent();
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        if (!CameraManager.Instance.IsRunning)
+            _lblInfo.Text = "Camera not running. Start camera first.";
+    }
+
+    private void InitializeComponent()
+    {
+        Text = "Head-Mounted Camera Offset Calibration";
+        Size = new Size(700, 550);
+        StartPosition = FormStartPosition.CenterParent;
+
+        var mainLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+
+        _picPreview = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black };
+        mainLayout.Controls.Add(_picPreview, 0, 0);
+
+        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(10) };
+
+        _lblInfo = new Label { Text = "Select calibration method:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
+        sidePanel.Controls.Add(_lblInfo, 0, 0);
+
+        _btnChArUco = new Button { Text = "Auto (ChArUco Board)", Dock = DockStyle.Fill, Height = 45 };
+        _btnChArUco.Click += (s, e) => AutoCalibrate();
+        sidePanel.Controls.Add(_btnChArUco, 0, 1);
+
+        var sep = new Label { Text = "--- or ---", TextAlign = ContentAlignment.MiddleCenter, Height = 30 };
+        sidePanel.Controls.Add(sep, 0, 2);
+
+        _btnManual = new Button { Text = "Manual (Burn Mark)", Dock = DockStyle.Fill, Height = 45 };
+        _btnManual.Click += (s, e) => ManualCalibrate();
+        sidePanel.Controls.Add(_btnManual, 0, 3);
+
+        _lblOffset = new Label { Text = "Offset: -- mm", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Height = 40 };
+        sidePanel.Controls.Add(_lblOffset, 0, 4);
+
+        _lblHeight = new Label { Text = "Height: -- mm", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Height = 40 };
+        sidePanel.Controls.Add(_lblHeight, 0, 5);
+
+        _btnSave = new Button { Text = "Save Offset", Dock = DockStyle.Fill, Height = 40, Enabled = false };
+        _btnSave.Click += (s, e) => SaveOffset();
+        sidePanel.Controls.Add(_btnSave, 0, 6);
+
+        mainLayout.Controls.Add(sidePanel, 1, 0);
+        Controls.Add(mainLayout);
+
+        CameraManager.Instance.FrameReceived += OnFrameReceived;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) CameraManager.Instance.FrameReceived -= OnFrameReceived;
+        base.Dispose(disposing);
+    }
+
+    private void OnFrameReceived(Bitmap frame)
+    {
+        if (!IsHandleCreated) { frame.Dispose(); return; }
+        try
         {
-            InitializeComponent();
-            
-            // Record Start Position (Assuming machine is idle)
-            _startPos = SerialInterface.Instance.MachinePosition;
-            if (_lblPos != null) _lblPos.Text = $"Start Pos: {_startPos.X:F3}, {_startPos.Y:F3}\nCurrent Pos: {_startPos.X:F3}, {_startPos.Y:F3}";
-            
-            CameraManager.Instance.FrameReceived += OnFrameReceived;
-            SerialInterface.Instance.StatusReceived += OnStatusReceived;
-            
-            this.FormClosing += (s, e) => {
-                 CameraManager.Instance.FrameReceived -= OnFrameReceived;
-                 SerialInterface.Instance.StatusReceived -= OnStatusReceived;
-            };
-        }
-        
-        private void OnStatusReceived(string state, PointF pos)
-        {
-            if (this.InvokeRequired)
+            this.BeginInvoke(new Action(() =>
             {
-                this.BeginInvoke(new Action(() => OnStatusReceived(state, pos)));
+                if (_picPreview.IsDisposed) { frame.Dispose(); return; }
+                var old = _picPreview.Image;
+                _picPreview.Image = new Bitmap(frame);
+                old?.Dispose();
+                frame.Dispose();
+            }));
+        }
+        catch
+        {
+            frame.Dispose();
+        }
+    }
+
+    private void AutoCalibrate()
+    {
+        var store = CalibrationStore.Load();
+        if (store.BoardConfig == null || !store.HasIntrinsics)
+        {
+            MessageBox.Show("Need ChArUco board config and lens calibration first.", "Missing",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (_picPreview.Image == null)
+        {
+            MessageBox.Show("No camera frame available.", "Error");
+            return;
+        }
+
+        try
+        {
+            using var bmp = new Bitmap(_picPreview.Image);
+            using var mat = CameraCalibrationEngine.BitmapToMat(bmp);
+            var engine = new CameraCalibrationEngine(store.BoardConfig);
+            var pose = engine.SolveCameraPose(mat, store.Intrinsics!);
+
+            if (pose == null)
+            {
+                MessageBox.Show("ChArUco board not detected in current frame.", "Error");
                 return;
             }
-            _lblPos.Text = $"Start Pos: {_startPos.X:F3}, {_startPos.Y:F3}\nCurrent Pos: {pos.X:F3}, {pos.Y:F3}";
-        }
 
-        private void InitializeComponent()
+            var (rvec, tvec, reproj) = pose.Value;
+            _offsetX = (float)tvec[0];
+            _offsetY = (float)tvec[1];
+            _offsetZ = (float)tvec[2];
+
+            _lblOffset.Text = $"Offset: ({_offsetX:F1}, {_offsetY:F1}) mm";
+            _lblHeight.Text = $"Height: {_offsetZ:F1} mm";
+            _lblInfo.Text = $"Detected! RMSE: {reproj:F3} px";
+            _btnSave.Enabled = true;
+        }
+        catch (Exception ex)
         {
-            this.Size = new Size(900, 600);
-            this.Text = "Head-Mounted Camera Offset Calibration";
-
-            var split = new SplitContainer { Dock = DockStyle.Fill };
-            this.Controls.Add(split);
-
-            // Left: Camera View
-            _pbCam = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
-            _pbCam.Paint += OnCameraPaint;
-            split.Panel1.Controls.Add(_pbCam);
-
-            // Right: Controls
-            var pnlRight = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(10) };
-            split.Panel2.Controls.Add(pnlRight);
-            
-            pnlRight.Controls.Add(new Label { Text = "Instructions:", Font = new Font(FontFamily.GenericSansSerif, 10, FontStyle.Bold), AutoSize = true });
-            pnlRight.Controls.Add(new Label { Text = "1. Ensure Laser is focused on a scrap material.\n2. Click 'Pulse Laser' to mark the start spot.\n3. Use Jog controls to move the machine until the\n   Camera Crosshair is EXACTLY on the burn mark.\n4. Click 'Confirm Offset'.", AutoSize = true, Width = 280, Height = 100 });
-
-            _lblPos = new Label { Text = "Pos: 0,0", AutoSize = true };
-            pnlRight.Controls.Add(_lblPos);
-
-            var btnPulse = new Button { Text = "Pulse Laser", Width = 200, Height = 40, BackColor = Color.Salmon, ForeColor = Color.White };
-            btnPulse.Click += (s, e) => {
-                // Pulse laser: M3 S100, G4 P0.5, M5
-                SerialInterface.Instance.Write("M3 S100\n"); 
-                System.Threading.Tasks.Task.Delay(200).ContinueWith(t => SerialInterface.Instance.Write("M5\n"));
-            };
-            pnlRight.Controls.Add(btnPulse);
-            
-            pnlRight.Controls.Add(new Label { Text = "Jog Controls:", AutoSize = true, Margin = new Padding(0, 10, 0, 0) });
-            
-            // Jog Grid
-            var pnlJog = new TableLayoutPanel { RowCount = 3, ColumnCount = 3, AutoSize = true };
-            pnlJog.Controls.Add(CreateJogBtn("Y+", 0, 10), 1, 0);
-            pnlJog.Controls.Add(CreateJogBtn("X-", -10, 0), 0, 1);
-            pnlJog.Controls.Add(new Label { Text = "" }, 1, 1);
-            pnlJog.Controls.Add(CreateJogBtn("X+", 10, 0), 2, 1);
-            pnlJog.Controls.Add(CreateJogBtn("Y-", 0, -10), 1, 2);
-            pnlRight.Controls.Add(pnlJog);
-            
-            var btnAuto = new Button { Text = "Auto Center (Burn & Scan)", Width = 200, Height = 40, BackColor = Color.LightSkyBlue };
-            btnAuto.Click += OnAutoCenterClick;
-            pnlRight.Controls.Add(btnAuto);
-
-            var btnConfirm = new Button { Text = "Confirm Offset", Width = 200, Height = 50, BackColor = Color.LightGreen };
-            btnConfirm.Click += OnConfirmClick;
-            pnlRight.Controls.Add(btnConfirm);
+            MessageBox.Show($"Auto calibration error: {ex.Message}", "Error");
         }
-        
-        private Button CreateJogBtn(string text, float x, float y)
+    }
+
+    private void ManualCalibrate()
+    {
+        if (!SerialInterface.Instance.IsConnected)
         {
-            var btn = new Button { Text = text, Width = 60, Height = 60 };
-            btn.MouseDown += (s, e) => {
-                string cmd = $"$J=G91 X{x} Y{y} F1000\n";
-                SerialInterface.Instance.Write(cmd);
-            };
-            return btn;
+            MessageBox.Show("Machine not connected.", "Error");
+            return;
         }
 
-        private void OnFrameReceived(Bitmap bmp)
-        {
-            try
-            {
-                 // Clone for UI
-                 var copy = new Bitmap(bmp);
-                 this.BeginInvoke(new Action(()=>
-                 {
-                     var old = _pbCam.Image;
-                     _pbCam.Image = copy;
-                     old?.Dispose();
-                 }));
-            }
-            catch {}
-        }
-        
-        private void OnCameraPaint(object? sender, PaintEventArgs e)
-        {
-             // Draw Crosshair
-             var w = _pbCam.Width;
-             var h = _pbCam.Height;
-             var cx = w / 2;
-             var cy = h / 2;
-             
-             // Draw Green Cross
-             using var pen = new Pen(Color.LimeGreen, 2);
-             e.Graphics.DrawLine(pen, cx - 20, cy, cx + 20, cy);
-             e.Graphics.DrawLine(pen, cx, cy - 20, cx, cy + 20);
-             e.Graphics.DrawEllipse(pen, cx - 10, cy - 10, 20, 20);
-        }
-        
-        private async void OnAutoCenterClick(object? sender, EventArgs e)
-        {
-            if (MessageBox.Show("This will move the machine.\nEnsure the camera can see the burn mark (roughly).\nProceed?", "Auto Center", MessageBoxButtons.YesNo) != DialogResult.Yes)
-                return;
+        var startPos = SerialInterface.Instance.MachinePosition;
 
-            _lblPos.Text = "Status: Auto Centering...";
-            
-            try
-            {
-                var p1 = await CaptureSpotLocation();
-                if (p1 == null) throw new Exception("Could not find dark spot (burn mark). Adjust light/threshold.");
-                
-                float moveDist = 5.0f;
-                PointF startMachinePos = SerialInterface.Instance.MachinePosition;
-                
-                await SerialInterface.Instance.MoveRelative(moveDist, 0);
-                await System.Threading.Tasks.Task.Delay(500); 
-                
-                var p2 = await CaptureSpotLocation();
-                if (p2 == null) throw new Exception("Lost spot after moving X.");
-                
-                await SerialInterface.Instance.MoveRelative(0, moveDist);
-                await System.Threading.Tasks.Task.Delay(500); 
-                
-                var p3 = await CaptureSpotLocation();
-                if (p3 == null) throw new Exception("Lost spot after moving Y.");
-                
-                float vx_x = p2.Value.X - p1.Value.X;
-                float vx_y = p2.Value.Y - p1.Value.Y;
-                
-                float vy_x = p3.Value.X - p2.Value.X;
-                float vy_y = p3.Value.Y - p2.Value.Y;
-                
-                float det = vx_x * vy_y - vx_y * vy_x;
-                if (Math.Abs(det) < 0.1f) throw new Exception("Singular matrix. Movement not detected.");
-                
-                var img = _pbCam.Image;
-                if (img == null) throw new Exception("Camera image is missing.");
-                float cx = img.Width / 2f;
-                float cy = img.Height / 2f;
-                
-                float du = cx - p3.Value.X; 
-                float dv = cy - p3.Value.Y;
-                
-                float dX = (vy_y * du - vy_x * dv) / det * moveDist;
-                float dY = (-vx_y * du + vx_x * dv) / det * moveDist;
-                
-                await SerialInterface.Instance.MoveRelative(dX, dY);
-                await System.Threading.Tasks.Task.Delay(500);
-                
-                var pFinal = await CaptureSpotLocation();
-                if (pFinal != null)
-                {
-                    float distErr = (float)Math.Sqrt(Math.Pow(pFinal.Value.X - cx, 2) + Math.Pow(pFinal.Value.Y - cy, 2));
-                    _lblPos.Text = $"Centered! Err: {distErr:F1}px";
-                    
-                    if (distErr < 20) 
-                    {
-                         MessageBox.Show("Centered Successfully!");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error: {ex.Message}");
-            }
-        }
+        var result = MessageBox.Show(
+            "Manual Offset Calibration:\n\n" +
+            "1. Place material on the work area\n" +
+            "2. Click 'Pulse Laser' to create a burn mark at current position\n" +
+            "3. Use jog controls to align camera crosshair with the burn mark\n" +
+            "4. Click OK when aligned",
+            "Manual Offset", MessageBoxButtons.OKCancel);
 
-        private async System.Threading.Tasks.Task<PointF?> CaptureSpotLocation()
-        {
-            await System.Threading.Tasks.Task.Delay(200);
-            
-            if (_pbCam.Image == null) return null;
-            
-            var bmp = (Bitmap)_pbCam.Image.Clone();
-            return await System.Threading.Tasks.Task.Run(() => Tools.ImageUtils.FindDarkestSpot(bmp));
-        }
+        if (result != DialogResult.OK) return;
 
-        private void OnConfirmClick(object? sender, EventArgs e)
+        var currentPos = SerialInterface.Instance.MachinePosition;
+        _offsetX = startPos.X - currentPos.X;
+        _offsetY = startPos.Y - currentPos.Y;
+
+        _lblOffset.Text = $"Offset: ({_offsetX:F1}, {_offsetY:F1}) mm";
+        _lblHeight.Text = "Height: manually entered";
+        _btnSave.Enabled = true;
+    }
+
+    private void SaveOffset()
+    {
+        var store = CalibrationStore.Load();
+        store.Offset = new HeadMountedOffset
         {
-             var current = SerialInterface.Instance.MachinePosition;
-             float offX = _startPos.X - current.X;
-             float offY = _startPos.Y - current.Y;
-             
-             var res = MessageBox.Show($"Calculated Offset:\nX: {offX:F3}\nY: {offY:F3}\n\nSave this offset?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-             if (res == DialogResult.Yes)
-             {
-                 var calib = CameraManager.Instance.Calibration;
-                 calib.OffsetX = offX;
-                 calib.OffsetY = offY;
-                 calib.IsHeadMounted = true;
-                 
-                 CameraManager.Instance.SaveCalibration();
-                 
-                 AppConfiguration.Instance.CameraOverlayX = offX;
-                 AppConfiguration.Instance.CameraOverlayY = offY; 
-                 
-                 AppConfiguration.Instance.Save();
-                 
-                 this.DialogResult = DialogResult.OK;
-                 this.Close();
-             }
-        }
+            OffsetX = _offsetX,
+            OffsetY = _offsetY,
+            OffsetZ = _offsetZ
+        };
+        store.Save();
+        MessageBox.Show("Offset saved.", "Saved");
+        DialogResult = DialogResult.OK;
+        Close();
     }
 }

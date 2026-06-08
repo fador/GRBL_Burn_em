@@ -153,11 +153,11 @@ namespace grbl_burn_em.Controls
             _btnCalibrate.Click += OnCalibrateClick;
             layout.Controls.Add(_btnCalibrate);
 
-            var btnLensCalib = new Button { Text = "Calibrate Lens (ArUco)", Dock = DockStyle.Top, Height = 30 };
-            btnLensCalib.Click += (s, e) => 
+            var btnLensCalib = new Button { Text = "Board Setup", Dock = DockStyle.Top, Height = 30 };
+            btnLensCalib.Click += (s, e) =>
             {
-                 using var form = new ArucoCalibrationForm();
-                 form.ShowDialog();
+                 using var form = new CharucoBoardSetupForm();
+                 form.ShowDialog(FindForm());
             };
             layout.Controls.Add(btnLensCalib);
 
@@ -183,60 +183,52 @@ namespace grbl_burn_em.Controls
         private void OnCalibrateClick(object? sender, EventArgs e)
         {
              var menu = new ContextMenuStrip();
-             
-             menu.Items.Add("Lens Calibration (Distortion)", null, (s, args) => 
+
+             menu.Items.Add("ChArUco Board Setup...", null, (s, args) =>
+             {
+                 using var form = new CharucoBoardSetupForm();
+                 form.ShowDialog(FindForm());
+             });
+
+             menu.Items.Add("Lens Calibration (ChArUco)...", null, (s, args) =>
              {
                  using var form = new LensCalibrationForm();
-                 form.ShowDialog();
+                 form.ShowDialog(FindForm());
              });
-             
+
+             menu.Items.Add("Stationary Registration...", null, (s, args) =>
+             {
+                 using var form = new CameraRegistrationForm();
+                 form.ShowDialog(FindForm());
+             });
+
              menu.Items.Add("-");
 
-             menu.Items.Add("Alignment: Head Mounted (Offset)", null, (s, args) => 
+             menu.Items.Add("Head-Mounted Offset...", null, (s, args) =>
              {
                  using var form = new OffsetCalibrationForm();
-                 if (form.ShowDialog() == DialogResult.OK)
+                 if (form.ShowDialog(FindForm()) == DialogResult.OK)
                  {
                      UpdateUIState();
                      UpdateOverlay();
                  }
              });
 
-             menu.Items.Add("Alignment: Stationary (Homography)", null, (s, args) => 
+             menu.Items.Add("-");
+
+             menu.Items.Add("Workspace Scan...", null, (s, args) =>
              {
-                // Stationary Calibration
-                using var form = new CalibrationForm();
-                if (form.ShowDialog() == DialogResult.OK)
-                {
-                    var imgPoints = form.SelectedPoints;
-                    // Now Ask for World Points.
-                    MessageBox.Show("Now click the 4 corresponding points on the Workbench Grid.\nUse the 'Measure' tool or simply Click-to-Select logic (Not implemented yet). \n\nFor now, we will simulate 4 corners of the work area: \n(0,0), (AreaW,0), (AreaW, AreaH), (0, AreaH).", "Step 2");
-                    
-                    var config = AppConfiguration.Instance;
-                    // World Points (Bed Corners)
-                    PointF[] worldPoints = {
-                        new PointF(0, config.WorkAreaHeight), // Top-Left (Y-Up: Height)
-                        new PointF(config.WorkAreaWidth, config.WorkAreaHeight), // Top-Right
-                        new PointF(config.WorkAreaWidth, 0), // Bottom-Right
-                        new PointF(0, 0) // Bottom-Left
-                    };
-                    
-                    CameraManager.Instance.ComputeHomography(imgPoints, worldPoints);
-                    MessageBox.Show("Homography Computed and Applied.");
-                }
+                 using var form = new WorkspaceScanForm();
+                 form.ShowDialog(FindForm());
              });
-             
+
              menu.Show(_btnCalibrate, new Point(0, _btnCalibrate.Height));
         }
         
         private void OnRefreshClick(object? sender, EventArgs e)
         {
-             // Trigger Grid Scan
-             if (MessageBox.Show("Start Workspace Scan? The machine will move to cover the work area.", "Scan", MessageBoxButtons.YesNo) == DialogResult.Yes)
-             {
-                 // Start Scan Job
-                 CameraManager.Instance.StartScan();
-             }
+             using var form = new WorkspaceScanForm();
+             form.ShowDialog(FindForm());
         }
 
 

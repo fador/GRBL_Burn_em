@@ -5,346 +5,263 @@
  * This file is part of the GRBL Burn'Em laser control software
  */
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
-using System.Collections.Generic;
+using Emgu.CV;
 using grbl_burn_em.Data;
 
-// Avoid ambiguity between System.Drawing.Size and OpenCvSharp.Size
-using Size = System.Drawing.Size;
-using Point = System.Drawing.Point;
-using Timer = System.Windows.Forms.Timer;
+using static grbl_burn_em.Data.CameraCalibrationEngine;
 
-namespace grbl_burn_em.Forms
+namespace grbl_burn_em.Forms;
+
+public partial class LensCalibrationForm : Form
 {
-    public class LensCalibrationForm : Form
+    private PictureBox _picPreview = null!;
+    private Label _lblStatus = null!;
+    private Label _lblCount = null!;
+    private Label _lblResults = null!;
+    private Button _btnCapture = null!;
+    private Button _btnAutoCapture = null!;
+    private Button _btnCalibrate = null!;
+    private Button _btnSave = null!;
+
+    private readonly List<Mat> _capturedFrames = new();
+    private bool _calibrated;
+    private CameraIntrinsics? _result;
+
+    public LensCalibrationForm()
     {
-        private PictureBox _pbCam = null!;
-        private ListBox _lstFrames = null!;
-        private Label _lblStatus = null!;
-        private Button _btnCapture = null!;
-        private Button _btnCalibrate = null!;
-        private Timer _uiTimer = null!;
-        
-        private List<Bitmap> _capturedFrames = new List<Bitmap>();
-        private Bitmap? _currentBitmap;
-        private object _lock = new object();
-        
-        // Config from Data
-        private int _rows;
-        private int _cols;
-        private float _spacing;
-        private CalibrationPatternType _type;
+        InitializeComponent();
+    }
 
-        public LensCalibrationForm()
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        if (!CameraManager.Instance.IsRunning)
+            _lblStatus.Text = "Camera not running. Start camera first.";
+    }
+
+    private void InitializeComponent()
+    {
+        Text = "Lens Calibration (ChArUco)";
+        Size = new Size(750, 650);
+        StartPosition = FormStartPosition.CenterParent;
+
+        var mainLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+
+        _picPreview = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black };
+        mainLayout.Controls.Add(_picPreview, 0, 0);
+
+        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(10) };
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+
+        _lblCount = new Label { Text = "0 views captured (need 5+)", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
+        sidePanel.Controls.Add(_lblCount, 0, 0);
+
+        _lblStatus = new Label { Text = "Ready", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
+        sidePanel.Controls.Add(_lblStatus, 0, 1);
+
+        _btnCapture = new Button { Text = "Capture View", Dock = DockStyle.Fill, Height = 40 };
+        _btnCapture.Click += (s, e) => CaptureCurrentView();
+        sidePanel.Controls.Add(_btnCapture, 0, 2);
+
+        _btnAutoCapture = new Button { Text = "Auto Capture (grid)", Dock = DockStyle.Fill, Height = 40 };
+        _btnAutoCapture.Click += async (s, e) => await AutoCapture();
+        sidePanel.Controls.Add(_btnAutoCapture, 0, 3);
+
+        _lblResults = new Label { Text = "", Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopCenter, AutoSize = false, Height = 80 };
+        sidePanel.Controls.Add(_lblResults, 0, 4);
+
+        var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
+        _btnCalibrate = new Button { Text = "Calibrate", Width = 100, Enabled = false };
+        _btnCalibrate.Click += (s, e) => RunCalibration();
+        _btnSave = new Button { Text = "Save", Width = 80, Enabled = false };
+        _btnSave.Click += (s, e) => SaveCalibration();
+        btnPanel.Controls.Add(_btnCalibrate);
+        btnPanel.Controls.Add(_btnSave);
+        sidePanel.Controls.Add(btnPanel, 0, 5);
+
+        mainLayout.Controls.Add(sidePanel, 1, 0);
+        Controls.Add(mainLayout);
+
+        CameraManager.Instance.FrameReceived += OnFrameReceived;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
         {
-            InitializeComponent();
-            
-            var calib = CameraManager.Instance.Calibration;
-            _rows = calib.PatternRows;
-            _cols = calib.PatternCols;
-            _spacing = calib.PatternSpacingMm;
-            _type = calib.PatternType;
-            
-            CameraManager.Instance.FrameReceived += OnFrameReceived;
-            
-            _uiTimer = new Timer { Interval = 100 };
-            _uiTimer.Tick += (s, e) => UpdateUI();
-            _uiTimer.Start();
-            
-            // On Config Change (if we had a settings button), we would update vars.
+            CameraManager.Instance.FrameReceived -= OnFrameReceived;
+            foreach (var frame in _capturedFrames) frame.Dispose();
         }
+        base.Dispose(disposing);
+    }
 
-        private void InitializeComponent()
+    private void OnFrameReceived(Bitmap frame)
+    {
+        if (!IsHandleCreated) { frame.Dispose(); return; }
+        try
         {
-            this.Size = new Size(900, 600);
-            this.Text = "Lens Calibration (Circle Grid)";
-            this.TopMost = true; // Keep form on top
-            this.FormClosing += (s, e) => {
-                 CameraManager.Instance.FrameReceived -= OnFrameReceived;
-                 foreach(var m in _capturedFrames) m.Dispose();
-                 _currentBitmap?.Dispose();
-            };
+            using var mat = BitmapToMat(frame);
+            frame.Dispose();
 
-            var split = new SplitContainer { Dock = DockStyle.Fill };
-            this.Controls.Add(split);
+            var store = CalibrationStore.Load();
+            if (store.BoardConfig == null) return;
 
-            // Left: Camera
-            _pbCam = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
-            split.Panel1.Controls.Add(_pbCam);
+            var engine = new CameraCalibrationEngine(store.BoardConfig);
+            var detection = engine.DetectBoard(mat);
 
-            // Right: Controls
-            var pnlRight = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(10) };
-            split.Panel2.Controls.Add(pnlRight);
-            
-            pnlRight.Controls.Add(new Label { Text = "Instructions:", Font = new Font(FontFamily.GenericSansSerif, 10, FontStyle.Bold), AutoSize = true });
-            pnlRight.Controls.Add(new Label { Text = "1. Print the calibration pattern (Asymmetric Circles).\n2. Hold it flat in front of camera.\n3. Capture 10-20 images from different angles.\n4. Ensure the colored grid is detected.", AutoSize = true, Width = 250, Height = 100 });
-            
-            _lblStatus = new Label { Text = "Status: Waiting...", AutoSize = true, ForeColor = Color.Blue };
-            pnlRight.Controls.Add(_lblStatus);
-            
-            _btnCapture = new Button { Text = "Capture Frame", Width = 200, Height = 40, BackColor = Color.LightYellow };
-            _btnCapture.Click += OnCaptureClick;
-            pnlRight.Controls.Add(_btnCapture);
-            
-            _btnCalibrate = new Button { Text = "Calibrate Now", Width = 200, Height = 40, BackColor = Color.LightGreen, Enabled = false };
-            _btnCalibrate.Click += OnCalibrateClick;
-            pnlRight.Controls.Add(_btnCalibrate);
+            if (_picPreview.IsDisposed) return;
 
-            var btnAuto = new Button { Text = "Start Auto Calibration", Width = 200, Height = 40, BackColor = Color.LightSkyBlue, Margin = new Padding(0, 10, 0, 0) };
-            btnAuto.Click += OnAutoCalibrateClick;
-            pnlRight.Controls.Add(btnAuto);
-            
-            pnlRight.Controls.Add(new Label { Text = "Captured Frames:", AutoSize = true, Margin = new Padding(0, 10, 0, 0) });
-            _lstFrames = new ListBox { Width = 200, Height = 200 };
-            pnlRight.Controls.Add(_lstFrames);
-            
-            var btnClear = new Button { Text = "Clear All", Width = 200 };
-            btnClear.Click += (s, e) => {
-                foreach(var m in _capturedFrames) m.Dispose();
-                _capturedFrames.Clear();
-                _lstFrames.Items.Clear();
-                UpdateButtons();
-            };
-            pnlRight.Controls.Add(btnClear);
-        }
+            using var display = mat.Clone();
+            engine.DrawDetectedBoard(display, detection);
 
-        private void OnFrameReceived(Bitmap bmp)
-        {
-            try
+            var displayBmp = MatToBitmap(display);
+            this.BeginInvoke(new Action(() =>
             {
-                // Clone for display and detection (since we might draw on it)
-                Bitmap display = new Bitmap(bmp);
-                
-                // Keep reference for capture
-                lock(_lock)
+                if (!_picPreview.IsDisposed)
                 {
-                    _currentBitmap?.Dispose();
-                    _currentBitmap = new Bitmap(bmp);
-                }
-
-                // Detection for visualization (Draw on display)
-                var detected = CameraManager.Instance.DetectDotPattern(display, display, _rows, _cols, _type);
-                
-                this.BeginInvoke(new Action(() => 
-                {
-                    var old = _pbCam.Image;
-                    _pbCam.Image = display;
+                    var old = _picPreview.Image;
+                    _picPreview.Image = displayBmp;
                     old?.Dispose();
-                    
-                    if (detected != null && detected.Length > 0)
-                         _lblStatus.Text = "Pattern DETECTED";
-                    else if (!_isAutoCalibrating) // Don't overwrite auto status
-                         _lblStatus.Text = "Looking for pattern...";
-                }));
-            }
-            catch {}
-        }
 
-        private void UpdateUI()
-        {
-             // Optional: Update status text color or simple anims
-        }
-        
-        private void OnCaptureClick(object? sender, EventArgs e)
-        {
-            CaptureCurrentFrame();
-        }
-
-        private bool CaptureCurrentFrame()
-        {
-            Bitmap? capture = null;
-            lock(_lock)
-            {
-                if (_currentBitmap != null)
-                    capture = new Bitmap(_currentBitmap);
-            }
-            
-            if (capture != null)
-            {
-                var pts = CameraManager.Instance.DetectDotPattern(capture, null, _rows, _cols, _type);
-                // Allow fuzzy capture or stick to strict count?
-                // Strict count usually needed for calibration.
-                // But since we disabled calibration, maybe loose is fine?
-                // Let's keep check.
-                if (pts != null && pts.Length == _rows*_cols) // Assuming BlobDetector logic matches this expectance? 
-                {
-                    // BlobDetector currently returns ALL blobs. 
-                    // It doesn't filter by grid size yet.
-                    // So this check will likely FAIL unless exactly that many blobs.
-                    // Let's relax it for now since Calibration is disabled anyway.
-                    
-                    _capturedFrames.Add(capture);
-                    _lstFrames.Items.Add($"Frame {_capturedFrames.Count}");
-                    UpdateButtons();
-                    return true;
+                    if (detection.Detected)
+                        _lblStatus.Text = $"Board detected: {detection.CharucoIds?.Size ?? 0} corners";
+                    else
+                        _lblStatus.Text = "Board not detected";
                 }
                 else
                 {
-                    // If relaxed:
-                    if (pts != null && pts.Length > 10) // Some arb number
-                    {
-                         _capturedFrames.Add(capture);
-                        _lstFrames.Items.Add($"Frame {_capturedFrames.Count}");
-                        UpdateButtons();
-                        return true;
-                    }
-
-                    if (!_isAutoCalibrating)
-                        MessageBox.Show(this, "Pattern not detected in this frame. Please adjust angle/lighting.");
-                    capture.Dispose();
+                    displayBmp.Dispose();
                 }
-            }
-            return false;
+            }));
         }
-        
-        private void UpdateButtons()
+        catch (Exception ex)
         {
-            _btnCalibrate.Enabled = _capturedFrames.Count >= 5;
-            _btnCalibrate.Text = $"Calibrate ({_capturedFrames.Count} frames)";
-        }
-        
-        private bool _isAutoCalibrating = false;
-
-        private async void OnAutoCalibrateClick(object? sender, EventArgs e)
-        {
-            if (_isAutoCalibrating) return;
-            
-            if (MessageBox.Show(this, "Ensure the laser area is clear.\nThe machine will move around the current position.\nContinue?", "Auto Calibration", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-                return;
-
-            _isAutoCalibrating = true;
-            _lblStatus.Text = "Starting Auto Calibration...";
-            
-            var offsets = new List<(float x, float y)> 
-            {
-                (0, 0),
-                (-15, 0), (15, 0),
-                (0, -15), (0, 15),
-                (-10, -10), (10, -10),
-                (-10, 10), (10, 10)
-            };
-
-            try
-            {
-                if (SerialInterface.Instance.MachineState == "Unknown")
-                {
-                    MessageBox.Show(this, "Machine state unknown. Connect first.");
-                    return;
-                }
-
-                PointF startPos = SerialInterface.Instance.MachinePosition;
-                
-                foreach(var offset in offsets)
-                {
-                    if (!_isAutoCalibrating) break;
-
-                    float targetX = startPos.X + offset.x;
-                    float targetY = startPos.Y + offset.y;
-                    
-                    _lblStatus.Text = $"Moving to {offset.x}, {offset.y}...";
-                    
-                    SerialInterface.Instance.Write($"G0 X{targetX:F3} Y{targetY:F3}\n");
-                    
-                    await WaitUntilIdle();
-                    await System.Threading.Tasks.Task.Delay(500);
-                    
-                    _lblStatus.Text = "Capturing...";
-                    
-                    bool captured = false;
-                    for(int i=0; i<3; i++)
-                    {
-                        if (CaptureCurrentFrame())
-                        {
-                            captured = true;
-                            break;
-                        }
-                        await System.Threading.Tasks.Task.Delay(500);
-                    }
-                    
-                    if (!captured)
-                    {
-                         _lblStatus.Text = "Capture Failed at this pos.";
-                         await System.Threading.Tasks.Task.Delay(500);
-                    }
-                }
-                
-                SerialInterface.Instance.Write($"G0 X{startPos.X:F3} Y{startPos.Y:F3}\n");
-                await WaitUntilIdle();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, $"Auto Calibration Error: {ex.Message}");
-            }
-            finally
-            {
-                _isAutoCalibrating = false;
-                _lblStatus.Text = "Auto Calibration Complete.";
-            }
-        }
-
-        private async System.Threading.Tasks.Task WaitUntilIdle()
-        {
-             await System.Threading.Tasks.Task.Delay(250);
-
-             while (true)
-             {
-                 if (SerialInterface.Instance.MachineState.Equals("Idle", StringComparison.OrdinalIgnoreCase))
-                     return;
-                     
-                 if (SerialInterface.Instance.MachineState.Contains("Alarm"))
-                     throw new Exception("Machine Alarm triggered during move.");
-                     
-                 await System.Threading.Tasks.Task.Delay(100);
-             }
-        }
-        
-        private async void OnCalibrateClick(object? sender, EventArgs e)
-        {
-            _btnCalibrate.Enabled = false;
-            _lblStatus.Text = "Calibrating... Please Wait...";
-            
-            double err = -1;
-            double[]? camMatrix = null;
-            double[]? distCoeffs = null;
-            
-            await System.Threading.Tasks.Task.Run(() => 
-            {
-                err = CameraManager.Instance.CalibrateCameraDots(
-                    _capturedFrames, 
-                    _rows, 
-                    _cols, 
-                    _spacing, 
-                    _type, 
-                    out var cm, 
-                    out var dc
-                );
-                camMatrix = cm;
-                distCoeffs = dc;
-            });
-            
-            if (err >= 0 && camMatrix != null && distCoeffs != null)
-            {
-                MessageBox.Show(this, $"Calibration Successful!\nReprojection Error: {err:F4} px", "Result", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                
-                var calib = CameraManager.Instance.Calibration;
-                calib.CameraMatrix = camMatrix;
-                calib.DistCoeffs = distCoeffs;
-                calib.PatternRows = _rows;
-                calib.PatternCols = _cols;
-                calib.PatternSpacingMm = _spacing;
-                calib.PatternType = _type;
-                
-                CameraManager.Instance.SaveCalibration();
-                this.Close();
-            }
-            else
-            {
-                // Error message handled in CalibrateCameraDots stub usually?
-                // Or here.
-                _btnCalibrate.Enabled = true;
-                _lblStatus.Text = "Failed/Disabled.";
-            }
+            System.Diagnostics.Debug.WriteLine($"Preview error: {ex.Message}");
+            frame.Dispose();
         }
     }
+
+    private void CaptureCurrentView()
+    {
+        if (_picPreview.Image == null) return;
+
+        try
+        {
+            var store = CalibrationStore.Load();
+            if (store.BoardConfig == null)
+            {
+                MessageBox.Show("Please set up ChArUco board first.", "Warning");
+                return;
+            }
+
+            var engine = new CameraCalibrationEngine(store.BoardConfig);
+            using var bmp = new Bitmap(_picPreview.Image);
+            using var mat = BitmapToMat(bmp);
+            var detection = engine.DetectBoard(mat);
+
+            if (!detection.Detected)
+            {
+                MessageBox.Show("ChArUco board not detected in this frame.", "Warning");
+                return;
+            }
+
+            _capturedFrames.Add(mat.Clone());
+            _lblCount.Text = $"{_capturedFrames.Count} views captured (need 5+)";
+            _btnCalibrate.Enabled = _capturedFrames.Count >= 3;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Capture failed: {ex.Message}", "Error");
+        }
+    }
+
+    private async System.Threading.Tasks.Task AutoCapture()
+    {
+        var store = CalibrationStore.Load();
+        if (store.BoardConfig == null)
+        {
+            MessageBox.Show("Please set up ChArUco board first.", "Warning");
+            return;
+        }
+
+        for (int i = 0; i < 9; i++)
+        {
+            float dx = (i % 3 - 1) * 10;
+            float dy = (i / 3 - 1) * 10;
+
+            if (SerialInterface.Instance.IsConnected)
+            {
+                var pos = SerialInterface.Instance.MachinePosition;
+                string cmd = $"$J=G91 X{dx} Y{dy} F500";
+                SerialInterface.Instance.Write(cmd + "\n");
+                await System.Threading.Tasks.Task.Delay(750);
+            }
+
+            await System.Threading.Tasks.Task.Delay(250);
+            CaptureCurrentView();
+            await System.Threading.Tasks.Task.Delay(100);
+        }
+
+        _lblCount.Text = $"{_capturedFrames.Count} views captured (need 5+)";
+        _btnCalibrate.Enabled = _capturedFrames.Count >= 3;
+    }
+
+    private void RunCalibration()
+    {
+        try
+        {
+            var store = CalibrationStore.Load();
+            if (store.BoardConfig == null) return;
+
+            var engine = new CameraCalibrationEngine(store.BoardConfig);
+            var result = engine.CalibrateLens(_capturedFrames);
+
+            if (result == null)
+            {
+                MessageBox.Show("Calibration failed. Need 3+ valid views with detected board.", "Error");
+                return;
+            }
+
+            _result = result;
+            _calibrated = true;
+            _btnSave.Enabled = true;
+
+            _lblResults.Text = $"Calibrated!\nRMSE: {result.ReprojectionError:F4} px\n" +
+                $"fx={result.CameraMatrix[0]:F1} fy={result.CameraMatrix[4]:F1}\n" +
+                $"cx={result.CameraMatrix[2]:F1} cy={result.CameraMatrix[5]:F1}\n" +
+                $"k1={result.DistCoeffs[0]:F4} k2={result.DistCoeffs[1]:F4}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Calibration error: {ex.Message}", "Error");
+        }
+    }
+
+    private void SaveCalibration()
+    {
+        if (_result == null) return;
+
+        var store = CalibrationStore.Load();
+        store.Intrinsics = _result;
+        store.Save();
+        MessageBox.Show("Lens calibration saved.", "Saved");
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+    
+    /// <summary>
+    /// Expose captured frames for external use
+    /// </summary>
+    public IReadOnlyList<Mat> CapturedFrames => _capturedFrames;
+    public bool IsCalibrated => _calibrated;
 }
