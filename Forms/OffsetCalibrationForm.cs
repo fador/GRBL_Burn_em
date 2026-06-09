@@ -49,7 +49,7 @@ public partial class OffsetCalibrationForm : Form
         _picPreview = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black };
         mainLayout.Controls.Add(_picPreview, 0, 0);
 
-        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(10) };
+        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8, Padding = new Padding(10) };
 
         _lblInfo = new Label { Text = "Select calibration method:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
         sidePanel.Controls.Add(_lblInfo, 0, 0);
@@ -74,6 +74,25 @@ public partial class OffsetCalibrationForm : Form
         _btnSave = new Button { Text = "Save Offset", Dock = DockStyle.Fill, Height = 40, Enabled = false };
         _btnSave.Click += (s, e) => SaveOffset();
         sidePanel.Controls.Add(_btnSave, 0, 6);
+
+        var movePanel = new Panel { Dock = DockStyle.Fill };
+        var moveLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
+        moveLayout.Controls.Add(new Label { Text = "Go to:", AutoSize = true });
+        var goX = new NumericUpDown { Minimum = -5000, Maximum = 5000, DecimalPlaces = 1, Width = 55, Value = 0 };
+        var goY = new NumericUpDown { Minimum = -5000, Maximum = 5000, DecimalPlaces = 1, Width = 55, Value = 0 };
+        var btnGo = new Button { Text = "Go", Width = 40, Height = 23 };
+        btnGo.Click += (s, e) =>
+        {
+            if (!SerialInterface.Instance.IsConnected) return;
+            string cmd = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"$J=G90 X{(float)goX.Value:F1} Y{(float)goY.Value:F1} F2000");
+            SerialInterface.Instance.Write(cmd + "\n");
+        };
+        moveLayout.Controls.Add(goX);
+        moveLayout.Controls.Add(goY);
+        moveLayout.Controls.Add(btnGo);
+        movePanel.Controls.Add(moveLayout);
+        sidePanel.Controls.Add(movePanel, 0, 7);
 
         mainLayout.Controls.Add(sidePanel, 1, 0);
         Controls.Add(mainLayout);
@@ -137,13 +156,22 @@ public partial class OffsetCalibrationForm : Form
             }
 
             var (rvec, tvec, reproj) = pose.Value;
-            _offsetX = (float)tvec[0];
-            _offsetY = (float)tvec[1];
+
+            float boardWx = 0f, boardWy = 0f;
+            float machineX = 0f, machineY = 0f;
+            if (SerialInterface.Instance.IsConnected)
+            {
+                var pos = SerialInterface.Instance.MachinePosition;
+                machineX = pos.X; machineY = pos.Y;
+            }
+
+            _offsetX = boardWx - (float)tvec[0] - machineX;
+            _offsetY = boardWy - (float)tvec[1] - machineY;
             _offsetZ = (float)tvec[2];
 
             _lblOffset.Text = $"Offset: ({_offsetX:F1}, {_offsetY:F1}) mm";
             _lblHeight.Text = $"Height: {_offsetZ:F1} mm";
-            _lblInfo.Text = $"Detected! RMSE: {reproj:F3} px";
+            _lblInfo.Text = $"Detected! RMSE: {reproj:F3} px\nBoard at ({boardWx:F0},{boardWy:F0})";
             _btnSave.Enabled = true;
         }
         catch (Exception ex)

@@ -23,6 +23,7 @@ public partial class WorkspaceScanForm : Form
     private Button _btnClear = null!;
 
     private bool _cancelRequested;
+    private CancellationTokenSource? _scanCts;
 
     public WorkspaceScanForm()
     {
@@ -60,7 +61,7 @@ public partial class WorkspaceScanForm : Form
         _btnStart = new Button { Text = "Start Scan", Width = 100, Height = 35 };
         _btnStart.Click += async (s, e) => await StartScanAsync();
         _btnCancel = new Button { Text = "Cancel", Width = 80, Enabled = false };
-        _btnCancel.Click += (s, e) => { _cancelRequested = true; };
+        _btnCancel.Click += (s, e) => { _cancelRequested = true; _scanCts?.Cancel(); };
         _btnClear = new Button { Text = "Clear Scan", Width = 100 };
         _btnClear.Click += (s, e) => { CameraManager.Instance.CapturedFrames.Clear(); };
 
@@ -79,14 +80,17 @@ public partial class WorkspaceScanForm : Form
     {
         if (!SerialInterface.Instance.IsConnected)
         {
-            MessageBox.Show(this, "Machine not connected.", "Error");
+            MessageBox.Show(this, "Machine not connected. Click 'Connect Emulator' in Camera Settings.", "Error");
             return;
         }
 
         _cancelRequested = false;
+        _scanCts = new CancellationTokenSource();
+        var token = _scanCts.Token;
         _btnStart.Enabled = false;
         _btnCancel.Enabled = true;
         _progressBar.Visible = true;
+        _lblStatus.Text = "Starting scan...";
 
         try
         {
@@ -102,11 +106,7 @@ public partial class WorkspaceScanForm : Form
             {
                 var engine = new CameraCalibrationEngine(store.BoardConfig ?? new CharucoBoardConfig());
                 var fov = engine.ComputeFovMm(store.Offset.OffsetZ, store.Intrinsics!);
-                if (!fov.IsEmpty)
-                {
-                    fovW = fov.Width;
-                    fovH = fov.Height;
-                }
+                if (!fov.IsEmpty) { fovW = fov.Width; fovH = fov.Height; }
             }
 
             if (fovW <= 10) fovW = config.CameraOverlayWidth;
@@ -131,55 +131,80 @@ public partial class WorkspaceScanForm : Form
 
             CameraManager.Instance.CapturedFrames.Clear();
             int total = points.Count;
+            _lblStatus.Text = $"Scanning 0/{total}...";
 
             for (int i = 0; i < total; i++)
             {
-                if (_cancelRequested) break;
+                if (_cancelRequested || token.IsCancellationRequested) break;
 
                 var pt = points[i];
-                string cmd = $"$J=G90 X{pt.X:F2} Y{pt.Y:F2} F{config.FramingSpeed}";
-                SerialInterface.Instance.Write(cmd + "\n");
+                string cmd = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                    $"$J=G90 X{pt.X:F2} Y{pt.Y:F2} F{config.FramingSpeed}");
+                bool sent = SerialInterface.Instance.Write(cmd + "\n");
 
-                await WaitForPosition(pt.X, pt.Y);
-                await Task.Delay(500);
+                if (!sent)
+                {
+                    if (!IsDisposed)
+                        MessageBox.Show(this, "Connection lost during scan.", "Error");
+                    break;
+                }
+
+                try { await WaitForPosition(pt.X, pt.Y, token); }
+                catch (OperationCanceledException) { break; }
+
+                if (token.IsCancellationRequested) break;
+                await Task.Delay(500, token);
 
                 CameraManager.Instance.CaptureCurrentFrame(pt.X - offX, pt.Y - offY, fovW, fovH);
 
                 this.BeginInvoke(new Action(() =>
                 {
-                    _lblStatus.Text = $"Scanning... {i + 1}/{total}";
+                    if (!IsDisposed)
+                        _lblStatus.Text = $"Scanning... {i + 1}/{total}";
                 }));
             }
 
-            this.BeginInvoke(new Action(() =>
+            if (!IsDisposed)
             {
-                _lblStatus.Text = _cancelRequested
+                string msg = _cancelRequested
                     ? $"Cancelled. {CameraManager.Instance.CapturedFrames.Count} frames captured."
                     : $"Done. {CameraManager.Instance.CapturedFrames.Count} frames captured.";
-            }));
+                _lblStatus.Text = msg;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (!IsDisposed) _lblStatus.Text = "Scan cancelled.";
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Scan error: {ex.Message}", "Error");
+            if (!IsDisposed) MessageBox.Show(this, $"Scan error: {ex.Message}", "Error");
         }
         finally
         {
-            _btnStart.Enabled = true;
-            _btnCancel.Enabled = false;
-            _progressBar.Visible = false;
+            _scanCts?.Dispose();
+            _scanCts = null;
+            if (!IsDisposed)
+            {
+                _btnStart.Enabled = true;
+                _btnCancel.Enabled = false;
+                _progressBar.Visible = false;
+            }
         }
     }
 
-    private static async Task WaitForPosition(float targetX, float targetY)
+    private static async Task WaitForPosition(float targetX, float targetY, CancellationToken token)
     {
         int timeout = 10000;
         while (timeout > 0)
         {
+            token.ThrowIfCancellationRequested();
+            if (!SerialInterface.Instance.IsConnected) return;
             var pos = SerialInterface.Instance.MachinePosition;
             float dist = (float)Math.Sqrt(
                 Math.Pow(pos.X - targetX, 2) + Math.Pow(pos.Y - targetY, 2));
             if (dist < 1.0f) return;
-            await Task.Delay(100);
+            await Task.Delay(100, token);
             timeout -= 100;
         }
     }

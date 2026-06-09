@@ -518,7 +518,7 @@ public partial class MainForm
                  if (!SerialInterface.Instance.IsConnected) return;
                  if (!double.TryParse(cmbStep.Text, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double step)) step = 10;
                  double dist = (dir == "-") ? -step : step;
-                 string cmd = $"$J=G91 {axis}{dist} F{numFeed.Value}";
+                 string cmd = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"$J=G91 {axis}{dist} F{numFeed.Value}");
                  SerialInterface.Instance.Write(cmd + "\n");
             };
             

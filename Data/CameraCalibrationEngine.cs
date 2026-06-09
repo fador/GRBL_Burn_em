@@ -45,7 +45,7 @@ public class CameraCalibrationEngine
         ArucoInvoke.DetectMarkers(grey, dict, corners, ids, param, rejected);
         grey.Dispose();
 
-        if (ids.Size == 0)
+        if (ids.Size < 4)
             return result;
 
         using var charucoCorners = new VectorOfPointF();
@@ -53,7 +53,7 @@ public class CameraCalibrationEngine
 
         ArucoInvoke.InterpolateCornersCharuco(corners, ids, image, board, charucoCorners, charucoIds);
 
-        result.Detected = charucoIds.Size > 0;
+        result.Detected = charucoIds.Size >= 4;
         if (result.Detected)
         {
             result.CharucoCorners = new VectorOfPointF(charucoCorners.ToArray());
@@ -67,7 +67,7 @@ public class CameraCalibrationEngine
 
     public CameraIntrinsics? CalibrateLens(List<Mat> images)
     {
-        if (images == null || images.Count < 3) return null;
+        if (images == null || images.Count < 6) return null;
 
         using var board = BoardConfig.CreateBoard();
         using var dict = BoardConfig.GetDictionary();
@@ -90,20 +90,20 @@ public class CameraCalibrationEngine
             using var rejected = new VectorOfVectorOfPointF();
             ArucoInvoke.DetectMarkers(grey, dict, corners, ids, param, rejected);
 
-            if (ids.Size == 0) continue;
+            if (ids.Size < 4) continue;
 
             using var charucoCorners = new VectorOfPointF();
             using var charucoIds = new VectorOfInt();
             ArucoInvoke.InterpolateCornersCharuco(corners, ids, grey, board, charucoCorners, charucoIds);
 
-            if (charucoIds.Size == 0) continue;
+            if (charucoIds.Size < 4) continue;
 
             allCharucoCorners.Push(charucoCorners);
             allCharucoIds.Push(charucoIds);
             validCount++;
         }
 
-        if (validCount < 3) return null;
+        if (validCount < 6) return null;
 
         int imgW = images[0].Width;
         int imgH = images[0].Height;
@@ -178,13 +178,30 @@ public class CameraCalibrationEngine
         return (rvec, tvec, reproj);
     }
 
-    public double[]? ComputeWorkAreaHomography(
+    public (double[]? homography, double[]? rvec, double[]? tvec, double reprojError)?
+        ComputeWorkAreaHomographyWithPose(
         Mat image, CameraIntrinsics intrinsics,
         float boardWorldX, float boardWorldY, float boardWorldRotationDeg)
     {
         var pose = SolveCameraPose(image, intrinsics);
         if (pose == null) return null;
-        var (rvec, tvec, _) = pose.Value;
+        var (rvec, tvec, reproj) = pose.Value;
+
+        var h = ComputeHomographyFromPose(rvec, tvec, intrinsics, boardWorldX, boardWorldY, boardWorldRotationDeg);
+        return (h, rvec, tvec, reproj);
+    }
+
+    public double[]? ComputeWorkAreaHomography(
+        Mat image, CameraIntrinsics intrinsics,
+        float boardWorldX, float boardWorldY, float boardWorldRotationDeg)
+    {
+        return ComputeWorkAreaHomographyWithPose(image, intrinsics, boardWorldX, boardWorldY, boardWorldRotationDeg)?.homography;
+    }
+
+    private double[]? ComputeHomographyFromPose(
+        double[] rvec, double[] tvec, CameraIntrinsics intrinsics,
+        float boardWorldX, float boardWorldY, float boardWorldRotationDeg)
+    {
 
         using var rvecMat = MatFromArray(rvec, 3, 1);
         using var tvecMat = MatFromArray(tvec, 3, 1);
@@ -211,7 +228,8 @@ public class CameraCalibrationEngine
         Tw[3] = sinR; Tw[4] = cosR;  Tw[5] = (double)boardWorldY;
         Tw[6] = 0;    Tw[7] = 0;     Tw[8] = 1;
 
-        return MultiplyMat(H, Tw, 3);
+        var HworldToImage = MultiplyMat(H, Tw, 3);
+        return InvertMat3x3(HworldToImage);
     }
 
     public void UndistortImage(Mat src, Mat dst, CameraIntrinsics intrinsics)
@@ -297,6 +315,29 @@ public class CameraCalibrationEngine
                 result[i * size + j] = sum;
             }
         return result;
+    }
+
+    private static double[] InvertMat3x3(double[] m)
+    {
+        double det = m[0] * (m[4] * m[8] - m[5] * m[7])
+                   - m[1] * (m[3] * m[8] - m[5] * m[6])
+                   + m[2] * (m[3] * m[7] - m[4] * m[6]);
+
+        if (Math.Abs(det) < 1e-10)
+            return (double[])m.Clone();
+
+        double invDet = 1.0 / det;
+        var inv = new double[9];
+        inv[0] = (m[4] * m[8] - m[5] * m[7]) * invDet;
+        inv[1] = (m[2] * m[7] - m[1] * m[8]) * invDet;
+        inv[2] = (m[1] * m[5] - m[2] * m[4]) * invDet;
+        inv[3] = (m[5] * m[6] - m[3] * m[8]) * invDet;
+        inv[4] = (m[0] * m[8] - m[2] * m[6]) * invDet;
+        inv[5] = (m[2] * m[3] - m[0] * m[5]) * invDet;
+        inv[6] = (m[3] * m[7] - m[4] * m[6]) * invDet;
+        inv[7] = (m[1] * m[6] - m[0] * m[7]) * invDet;
+        inv[8] = (m[0] * m[4] - m[1] * m[3]) * invDet;
+        return inv;
     }
 
     public static Mat BitmapToMat(Bitmap bmp)

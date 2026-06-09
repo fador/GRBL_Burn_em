@@ -91,7 +91,7 @@ namespace grbl_burn_em.Data
                 // Move
                 // Use SerialInterface to Jog? Or G0?
                 // G0 is better for exact positioning.
-                string cmd = $"$J=G90 X{pt.X:F2} Y{pt.Y:F2} F{_config.FramingSpeed}"; // Use Jog to avoid ALARM if state is weird? 
+                string cmd = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"$J=G90 X{pt.X:F2} Y{pt.Y:F2} F{_config.FramingSpeed}");
                 // Using G0 requires getting out of other states.
                 // $J is good.
                 

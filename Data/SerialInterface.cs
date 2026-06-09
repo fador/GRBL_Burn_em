@@ -95,12 +95,11 @@ public class SerialInterface
             // Start Polling 
             StartPolling();
             
-            // Initialize Grbl - Soft reset
-            Write("\u0018"); // Ctrl-X (Soft Reset)
+             // Initialize Grbl - Soft reset
+            Write("\u0018\n"); // Ctrl-X (Soft Reset)
             Thread.Sleep(100);
             Write("$X\n"); // Unlock
-            //Write("$10=3\n"); // Enable Buffer Stats (as per user request)
-            Write("?"); // Status report
+            Write("?\n"); // Status report
         }
         catch (Exception ex)
         {
@@ -127,11 +126,11 @@ public class SerialInterface
             // Start Read Loop
             Task.Run(TcpReadLoop);
             
-             // Initialize Grbl
-            Write("\u0018"); 
+              // Initialize Grbl
+            Write("\u0018\n");
             Thread.Sleep(100);
             Write("$X\n");
-            Write("?");
+            Write("?\n");
         }
         catch (Exception ex)
         {
@@ -204,7 +203,7 @@ public class SerialInterface
     {
         if (IsConnected)
         {
-            Write("?");
+            Write("?\n");
         }
     }
 
@@ -212,32 +211,23 @@ public class SerialInterface
 
     public bool Write(string data)
     {
-        if (IsConnected)
-        {
-            if (_serialPort != null)
-            {
-                if(data.Length > _serialPort.WriteBufferSize - _serialPort.BytesToWrite)
-                {                
-                    return false;
-                }
-            }
-            
-            try 
-            { 
-                 lock (_writeLock)
+        if (!IsConnected) return false;
+
+        try 
+        { 
+             lock (_writeLock)
+             {
+                 if (_serialPort != null && _serialPort.IsOpen)
+                     _serialPort.Write(data);
+                 else if (_netStream != null)
                  {
-                     if (_serialPort != null && _serialPort.IsOpen)
-                     {
-                        _serialPort.Write(data);
-                     }
-                     else if (_netStream != null)
-                     {
-                        byte[] bytes = Encoding.ASCII.GetBytes(data);
-                        _netStream.Write(bytes, 0, bytes.Length);
-                        _netStream.Flush();
-                     }
+                     byte[] bytes = Encoding.ASCII.GetBytes(data);
+                     _netStream.Write(bytes, 0, bytes.Length);
+                     _netStream.Flush();
                  }
-                 if(data != "?") LineSent?.Invoke(data.Trim()); // Invoke event
+             }
+             if(data.Trim() != "?") LineSent?.Invoke(data.Trim());
+             return true;
             }
             catch (TimeoutException)
             {
@@ -249,8 +239,6 @@ public class SerialInterface
                 Debug.WriteLine($"Write Error: {ex.Message}"); 
                 return false;
             }
-        }
-        return true;
     }
 
     protected virtual void _serialPort_DataReceived(object? sender, SerialDataReceivedEventArgs args)

@@ -171,7 +171,7 @@ namespace grbl_burn_em.Controls
                  if (SerialInterface.Instance.IsConnected)
                  {
                      int feed = 1000; // mm/min
-                     string cmd = $"$J=G90 X{snappedPos.X:F3} Y{snappedPos.Y:F3} F{feed}";
+                     string cmd = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"$J=G90 X{snappedPos.X:F3} Y{snappedPos.Y:F3} F{feed}");
                      SerialInterface.Instance.Write(cmd + "\n");
                  }
                  return;

@@ -1,9 +1,7 @@
-using System;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace grbl_burn_em_emulator;
 
@@ -51,32 +49,19 @@ public class TcpServer
 
                 Send("Grbl 1.1h ['$' for help]\r\n");
 
-                using (var stream = client.GetStream())
+                using var stream = client.GetStream();
+                var lineBuffer = new StringBuilder();
+                byte[] buffer = new byte[4096];
+
+                while (client.Connected)
                 {
-                    byte[] buffer = new byte[4096];
-                    var lineBuffer = new StringBuilder();
+                    int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                    if (bytesRead == 0) break;
 
-                    while (client.Connected)
-                    {
-                        int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
-                        if (bytesRead == 0) break;
+                    string data = Encoding.ASCII.GetString(buffer, 0, bytesRead);
+                    lineBuffer.Append(data);
 
-                        string data = Encoding.ASCII.GetString(buffer, 0, bytesRead);
-                        lineBuffer.Append(data);
-
-                        string buffered = lineBuffer.ToString();
-                        while (buffered.Contains('\n'))
-                        {
-                            int nlIdx = buffered.IndexOf('\n');
-                            string line = buffered.Substring(0, nlIdx).TrimEnd('\r', '\n', ' ');
-                            buffered = buffered.Substring(nlIdx + 1);
-
-                            if (!string.IsNullOrEmpty(line))
-                                EmulatorLogic.Instance.ParseLine(line);
-                        }
-                        lineBuffer.Clear();
-                        lineBuffer.Append(buffered);
-                    }
+                    ProcessBuffer(lineBuffer);
                 }
             }
             catch (Exception ex)
@@ -91,6 +76,48 @@ public class TcpServer
                 Log?.Invoke("Client Disconnected");
             }
         }
+    }
+
+    private void ProcessBuffer(StringBuilder lineBuffer)
+    {
+        string buf = lineBuffer.ToString();
+
+        while (true)
+        {
+            int qIdx = buf.IndexOf('?');
+            int nIdx = buf.IndexOf('\n');
+            int idx = (qIdx >= 0 && (nIdx < 0 || qIdx < nIdx)) ? qIdx : nIdx;
+            if (idx < 0) break;
+
+            if (idx == nIdx)
+            {
+                string line = buf.Substring(0, idx).TrimEnd('\r', '\n', ' ');
+                buf = buf.Substring(idx + 1);
+
+                if (!string.IsNullOrEmpty(line))
+                {
+                    Log?.Invoke($"RX: {line}");
+                    EmulatorLogic.Instance.ParseLine(line);
+                }
+            }
+            else
+            {
+                string before = buf.Substring(0, idx).TrimEnd('\r', ' ');
+                buf = buf.Substring(idx + 1);
+
+                if (!string.IsNullOrEmpty(before))
+                {
+                    lineBuffer.Clear();
+                    lineBuffer.Append(before);
+                    ProcessBuffer(lineBuffer);
+                    buf = lineBuffer.ToString();
+                }
+                EmulatorLogic.Instance.ParseLine("?");
+            }
+        }
+
+        lineBuffer.Clear();
+        lineBuffer.Append(buf);
     }
 
     private readonly object _sendLock = new();

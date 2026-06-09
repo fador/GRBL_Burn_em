@@ -82,6 +82,7 @@ public class CalibrationStore
         {
             var json = JsonSerializer.Serialize(this, JsonOptions);
             System.IO.File.WriteAllText(path, json);
+            CameraManager.Instance.ReloadCalibration();
         }
         catch (Exception ex)
         {

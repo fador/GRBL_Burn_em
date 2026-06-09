@@ -42,7 +42,7 @@ namespace grbl_burn_em.Data
         public event Action<Bitmap>? FrameReceived;
         public event Action? CameraStopped;
         
-        public CalibrationStore CalibrationStore { get; private set; } = CalibrationStore.Load();
+        public CalibrationStore CalibrationStore { get; private set; } = new();
         public List<CapturedFrame> CapturedFrames { get; private set; } = new List<CapturedFrame>();
         private object _framesLock = new object();
         
@@ -51,7 +51,12 @@ namespace grbl_burn_em.Data
 
         public CameraManager()
         {
-            LoadCalibration();
+            ReloadCalibration();
+        }
+
+        public void ReloadCalibration()
+        {
+            CalibrationStore = CalibrationStore.Load();
         }
 
         public List<string> GetAvailableDevices()
@@ -361,7 +366,7 @@ namespace grbl_burn_em.Data
 
         public void CaptureCurrentFrame(float worldX, float worldY, float width, float height)
         {
-            var tcs = new TaskCompletionSource<Bitmap>();
+            var tcs = new TaskCompletionSource<Bitmap?>();
             Action<Bitmap> handler = null!;
             handler = (bmp) =>
             {
@@ -370,22 +375,18 @@ namespace grbl_burn_em.Data
 
             FrameReceived += handler;
 
-            if (tcs.Task.Wait(1000))
+            bool gotFrame = tcs.Task.Wait(2000);
+            FrameReceived -= handler;
+
+            if (gotFrame && tcs.Task.Result != null)
             {
-                 FrameReceived -= handler;
                  var img = tcs.Task.Result;
-
                  Bitmap frame = UndistortFrame(img);
-
                  lock(_framesLock)
                  {
                      CapturedFrames.Add(new CapturedFrame(frame, worldX, worldY, width, height));
                  }
                  img.Dispose();
-            }
-            else
-            {
-                FrameReceived -= handler;
             }
         }
 

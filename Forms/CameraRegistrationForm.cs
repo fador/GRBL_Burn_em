@@ -52,7 +52,7 @@ public partial class CameraRegistrationForm : Form
         _picPreview = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black };
         mainLayout.Controls.Add(_picPreview, 0, 0);
 
-        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8, Padding = new Padding(10) };
+        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new Padding(10) };
         sidePanel.Controls.Add(new Label { Text = "Board World Position:", Font = new Font("Arial", 10, FontStyle.Bold), AutoSize = true }, 0, 0);
         sidePanel.Controls.Add(new Label { Text = "X (mm):", TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
         _nudBoardX = new NumericUpDown { Minimum = -5000, Maximum = 5000, DecimalPlaces = 2, Dock = DockStyle.Fill };
@@ -79,6 +79,25 @@ public partial class CameraRegistrationForm : Form
         _btnSave = new Button { Text = "Save", Dock = DockStyle.Fill, Enabled = false };
         _btnSave.Click += (s, e) => SaveRegistration();
         sidePanel.Controls.Add(_btnSave, 0, 7);
+
+        var movePanel = new Panel { Dock = DockStyle.Fill };
+        var moveLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
+        moveLayout.Controls.Add(new Label { Text = "Go to:", AutoSize = true });
+        var goX = new NumericUpDown { Minimum = -5000, Maximum = 5000, DecimalPlaces = 1, Width = 55, Value = 0 };
+        var goY = new NumericUpDown { Minimum = -5000, Maximum = 5000, DecimalPlaces = 1, Width = 55, Value = 0 };
+        var btnGo = new Button { Text = "Go", Width = 40, Height = 23 };
+        btnGo.Click += (s, e) =>
+        {
+            if (!SerialInterface.Instance.IsConnected) return;
+            string cmd = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"$J=G90 X{(float)goX.Value:F1} Y{(float)goY.Value:F1} F2000");
+            SerialInterface.Instance.Write(cmd + "\n");
+        };
+        moveLayout.Controls.Add(goX);
+        moveLayout.Controls.Add(goY);
+        moveLayout.Controls.Add(btnGo);
+        movePanel.Controls.Add(moveLayout);
+        sidePanel.Controls.Add(movePanel, 0, 8);
 
         mainLayout.Controls.Add(sidePanel, 1, 0);
         Controls.Add(mainLayout);
@@ -153,30 +172,27 @@ public partial class CameraRegistrationForm : Form
             using var mat = BitmapToMat(bmp);
 
             var engine = new CameraCalibrationEngine(store.BoardConfig);
-            var homography = engine.ComputeWorkAreaHomography(
+            var result = engine.ComputeWorkAreaHomographyWithPose(
                 mat, store.Intrinsics!,
                 (float)_nudBoardX.Value, (float)_nudBoardY.Value, (float)_nudBoardRot.Value);
 
-            if (homography == null)
+            if (result == null || result.Value.homography == null)
             {
                 MessageBox.Show(this, "Registration failed. Ensure board is detected and lens is calibrated.", "Error");
                 return;
             }
 
-            var pose = engine.SolveCameraPose(mat, store.Intrinsics!);
-            if (pose == null) return;
-
             _registration = new StationaryRegistration
             {
-                Homography = homography,
-                Rvec = pose.Value.rvec,
-                Tvec = pose.Value.tvec,
-                ReprojectionError = pose.Value.reprojError
+                Homography = result.Value.homography,
+                Rvec = result.Value.rvec!,
+                Tvec = result.Value.tvec!,
+                ReprojectionError = result.Value.reprojError
             };
 
             _btnSave.Enabled = true;
-            _lblResults.Text = $"Registration OK\nRMSE: {pose.Value.reprojError:F4} px\n" +
-                $"tvec: ({pose.Value.tvec[0]:F1}, {pose.Value.tvec[1]:F1}, {pose.Value.tvec[2]:F1}) mm";
+            _lblResults.Text = $"Registration OK\nRMSE: {result.Value.reprojError:F4} px\n" +
+                $"tvec: ({result.Value.tvec![0]:F1}, {result.Value.tvec![1]:F1}, {result.Value.tvec![2]:F1}) mm";
         }
         catch (Exception ex)
         {

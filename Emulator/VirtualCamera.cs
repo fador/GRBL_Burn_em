@@ -14,8 +14,8 @@ public class VirtualCamera
     public float OffsetY { get; set; } = 0f;
     public float OffsetZ { get; set; } = 100f;
 
-    public float FovWidth { get; set; } = 80f;
-    public float FovHeight { get; set; } = 60f;
+    public float FovWidth { get; set; } = 140f; // mm - covers 120mm board
+    public float FovHeight { get; set; } = 100f; // mm
 
     public int ResX { get; set; } = 1280;
     public int ResY { get; set; } = 960;

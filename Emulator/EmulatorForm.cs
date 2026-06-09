@@ -237,7 +237,7 @@ public partial class EmulatorForm : Form
         var font = new Font("Arial", 9, FontStyle.Bold);
 
         AddLabel(parent, "Camera Settings", font, ref y);
-        (_nudFovW, y) = AddNumeric(parent, "FOV Width (mm):", VirtualCamera.Instance.FovWidth, 1, 500, ref y);
+        (_nudFovW, y) = AddNumeric(parent, "FOV Width (mm):", VirtualCamera.Instance.FovWidth, 10, 500, ref y);
         _nudFovW.ValueChanged += (s, e) => VirtualCamera.Instance.FovWidth = (float)_nudFovW.Value;
 
         (_nudFovH, y) = AddNumeric(parent, "FOV Height (mm):", VirtualCamera.Instance.FovHeight, 1, 500, ref y);
@@ -345,7 +345,7 @@ public partial class EmulatorForm : Form
         {
             float step = (float)stepNud.Value;
             float feed = (float)feedNud.Value;
-            string cmd = $"$J=G91 X{dx * step} Y{dy * step} F{feed}";
+            string cmd = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"$J=G91 X{dx * step} Y{dy * step} F{feed}");
             EmulatorLogic.Instance.ParseLine(cmd);
         };
 
