@@ -79,7 +79,7 @@ public partial class WorkspaceScanForm : Form
     {
         if (!SerialInterface.Instance.IsConnected)
         {
-            MessageBox.Show("Machine not connected.", "Error");
+            MessageBox.Show(this, "Machine not connected.", "Error");
             return;
         }
 
@@ -113,7 +113,7 @@ public partial class WorkspaceScanForm : Form
             if (fovH <= 10) fovH = config.CameraOverlayHeight;
             if (fovW <= 10 || fovH <= 10)
             {
-                MessageBox.Show("Camera FOV not defined. Configure overlay size or calibrate camera first.", "Error");
+                MessageBox.Show(this, "Camera FOV not defined. Configure overlay size or calibrate camera first.", "Error");
                 return;
             }
 

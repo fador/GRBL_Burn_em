@@ -168,7 +168,7 @@ public partial class CharucoBoardSetupForm : Form
                     MarkerLengthMm = (float)_nudMarkerLen.Value
                 };
                 config.SavePreviewImage(sfd.FileName);
-                MessageBox.Show("Board image saved.", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "Board image saved.", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {

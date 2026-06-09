@@ -19,6 +19,7 @@ namespace grbl_burn_em.Controls
         private CheckBox _chkOverlay = null!;
         private TrackBar _trkOpacity = null!;
         private Button _btnCalibrate = null!;
+        private Button _btnConnectEmu = null!;
         
         // Manual Adjustments
         private NumericUpDown _nudX = null!;
@@ -33,21 +34,20 @@ namespace grbl_burn_em.Controls
         {
             InitializeComponent();
             RefreshDevices();
-            
-            // Subscribe to external stop events (e.g. from Main Menu)
+
             CameraManager.Instance.CameraStopped += OnCameraStopped;
-            
-            // Sync State if already running
+            SerialInterface.Instance.ConnectionStatusChanged += _ => UpdateEmulatorButtonState();
+
             if (CameraManager.Instance.IsRunning)
             {
                 _btnStartStop.Text = "Stop Camera";
                 _btnStartStop.BackColor = Color.Salmon;
-                
-                // Subscribe if not already? 
-                // Wait, if we are recreating Control, we need to resubscribe to FrameReceived!
+
                 CameraManager.Instance.FrameReceived -= OnFrameReceived;
                 CameraManager.Instance.FrameReceived += OnFrameReceived;
             }
+
+            UpdateEmulatorButtonState();
         }
 
         private void InitializeComponent()
@@ -147,6 +147,11 @@ namespace grbl_burn_em.Controls
                 UpdateUIState();
             };
             pnlMount.Controls.Add(_chkMounted);
+
+            _btnConnectEmu = new Button { Text = "Connect Emulator", Dock = DockStyle.Top, Height = 35, BackColor = Color.LightYellow };
+            _btnConnectEmu.Click += OnConnectEmulator;
+            layout.Controls.Add(_btnConnectEmu);
+
             layout.Controls.Add(pnlMount);
 
             _btnCalibrate = new Button { Text = "Calibrate Alignment", Dock = DockStyle.Top, Height = 30 };
@@ -157,7 +162,9 @@ namespace grbl_burn_em.Controls
             btnLensCalib.Click += (s, e) =>
             {
                  using var form = new CharucoBoardSetupForm();
-                 form.ShowDialog(FindForm());
+                 var owner = FindForm();
+                 form.TopMost = owner?.TopMost ?? false;
+                 form.ShowDialog(owner);
             };
             layout.Controls.Add(btnLensCalib);
 
@@ -176,30 +183,60 @@ namespace grbl_burn_em.Controls
         {
             var isMounted = _chkMounted.Checked;
             _btnRefresh.Visible = isMounted;
-            // Also might want to hide manual transforms if using calibration?
-            // For now keep them available for manual tweak.
+            UpdateEmulatorButtonState();
+        }
+
+        private void OnConnectEmulator(object? sender, EventArgs e)
+        {
+            if (SerialInterface.Instance.IsConnected)
+            {
+                SerialInterface.Instance.Disconnect();
+                UpdateEmulatorButtonState();
+                return;
+            }
+
+            try
+            {
+                SerialInterface.Instance.Connect("TCP:127.0.0.1:2345", 115200);
+                UpdateEmulatorButtonState();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(FindForm(), $"Failed to connect to emulator: {ex.Message}", "Error");
+            }
+        }
+
+        private void UpdateEmulatorButtonState()
+        {
+            var connected = SerialInterface.Instance.IsConnected;
+            _btnConnectEmu.Text = connected ? "✓ Connected (click to disconnect)" : "Connect Emulator";
+            _btnConnectEmu.BackColor = connected ? Color.LightGreen : Color.LightYellow;
         }
 
         private void OnCalibrateClick(object? sender, EventArgs e)
         {
+             var owner = FindForm();
              var menu = new ContextMenuStrip();
 
              menu.Items.Add("ChArUco Board Setup...", null, (s, args) =>
              {
                  using var form = new CharucoBoardSetupForm();
-                 form.ShowDialog(FindForm());
+                 form.TopMost = owner?.TopMost ?? false;
+                 form.ShowDialog(owner);
              });
 
              menu.Items.Add("Lens Calibration (ChArUco)...", null, (s, args) =>
              {
                  using var form = new LensCalibrationForm();
-                 form.ShowDialog(FindForm());
+                 form.TopMost = owner?.TopMost ?? false;
+                 form.ShowDialog(owner);
              });
 
              menu.Items.Add("Stationary Registration...", null, (s, args) =>
              {
                  using var form = new CameraRegistrationForm();
-                 form.ShowDialog(FindForm());
+                 form.TopMost = owner?.TopMost ?? false;
+                 form.ShowDialog(owner);
              });
 
              menu.Items.Add("-");
@@ -207,7 +244,8 @@ namespace grbl_burn_em.Controls
              menu.Items.Add("Head-Mounted Offset...", null, (s, args) =>
              {
                  using var form = new OffsetCalibrationForm();
-                 if (form.ShowDialog(FindForm()) == DialogResult.OK)
+                 form.TopMost = owner?.TopMost ?? false;
+                 if (form.ShowDialog(owner) == DialogResult.OK)
                  {
                      UpdateUIState();
                      UpdateOverlay();
@@ -219,7 +257,8 @@ namespace grbl_burn_em.Controls
              menu.Items.Add("Workspace Scan...", null, (s, args) =>
              {
                  using var form = new WorkspaceScanForm();
-                 form.ShowDialog(FindForm());
+                 form.TopMost = owner?.TopMost ?? false;
+                 form.ShowDialog(owner);
              });
 
              menu.Show(_btnCalibrate, new Point(0, _btnCalibrate.Height));
@@ -227,8 +266,10 @@ namespace grbl_burn_em.Controls
         
         private void OnRefreshClick(object? sender, EventArgs e)
         {
+             var owner = FindForm();
              using var form = new WorkspaceScanForm();
-             form.ShowDialog(FindForm());
+             form.TopMost = owner?.TopMost ?? false;
+             form.ShowDialog(owner);
         }
 
 

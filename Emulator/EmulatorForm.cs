@@ -33,6 +33,7 @@ public partial class EmulatorForm : Form
     private NumericUpDown _nudBoardY = null!;
     private NumericUpDown _nudBoardSquares = null!;
     private NumericUpDown _nudBoardSize = null!;
+    private ComboBox _cmbBoardDict = null!;
     private Button _btnDrawBoard = null!;
 
     private float _scale = 1.5f;
@@ -44,6 +45,12 @@ public partial class EmulatorForm : Form
 
     private bool _drawCharuco;
     private float _boardX, _boardY;
+    private int _lastBoardBx, _lastBoardBy, _lastBoardPx;
+    private bool _hasBoard;
+
+    private PointF _panOffset;
+    private Point _panStart;
+    private bool _isPanning;
 
     public EmulatorForm()
     {
@@ -150,9 +157,37 @@ public partial class EmulatorForm : Form
         {
             Dock = DockStyle.Fill,
             BackColor = Color.Gray,
-            SizeMode = PictureBoxSizeMode.Zoom
+            SizeMode = PictureBoxSizeMode.Normal,
+            Cursor = Cursors.Cross
         };
         _workArea.Paint += WorkAreaPaint;
+        _workArea.MouseDown += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Middle || (e.Button == MouseButtons.Left && ModifierKeys == Keys.Control))
+            {
+                _isPanning = true;
+                _panStart = e.Location;
+                _workArea.Cursor = Cursors.SizeAll;
+            }
+        };
+        _workArea.MouseMove += (s, e) =>
+        {
+            if (_isPanning)
+            {
+                _panOffset.X += e.X - _panStart.X;
+                _panOffset.Y += e.Y - _panStart.Y;
+                _panStart = e.Location;
+                _workArea.Invalidate();
+            }
+        };
+        _workArea.MouseUp += (s, e) =>
+        {
+            if (_isPanning)
+            {
+                _isPanning = false;
+                _workArea.Cursor = Cursors.Cross;
+            }
+        };
         leftSplit.Panel1.Controls.Add(_workArea);
 
         var logPanel = new Panel { Dock = DockStyle.Fill };
@@ -168,7 +203,12 @@ public partial class EmulatorForm : Form
 
         var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 35, FlowDirection = FlowDirection.LeftToRight };
         var btnClear = new Button { Text = "Clear Bed" };
-        btnClear.Click += (s, e) => { lock (_bedBitmap) _bedGraphics.Clear(Color.Beige); _workArea.Invalidate(); };
+        btnClear.Click += (s, e) => {
+            lock (_bedBitmap) _bedGraphics.Clear(Color.Beige);
+            _hasBoard = false;
+            if (_drawCharuco) DrawCharucoBoard();
+            _workArea.Invalidate();
+        };
         var btnClearLog = new Button { Text = "Clear Log" };
         btnClearLog.Click += (s, e) => _logBox.Clear();
         var btnHome = new Button { Text = "Home (0,0)" };
@@ -177,9 +217,12 @@ public partial class EmulatorForm : Form
             EmulatorLogic.Instance.X = 0; EmulatorLogic.Instance.Y = 0; EmulatorLogic.Instance.Z = 0;
             LogMessage("Manual home to 0,0");
         };
+        var btnResetPan = new Button { Text = "Reset Pan" };
+        btnResetPan.Click += (s, e) => { _panOffset = PointF.Empty; _workArea.Invalidate(); };
         btnPanel.Controls.Add(btnClear);
         btnPanel.Controls.Add(btnClearLog);
         btnPanel.Controls.Add(btnHome);
+        btnPanel.Controls.Add(btnResetPan);
         logPanel.Controls.Add(btnPanel);
         leftSplit.Panel2.Controls.Add(logPanel);
 
@@ -239,9 +282,32 @@ public partial class EmulatorForm : Form
         y += 10;
         AddLabel(parent, "ChArUco Board", font, ref y);
         _chkCharuco = new CheckBox { Text = "Draw ChArUco board on bed", Left = 10, Top = y, Width = 200 };
-        _chkCharuco.CheckedChanged += (s, e) => { _drawCharuco = _chkCharuco.Checked; if (_drawCharuco) DrawCharucoBoard(); _workArea.Invalidate(); };
+        _chkCharuco.CheckedChanged += (s, e) =>
+        {
+            _drawCharuco = _chkCharuco.Checked;
+            if (_drawCharuco)
+                DrawCharucoBoard();
+            else if (_hasBoard)
+            {
+                lock (_bedBitmap)
+                {
+                    using var g = Graphics.FromImage(_bedBitmap);
+                    using var clearBrush = new SolidBrush(Color.Beige);
+                    g.FillRectangle(clearBrush, _lastBoardBx, _lastBoardBy, _lastBoardPx, _lastBoardPx);
+                }
+                _hasBoard = false;
+                _workArea.Invalidate();
+            }
+        };
         parent.Controls.Add(_chkCharuco);
         y += 25;
+
+        _cmbBoardDict = new ComboBox { Left = 10, Top = y, Width = 250, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cmbBoardDict.Items.AddRange(ArUcoDictNames);
+        _cmbBoardDict.SelectedIndex = 0;
+        _cmbBoardDict.SelectedIndexChanged += (s, e) => { if (_drawCharuco) DrawCharucoBoard(); };
+        parent.Controls.Add(_cmbBoardDict);
+        y += 28;
 
         (_nudBoardSquares, y) = AddNumeric(parent, "Squares:", 5, 3, 10, 0, ref y);
         _nudBoardSquares.ValueChanged += (s, e) => { if (_drawCharuco) DrawCharucoBoard(); };
@@ -341,65 +407,111 @@ public partial class EmulatorForm : Form
 
     private void DrawCharucoBoard()
     {
-        lock (_bedBitmap)
+        int squares = (int)_nudBoardSquares.Value;
+        float boardSizeMm = (float)_nudBoardSize.Value;
+        float squareSizeMm = boardSizeMm / squares;
+        float markerSizeMm = squareSizeMm * 0.7f;
+
+        int boardPx = (int)(boardSizeMm * _scale);
+        int bx = (int)(_boardX * _scale);
+        int by = _bedHeight - (int)(_boardY * _scale) - boardPx;
+
+        var dict = GetSelectedDictionary();
+
+        int pxPerSquare = 80;
+        int margin = pxPerSquare;
+        int imgW = squares * pxPerSquare + 2 * margin;
+        int imgH = squares * pxPerSquare + 2 * margin;
+
+        using var board = new CharucoBoard(squares, squares, squareSizeMm, markerSizeMm, dict);
+        using var boardImg = new Mat();
+        ArucoInvoke.GenerateImage(board, new Size(imgW, imgH), boardImg, margin, 1);
+
+        int boardW = boardImg.Width;
+        int boardH = boardImg.Height;
+
+        using var srcBmp = new Bitmap(boardW, boardH, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        var bd = srcBmp.LockBits(new Rectangle(0, 0, boardW, boardH),
+            System.Drawing.Imaging.ImageLockMode.WriteOnly, srcBmp.PixelFormat);
+
+        if (boardImg.NumberOfChannels == 1)
         {
-            int squares = (int)_nudBoardSquares.Value;
-            float boardSizeMm = (float)_nudBoardSize.Value;
-            float squareSizeMm = boardSizeMm / squares;
-            float markerSizeMm = squareSizeMm * 0.7f;
-
-            int boardPx = (int)(boardSizeMm * _scale);
-            int bx = (int)(_boardX * _scale);
-            int by = _bedHeight - (int)(_boardY * _scale) - boardPx;
-
-            using var g = Graphics.FromImage(_bedBitmap);
-            g.CompositingQuality = CompositingQuality.HighQuality;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-
-            var dict = new Dictionary(Dictionary.PredefinedDictionaryName.Dict4X4_50);
-            var board = new CharucoBoard(squares, squares, squareSizeMm, markerSizeMm, dict);
-
-            int pxPerSquare = 80;
-            int margin = pxPerSquare;
-            int imgW = squares * pxPerSquare + 2 * margin;
-            int imgH = squares * pxPerSquare + 2 * margin;
-
-            using var boardImg = new Mat();
-            ArucoInvoke.GenerateImage(board, new Size(imgW, imgH), boardImg, margin, 1);
-
-            int channels = boardImg.NumberOfChannels;
-            int boardW = boardImg.Width;
-            int boardH = boardImg.Height;
-
-            using var srcBmp = new Bitmap(boardW, boardH, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-            var bd = srcBmp.LockBits(new Rectangle(0, 0, boardW, boardH),
-                System.Drawing.Imaging.ImageLockMode.WriteOnly, srcBmp.PixelFormat);
-
-            if (channels == 1)
+            for (int y = 0; y < boardH; y++)
             {
-                for (int y = 0; y < boardH; y++)
+                IntPtr src = boardImg.DataPointer + y * boardImg.Step;
+                IntPtr dst = bd.Scan0 + y * bd.Stride;
+                for (int x = 0; x < boardW; x++)
                 {
-                    IntPtr src = boardImg.DataPointer + y * boardImg.Step;
-                    IntPtr dst = bd.Scan0 + y * bd.Stride;
-                    for (int x = 0; x < boardW; x++)
-                    {
-                        byte v = System.Runtime.InteropServices.Marshal.ReadByte(src + x);
-                        byte inv = (byte)(255 - v);
-                        System.Runtime.InteropServices.Marshal.WriteByte(dst + x * 3, inv);
-                        System.Runtime.InteropServices.Marshal.WriteByte(dst + x * 3 + 1, inv);
-                        System.Runtime.InteropServices.Marshal.WriteByte(dst + x * 3 + 2, inv);
-                    }
+                    byte v = System.Runtime.InteropServices.Marshal.ReadByte(src + x);
+                    System.Runtime.InteropServices.Marshal.WriteByte(dst + x * 3, v);
+                    System.Runtime.InteropServices.Marshal.WriteByte(dst + x * 3 + 1, v);
+                    System.Runtime.InteropServices.Marshal.WriteByte(dst + x * 3 + 2, v);
                 }
             }
-            srcBmp.UnlockBits(bd);
+        }
+        srcBmp.UnlockBits(bd);
 
+        lock (_bedBitmap)
+        {
+            using var g = Graphics.FromImage(_bedBitmap);
+
+            if (_hasBoard)
+            {
+                using var clearBrush = new SolidBrush(Color.Beige);
+                g.FillRectangle(clearBrush, _lastBoardBx, _lastBoardBy, _lastBoardPx, _lastBoardPx);
+            }
+
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.DrawImage(srcBmp, bx, by, boardPx, boardPx);
         }
+
+        _lastBoardBx = bx;
+        _lastBoardBy = by;
+        _lastBoardPx = boardPx;
+        _hasBoard = true;
+
         _workArea.Invalidate();
     }
 
+    private Dictionary GetSelectedDictionary()
+    {
+        string? name = _cmbBoardDict?.SelectedItem?.ToString();
+        return name switch
+        {
+            "DICT_4X4_50" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict4X4_50),
+            "DICT_4X4_100" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict4X4_100),
+            "DICT_4X4_250" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict4X4_250),
+            "DICT_4X4_1000" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict4X4_1000),
+            "DICT_5X5_50" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict5X5_50),
+            "DICT_5X5_100" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict5X5_100),
+            "DICT_5X5_250" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict5X5_250),
+            "DICT_5X5_1000" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict5X5_1000),
+            "DICT_6X6_50" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict6X6_50),
+            "DICT_6X6_100" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict6X6_100),
+            "DICT_6X6_250" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict6X6_250),
+            "DICT_6X6_1000" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict6X6_1000),
+            "DICT_7X7_50" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict7X7_50),
+            "DICT_7X7_100" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict7X7_100),
+            "DICT_7X7_250" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict7X7_250),
+            "DICT_7X7_1000" => new Dictionary(Dictionary.PredefinedDictionaryName.Dict7X7_1000),
+            _ => new Dictionary(Dictionary.PredefinedDictionaryName.Dict4X4_50)
+        };
+    }
+
+    private static readonly string[] ArUcoDictNames =
+    {
+        "DICT_4X4_50", "DICT_4X4_100", "DICT_4X4_250", "DICT_4X4_1000",
+        "DICT_5X5_50", "DICT_5X5_100", "DICT_5X5_250", "DICT_5X5_1000",
+        "DICT_6X6_50", "DICT_6X6_100", "DICT_6X6_250", "DICT_6X6_1000",
+        "DICT_7X7_50", "DICT_7X7_100", "DICT_7X7_250", "DICT_7X7_1000"
+    };
+
     private void WorkAreaPaint(object? sender, PaintEventArgs e)
     {
+        var state = e.Graphics.Save();
+        e.Graphics.TranslateTransform(_panOffset.X, _panOffset.Y);
+
         lock (_bedBitmap)
         {
             e.Graphics.DrawImage(_bedBitmap, 0, 0);
@@ -413,13 +525,15 @@ public partial class EmulatorForm : Form
 
         var logic = EmulatorLogic.Instance;
         e.Graphics.DrawString($"Pos: {logic.X:F1}, {logic.Y:F1}   State: {logic.State}   Laser: {(logic.IsLaserOn ? "ON" : "OFF")}   S={logic.SpindleSpeed:F0}",
-            SystemFonts.DefaultFont, Brushes.Black, 10, 10);
+            SystemFonts.DefaultFont, Brushes.White, 10, 10);
 
         float camX = lx + VirtualCamera.Instance.OffsetX * _scale;
         float camY = ly - VirtualCamera.Instance.OffsetY * _scale;
         float camW = VirtualCamera.Instance.FovWidth * _scale;
         float camH = VirtualCamera.Instance.FovHeight * _scale;
         e.Graphics.DrawRectangle(Pens.Lime, camX - camW / 2, camY - camH / 2, camW, camH);
+
+        e.Graphics.Restore(state);
     }
 
     private void InitializeComponent()

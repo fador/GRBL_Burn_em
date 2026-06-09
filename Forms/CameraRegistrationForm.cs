@@ -139,13 +139,13 @@ public partial class CameraRegistrationForm : Form
             var store = CalibrationStore.Load();
             if (store.BoardConfig == null || !store.HasIntrinsics)
             {
-                MessageBox.Show("Need ChArUco board config and lens calibration first.", "Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Need ChArUco board config and lens calibration first.", "Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             if (_picPreview.Image == null)
             {
-                MessageBox.Show("No camera frame available.", "Error");
+                MessageBox.Show(this, "No camera frame available.", "Error");
                 return;
             }
 
@@ -159,7 +159,7 @@ public partial class CameraRegistrationForm : Form
 
             if (homography == null)
             {
-                MessageBox.Show("Registration failed. Ensure board is detected and lens is calibrated.", "Error");
+                MessageBox.Show(this, "Registration failed. Ensure board is detected and lens is calibrated.", "Error");
                 return;
             }
 
@@ -190,7 +190,7 @@ public partial class CameraRegistrationForm : Form
         var store = CalibrationStore.Load();
         store.Registration = _registration;
         store.Save();
-        MessageBox.Show("Registration saved.", "Saved");
+        MessageBox.Show(this, "Registration saved.", "Saved");
         DialogResult = DialogResult.OK;
         Close();
     }

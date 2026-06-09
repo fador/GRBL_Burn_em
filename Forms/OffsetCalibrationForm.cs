@@ -112,14 +112,14 @@ public partial class OffsetCalibrationForm : Form
         var store = CalibrationStore.Load();
         if (store.BoardConfig == null || !store.HasIntrinsics)
         {
-            MessageBox.Show("Need ChArUco board config and lens calibration first.", "Missing",
+            MessageBox.Show(this, "Need ChArUco board config and lens calibration first.", "Missing",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
         if (_picPreview.Image == null)
         {
-            MessageBox.Show("No camera frame available.", "Error");
+            MessageBox.Show(this, "No camera frame available.", "Error");
             return;
         }
 
@@ -132,7 +132,7 @@ public partial class OffsetCalibrationForm : Form
 
             if (pose == null)
             {
-                MessageBox.Show("ChArUco board not detected in current frame.", "Error");
+                MessageBox.Show(this, "ChArUco board not detected in current frame.", "Error");
                 return;
             }
 
@@ -156,7 +156,7 @@ public partial class OffsetCalibrationForm : Form
     {
         if (!SerialInterface.Instance.IsConnected)
         {
-            MessageBox.Show("Machine not connected.", "Error");
+            MessageBox.Show(this, "Machine not connected.", "Error");
             return;
         }
 
@@ -191,7 +191,7 @@ public partial class OffsetCalibrationForm : Form
             OffsetZ = _offsetZ
         };
         store.Save();
-        MessageBox.Show("Offset saved.", "Saved");
+        MessageBox.Show(this, "Offset saved.", "Saved");
         DialogResult = DialogResult.OK;
         Close();
     }
