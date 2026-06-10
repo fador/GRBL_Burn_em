@@ -45,7 +45,7 @@ public class CameraCalibrationEngine
         ArucoInvoke.DetectMarkers(grey, dict, corners, ids, param, rejected);
         grey.Dispose();
 
-        if (ids.Size < 4)
+        if (ids.Size < 6)
             return result;
 
         using var charucoCorners = new VectorOfPointF();
@@ -53,7 +53,7 @@ public class CameraCalibrationEngine
 
         ArucoInvoke.InterpolateCornersCharuco(corners, ids, image, board, charucoCorners, charucoIds);
 
-        result.Detected = charucoIds.Size >= 4;
+        result.Detected = charucoIds.Size >= 6;
         if (result.Detected)
         {
             result.CharucoCorners = new VectorOfPointF(charucoCorners.ToArray());
@@ -63,6 +63,85 @@ public class CameraCalibrationEngine
         }
 
         return result;
+    }
+
+    public CameraIntrinsics? CalibrateSingleView(Mat image)
+    {
+        if (image.IsEmpty) return null;
+
+        using var board = BoardConfig.CreateBoard();
+        using var dict = BoardConfig.GetDictionary();
+        var param = DetectorParameters.GetDefault();
+
+        using var grey = new Mat();
+        if (image.NumberOfChannels > 1)
+            CvInvoke.CvtColor(image, grey, ColorConversion.Bgr2Gray);
+        else
+            image.CopyTo(grey);
+
+        using var corners = new VectorOfVectorOfPointF();
+        using var ids = new VectorOfInt();
+        using var rejected = new VectorOfVectorOfPointF();
+        ArucoInvoke.DetectMarkers(grey, dict, corners, ids, param, rejected);
+
+        if (ids.Size < 6) return null;
+
+        using var charucoCorners = new VectorOfPointF();
+        using var charucoIds = new VectorOfInt();
+        ArucoInvoke.InterpolateCornersCharuco(corners, ids, grey, board, charucoCorners, charucoIds);
+
+        if (charucoIds.Size < 6) return null;
+
+        int cornerCount = charucoIds.Size;
+        var idsArr = charucoIds.ToArray();
+        var cornersArr = charucoCorners.ToArray();
+
+        var objPts3D = new MCvPoint3D32f[cornerCount];
+        var imgPtsF = new PointF[cornerCount];
+        for (int i = 0; i < cornerCount; i++)
+        {
+            imgPtsF[i] = cornersArr[i];
+            int cid = idsArr[i];
+            int row = cid / BoardConfig.SquaresX;
+            int col = cid % BoardConfig.SquaresX;
+            objPts3D[i] = new MCvPoint3D32f(col * BoardConfig.SquareLengthMm, row * BoardConfig.SquareLengthMm, 0);
+        }
+
+        int imgW = image.Width, imgH = image.Height;
+        using var cameraMatrix = MatFromArray(new double[] {
+            Math.Max(imgW, imgH), 0, imgW / 2.0, 0, Math.Max(imgW, imgH), imgH / 2.0, 0, 0, 1
+        }, 3, 3);
+        using var distCoeffs = MatFromArray(new double[5], 5, 1);
+
+        var allObj = new MCvPoint3D32f[][] { objPts3D };
+        var allImg = new PointF[][] { imgPtsF };
+
+        var flags = CalibType.UseIntrinsicGuess | CalibType.FixAspectRatio
+                  | CalibType.FixPrincipalPoint | CalibType.ZeroTangentDist
+                  | CalibType.FixK3;
+
+        double rmse = CvInvoke.CalibrateCamera(
+            allObj, allImg, new Size(imgW, imgH),
+            cameraMatrix, distCoeffs, flags, new MCvTermCriteria(30, 0.001),
+            out Mat[] rvecs, out Mat[] tvecs);
+
+        double[] cm = new double[9];
+        double[] dc = new double[5];
+        Marshal.Copy(cameraMatrix.DataPointer, cm, 0, 9);
+        Marshal.Copy(distCoeffs.DataPointer, dc, 0, Math.Min(5, distCoeffs.Rows * distCoeffs.Cols));
+
+        if (rmse > 5 || double.IsNaN(rmse) || Math.Abs(dc[0]) > 10 || Math.Abs(dc[1]) > 10)
+            return null;
+
+        return new CameraIntrinsics
+        {
+            CameraMatrix = cm,
+            DistCoeffs = dc,
+            ReprojectionError = rmse,
+            UsedViewCount = 1,
+            CalibratedImageWidth = imgW,
+            CalibratedImageHeight = imgH
+        };
     }
 
     public CameraIntrinsics? CalibrateLens(List<Mat> images)
@@ -90,13 +169,13 @@ public class CameraCalibrationEngine
             using var rejected = new VectorOfVectorOfPointF();
             ArucoInvoke.DetectMarkers(grey, dict, corners, ids, param, rejected);
 
-            if (ids.Size < 4) continue;
+            if (ids.Size < 6) continue;
 
             using var charucoCorners = new VectorOfPointF();
             using var charucoIds = new VectorOfInt();
             ArucoInvoke.InterpolateCornersCharuco(corners, ids, grey, board, charucoCorners, charucoIds);
 
-            if (charucoIds.Size < 4) continue;
+            if (charucoIds.Size < 6) continue;
 
             allCharucoCorners.Push(charucoCorners);
             allCharucoIds.Push(charucoIds);
@@ -109,8 +188,13 @@ public class CameraCalibrationEngine
         int imgH = images[0].Height;
         var imgSize = new System.Drawing.Size(imgW, imgH);
 
-        using var cameraMatrix = new Mat();
-        using var distCoeffs = new Mat();
+        double fInit = Math.Max(imgW, imgH);
+        using var cameraMatrix = MatFromArray(new double[] {
+            fInit, 0, imgW / 2.0,
+            0, fInit, imgH / 2.0,
+            0, 0, 1
+        }, 3, 3);
+        using var distCoeffs = MatFromArray(new double[5], 5, 1);
         var rvecs = new VectorOfMat();
         var tvecs = new VectorOfMat();
 
@@ -118,7 +202,7 @@ public class CameraCalibrationEngine
             allCharucoCorners, allCharucoIds, board, imgSize,
             cameraMatrix, distCoeffs,
             rvecs, tvecs,
-            CalibType.Default,
+            CalibType.Default | CalibType.UseIntrinsicGuess,
             new MCvTermCriteria(30, 0.001));
 
         double[] cm = new double[9];
@@ -160,6 +244,9 @@ public class CameraCalibrationEngine
             objPts[i] = new PointF(col * BoardConfig.SquareLengthMm, row * BoardConfig.SquareLengthMm);
         }
 
+        if (cornerCount < 6)
+            return null;
+
         using var cm = MatFromArray(intrinsics.CameraMatrix, 3, 3);
         using var dc = MatFromArray(intrinsics.DistCoeffs, 5, 1);
         using var rvecMat = new Mat();
@@ -167,7 +254,15 @@ public class CameraCalibrationEngine
         using var vObj = new VectorOfPointF(objPts);
         using var vImg = new VectorOfPointF(imgPts);
 
-        bool ok = CvInvoke.SolvePnP(vObj, vImg, cm, dc, rvecMat, tvecMat, false, SolvePnpMethod.Iterative);
+        bool ok;
+        try
+        {
+            ok = CvInvoke.SolvePnP(vObj, vImg, cm, dc, rvecMat, tvecMat, false, SolvePnpMethod.Iterative);
+        }
+        catch
+        {
+            return null;
+        }
         if (!ok) return null;
 
         double[] rvec = new double[3], tvec = new double[3];
@@ -357,7 +452,7 @@ public class CameraCalibrationEngine
                 CopyMemory(dst, src, (uint)(w * channels));
             }
             bmp.UnlockBits(bd);
-            if (channels == 4)
+            if (channels == 6)
             {
                 var rgb = new Mat();
                 CvInvoke.CvtColor(mat, rgb, ColorConversion.Bgra2Bgr);
@@ -384,7 +479,7 @@ public class CameraCalibrationEngine
             CvInvoke.CvtColor(mat, temp1, ColorConversion.Gray2Bgr);
             display = temp1;
         }
-        else if (mat.NumberOfChannels == 4)
+        else if (mat.NumberOfChannels == 6)
         {
             temp2 = new Mat();
             CvInvoke.CvtColor(mat, temp2, ColorConversion.Bgra2Bgr);

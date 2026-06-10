@@ -252,10 +252,31 @@ public partial class EmulatorForm : Form
         (_nudCamZ, y) = AddNumeric(parent, "Cam Height Z (mm):", VirtualCamera.Instance.OffsetZ, 10, 500, ref y);
         _nudCamZ.ValueChanged += (s, e) => VirtualCamera.Instance.OffsetZ = (float)_nudCamZ.Value;
 
-        (_nudResX, y) = AddNumeric(parent, "Resolution X:", VirtualCamera.Instance.ResX, 160, 3840, ref y);
+        var cmbRes = new ComboBox { Left = 10, Top = y, Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
+        cmbRes.Items.AddRange(new[] { "640×480", "800×600", "1024×768", "1280×720", "1280×960", "1920×1080", "2592×1944", "3840×2160" });
+        cmbRes.SelectedIndex = 3;
+        cmbRes.SelectedIndexChanged += (s, e) =>
+        {
+            string? sel = cmbRes.SelectedItem?.ToString();
+            if (sel != null)
+            {
+                var parts = sel.Split('×');
+                if (parts.Length == 2 && int.TryParse(parts[0], out int w) && int.TryParse(parts[1], out int h))
+                {
+                    VirtualCamera.Instance.ResX = w;
+                    VirtualCamera.Instance.ResY = h;
+                    _nudResX.Value = w;
+                    _nudResY.Value = h;
+                }
+            }
+        };
+        parent.Controls.Add(cmbRes);
+        y += 28;
+
+        (_nudResX, y) = AddNumeric(parent, "Custom W:", VirtualCamera.Instance.ResX, 160, 3840, ref y);
         _nudResX.ValueChanged += (s, e) => VirtualCamera.Instance.ResX = (int)_nudResX.Value;
 
-        (_nudResY, y) = AddNumeric(parent, "Resolution Y:", VirtualCamera.Instance.ResY, 120, 2160, ref y);
+        (_nudResY, y) = AddNumeric(parent, "Custom H:", VirtualCamera.Instance.ResY, 120, 2160, ref y);
         _nudResY.ValueChanged += (s, e) => VirtualCamera.Instance.ResY = (int)_nudResY.Value;
 
         y += 5;

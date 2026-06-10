@@ -163,7 +163,6 @@ namespace grbl_burn_em.Controls
             {
                  using var form = new CharucoBoardSetupForm();
                  var owner = FindForm();
-                 form.TopMost = owner?.TopMost ?? false;
                  form.ShowDialog(owner);
             };
             layout.Controls.Add(btnLensCalib);
@@ -221,21 +220,18 @@ namespace grbl_burn_em.Controls
              menu.Items.Add("ChArUco Board Setup...", null, (s, args) =>
              {
                  using var form = new CharucoBoardSetupForm();
-                 form.TopMost = owner?.TopMost ?? false;
                  form.ShowDialog(owner);
              });
 
              menu.Items.Add("Lens Calibration (ChArUco)...", null, (s, args) =>
              {
                  using var form = new LensCalibrationForm();
-                 form.TopMost = owner?.TopMost ?? false;
                  form.ShowDialog(owner);
              });
 
              menu.Items.Add("Stationary Registration...", null, (s, args) =>
              {
                  using var form = new CameraRegistrationForm();
-                 form.TopMost = owner?.TopMost ?? false;
                  form.ShowDialog(owner);
              });
 
@@ -244,7 +240,6 @@ namespace grbl_burn_em.Controls
              menu.Items.Add("Head-Mounted Offset...", null, (s, args) =>
              {
                  using var form = new OffsetCalibrationForm();
-                 form.TopMost = owner?.TopMost ?? false;
                  if (form.ShowDialog(owner) == DialogResult.OK)
                  {
                      UpdateUIState();
@@ -257,18 +252,65 @@ namespace grbl_burn_em.Controls
              menu.Items.Add("Workspace Scan...", null, (s, args) =>
              {
                  using var form = new WorkspaceScanForm();
-                 form.TopMost = owner?.TopMost ?? false;
                  form.ShowDialog(owner);
+             });
+
+             menu.Items.Add("-");
+
+             menu.Items.Add("Manual Entry...", null, (s, args) =>
+             {
+                 using var form = new ManualCalibrationForm();
+                 form.ShowDialog(owner);
+             });
+
+             menu.Items.Add("Load Calibration from File...", null, (s, args) =>
+             {
+                 LoadCalibrationFromFile(owner);
              });
 
              menu.Show(_btnCalibrate, new Point(0, _btnCalibrate.Height));
         }
         
+        private void LoadCalibrationFromFile(IWin32Window? owner)
+        {
+            using var ofd = new OpenFileDialog
+            {
+                Filter = "JSON Files|*.json|All Files|*.*",
+                Title = "Load Calibration from File"
+            };
+            if (ofd.ShowDialog(owner) == DialogResult.OK)
+            {
+                try
+                {
+                    var store = CalibrationStore.Load(ofd.FileName);
+                    if (store.HasIntrinsics || store.BoardConfig != null || store.HasOffset || store.HasRegistration)
+                    {
+                        store.Save();
+                        MessageBox.Show(owner,
+                            "Calibration loaded.\n" +
+                            (store.BoardConfig != null ? "✓ Board config\n" : "✗ Board config\n") +
+                            (store.HasIntrinsics ? "✓ Lens calibration\n" : "✗ Lens calibration\n") +
+                            (store.HasRegistration ? "✓ Registration\n" : "") +
+                            (store.HasOffset ? "✓ Offset" : ""),
+                            "Loaded", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        MessageBox.Show(owner, "File loaded but no calibration data found.",
+                            "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(owner, $"Failed to load calibration: {ex.Message}", "Error");
+                }
+            }
+        }
+
         private void OnRefreshClick(object? sender, EventArgs e)
         {
              var owner = FindForm();
              using var form = new WorkspaceScanForm();
-             form.TopMost = owner?.TopMost ?? false;
              form.ShowDialog(owner);
         }
 

@@ -105,20 +105,26 @@ public class VirtualCamera
                 {
                     float nx = (x - cx) / norm;
                     float ny = (y - cy) / norm;
-                    float r2 = nx * nx + ny * ny;
-                    float radial = 1f + DistortionK1 * r2 + DistortionK2 * r2 * r2;
-                    float sx = cx + nx * radial * norm;
-                    float sy = cy + ny * radial * norm;
+                    float dx = nx, dy = ny;
 
-                    int ix = (int)sx, iy = (int)sy;
-                    if (ix >= 0 && ix < w - 1 && iy >= 0 && iy < h - 1)
+                    for (int iter = 0; iter < 4; iter++)
                     {
-                        int srcOff = iy * srcStride + ix * 3;
-                        int dstOff = y * dstStride + x * 3;
-                        dstPtr[dstOff] = srcPtr[srcOff];
-                        dstPtr[dstOff + 1] = srcPtr[srcOff + 1];
-                        dstPtr[dstOff + 2] = srcPtr[srcOff + 2];
+                        float r2 = dx * dx + dy * dy;
+                        float radial = 1f + DistortionK1 * r2 + DistortionK2 * r2 * r2;
+                        dx = nx / radial;
+                        dy = ny / radial;
                     }
+
+                    float sx = cx + dx * norm;
+                    float sy = cy + dy * norm;
+
+                    int ix = (int)Math.Clamp(sx, 0, w - 2);
+                    int iy = (int)Math.Clamp(sy, 0, h - 2);
+                    int srcOff = iy * srcStride + ix * 3;
+                    int dstOff = y * dstStride + x * 3;
+                    dstPtr[dstOff] = srcPtr[srcOff];
+                    dstPtr[dstOff + 1] = srcPtr[srcOff + 1];
+                    dstPtr[dstOff + 2] = srcPtr[srcOff + 2];
                 }
             }
         }

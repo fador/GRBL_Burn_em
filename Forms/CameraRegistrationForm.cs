@@ -35,8 +35,20 @@ public partial class CameraRegistrationForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        if (!CameraManager.Instance.IsRunning)
-            _lblStatus.Text = "Camera not running.";
+        UpdateCalibrationStatus();
+    }
+
+    private void UpdateCalibrationStatus()
+    {
+        var store = CameraManager.Instance.CalibrationStore;
+        if (store.BoardConfig == null)
+            _lblStatus.Text = "Board not configured.";
+        else if (!store.HasIntrinsics)
+            _lblStatus.Text = "Lens not calibrated.";
+        else if (store.HasRegistration)
+            _lblStatus.Text = $"Registered (RMSE={store.Registration!.ReprojectionError:F2})";
+        else
+            _lblStatus.Text = "Ready: detect board and compute registration.";
     }
 
     private void InitializeComponent()
@@ -119,7 +131,7 @@ public partial class CameraRegistrationForm : Form
             using var mat = BitmapToMat(frame);
             frame.Dispose();
 
-            var store = CalibrationStore.Load();
+            var store = CameraManager.Instance.CalibrationStore;
             if (store.BoardConfig == null || !store.HasIntrinsics)
             {
                 this.BeginInvoke(() => _lblStatus.Text = "Need board config + lens calibration first");
@@ -155,7 +167,7 @@ public partial class CameraRegistrationForm : Form
     {
         try
         {
-            var store = CalibrationStore.Load();
+            var store = CameraManager.Instance.CalibrationStore;
             if (store.BoardConfig == null || !store.HasIntrinsics)
             {
                 MessageBox.Show(this, "Need ChArUco board config and lens calibration first.", "Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);

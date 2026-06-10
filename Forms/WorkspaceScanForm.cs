@@ -125,9 +125,9 @@ public partial class WorkspaceScanForm : Form
             float offY = store.Offset?.OffsetY ?? config.CameraOverlayY;
 
             var points = new List<PointF>();
-            for (float y = fovH / 2; y < workH + fovH / 2; y += stepY)
-                for (float x = fovW / 2; x < workW + fovW / 2; x += stepX)
-                    points.Add(new PointF(x + offX, y + offY));
+            for (float y = offY; y <= workH + offY; y += stepY)
+                for (float x = offX; x <= workW + offX; x += stepX)
+                    points.Add(new PointF(x, y));
 
             CameraManager.Instance.CapturedFrames.Clear();
             int total = points.Count;

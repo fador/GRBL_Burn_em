@@ -6,9 +6,9 @@
  */
 using System;
 using System.Drawing;
+using System.Globalization;
 using System.Windows.Forms;
 using grbl_burn_em.Data;
-using grbl_burn_em.Tools;
 
 namespace grbl_burn_em.Forms;
 
@@ -22,7 +22,14 @@ public partial class OffsetCalibrationForm : Form
     private Button _btnManual = null!;
     private Button _btnSave = null!;
 
+    private Button _btnPulse = null!;
+    private Button _btnJogXMinus = null!, _btnJogXPlus = null!;
+    private Button _btnJogYMinus = null!, _btnJogYPlus = null!;
+    private NumericUpDown _nudJogStep = null!;
+    private Button _btnLockOffset = null!;
+
     private float _offsetX, _offsetY, _offsetZ;
+    private PointF _manualStartPos;
 
     public OffsetCalibrationForm()
     {
@@ -32,48 +39,102 @@ public partial class OffsetCalibrationForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        if (!CameraManager.Instance.IsRunning)
-            _lblInfo.Text = "Camera not running. Start camera first.";
+        UpdateCalibrationStatus();
+    }
+
+    private void UpdateCalibrationStatus()
+    {
+        var store = CameraManager.Instance.CalibrationStore;
+        var parts = new System.Text.StringBuilder();
+
+        if (store.BoardConfig == null)
+            parts.Append("Board not configured. ");
+        else
+            parts.Append($"Board: {store.BoardConfig.DictionaryName} {store.BoardConfig.SquaresX}x{store.BoardConfig.SquaresY}. ");
+
+        if (!store.HasIntrinsics)
+            parts.Append("Lens not calibrated. ");
+        else
+            parts.Append($"Lens calibrated (RMSE={store.Intrinsics!.ReprojectionError:F2}). ");
+
+        if (store.HasOffset)
+            parts.Append($"Offset: ({store.Offset!.OffsetX:F0},{store.Offset.OffsetY:F0},{store.Offset.OffsetZ:F0})mm. ");
+
+        _lblInfo.Text = parts.ToString().Trim();
+        _btnSave.Enabled = _offsetX != 0 || _offsetY != 0 || _offsetZ != 0;
     }
 
     private void InitializeComponent()
     {
         Text = "Head-Mounted Camera Offset Calibration";
-        Size = new Size(700, 550);
+        Size = new Size(780, 620);
         StartPosition = FormStartPosition.CenterParent;
 
         var mainLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
-        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
 
         _picPreview = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black };
         mainLayout.Controls.Add(_picPreview, 0, 0);
 
-        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8, Padding = new Padding(10) };
+        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 12, Padding = new Padding(8) };
 
-        _lblInfo = new Label { Text = "Select calibration method:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
+        _lblInfo = new Label { Text = "Checking calibration status...", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = true };
         sidePanel.Controls.Add(_lblInfo, 0, 0);
 
-        _btnChArUco = new Button { Text = "Auto (ChArUco Board)", Dock = DockStyle.Fill, Height = 45 };
-        _btnChArUco.Click += (s, e) => AutoCalibrate();
+        _btnChArUco = new Button { Text = "Auto (ChArUco Board)", Dock = DockStyle.Fill, Height = 40 };
+        _btnChArUco.Click += async (s, e) => await AutoCalibrate();
         sidePanel.Controls.Add(_btnChArUco, 0, 1);
 
-        var sep = new Label { Text = "--- or ---", TextAlign = ContentAlignment.MiddleCenter, Height = 30 };
+        var sep = new Label { Text = "--- or ---", TextAlign = ContentAlignment.MiddleCenter, Height = 22 };
         sidePanel.Controls.Add(sep, 0, 2);
 
-        _btnManual = new Button { Text = "Manual (Burn Mark)", Dock = DockStyle.Fill, Height = 45 };
-        _btnManual.Click += (s, e) => ManualCalibrate();
-        sidePanel.Controls.Add(_btnManual, 0, 3);
+        // Manual controls
+        var manualPanel = new Panel { Dock = DockStyle.Fill, Height = 160 };
+        var manualLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 4, Padding = new Padding(0) };
 
-        _lblOffset = new Label { Text = "Offset: -- mm", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Height = 40 };
-        sidePanel.Controls.Add(_lblOffset, 0, 4);
+        _btnPulse = new Button { Text = "Pulse Laser", Dock = DockStyle.Fill, BackColor = Color.OrangeRed, ForeColor = Color.White, Font = new Font("Arial", 9, FontStyle.Bold) };
+        _btnPulse.Click += (s, e) => PulseLaser();
+        manualLayout.SetColumnSpan(_btnPulse, 3);
+        manualLayout.Controls.Add(_btnPulse, 0, 0);
 
-        _lblHeight = new Label { Text = "Height: -- mm", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Height = 40 };
-        sidePanel.Controls.Add(_lblHeight, 0, 5);
+        _btnJogYPlus = new Button { Text = "Y+", Dock = DockStyle.Fill };
+        _btnJogYPlus.Click += (s, e) => Jog(0, 1);
+        _btnJogYMinus = new Button { Text = "Y-", Dock = DockStyle.Fill };
+        _btnJogYMinus.Click += (s, e) => Jog(0, -1);
+        _btnJogXMinus = new Button { Text = "X-", Dock = DockStyle.Fill };
+        _btnJogXMinus.Click += (s, e) => Jog(-1, 0);
+        _btnJogXPlus = new Button { Text = "X+", Dock = DockStyle.Fill };
+        _btnJogXPlus.Click += (s, e) => Jog(1, 0);
 
-        _btnSave = new Button { Text = "Save Offset", Dock = DockStyle.Fill, Height = 40, Enabled = false };
+        manualLayout.Controls.Add(_btnJogYPlus, 1, 1);
+        manualLayout.Controls.Add(_btnJogXMinus, 0, 2);
+        manualLayout.Controls.Add(_btnJogXPlus, 2, 2);
+        manualLayout.Controls.Add(_btnJogYMinus, 1, 2);
+
+        var stepPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
+        stepPanel.Controls.Add(new Label { Text = "Step:", AutoSize = true });
+        _nudJogStep = new NumericUpDown { Minimum = 0.1m, Maximum = 100, Value = 1, DecimalPlaces = 1, Width = 55 };
+        stepPanel.Controls.Add(_nudJogStep);
+        manualLayout.SetColumnSpan(stepPanel, 3);
+        manualLayout.Controls.Add(stepPanel, 0, 3);
+
+        manualPanel.Controls.Add(manualLayout);
+        sidePanel.Controls.Add(manualPanel, 0, 3);
+
+        _btnLockOffset = new Button { Text = "Lock Current Offset", Dock = DockStyle.Fill, Height = 35, Enabled = false };
+        _btnLockOffset.Click += (s, e) => LockManualOffset();
+        sidePanel.Controls.Add(_btnLockOffset, 0, 4);
+
+        _lblOffset = new Label { Text = "Offset: -- mm", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Height = 25 };
+        sidePanel.Controls.Add(_lblOffset, 0, 5);
+
+        _lblHeight = new Label { Text = "Height: -- mm", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Height = 25 };
+        sidePanel.Controls.Add(_lblHeight, 0, 6);
+
+        _btnSave = new Button { Text = "Save Offset", Dock = DockStyle.Fill, Height = 35, Enabled = false };
         _btnSave.Click += (s, e) => SaveOffset();
-        sidePanel.Controls.Add(_btnSave, 0, 6);
+        sidePanel.Controls.Add(_btnSave, 0, 7);
 
         var movePanel = new Panel { Dock = DockStyle.Fill };
         var moveLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
@@ -84,7 +145,7 @@ public partial class OffsetCalibrationForm : Form
         btnGo.Click += (s, e) =>
         {
             if (!SerialInterface.Instance.IsConnected) return;
-            string cmd = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            string cmd = string.Create(CultureInfo.InvariantCulture,
                 $"$J=G90 X{(float)goX.Value:F1} Y{(float)goY.Value:F1} F2000");
             SerialInterface.Instance.Write(cmd + "\n");
         };
@@ -92,7 +153,14 @@ public partial class OffsetCalibrationForm : Form
         moveLayout.Controls.Add(goY);
         moveLayout.Controls.Add(btnGo);
         movePanel.Controls.Add(moveLayout);
-        sidePanel.Controls.Add(movePanel, 0, 7);
+        sidePanel.Controls.Add(movePanel, 0, 8);
+
+        sidePanel.Controls.Add(new Label { Text = "", AutoSize = true }, 0, 9);
+        sidePanel.Controls.Add(new Label { Text = "Manual: place material under laser, pulse to burn mark, jog until camera crosshair aligns with mark, then Lock.", Font = new Font("Arial", 7), ForeColor = Color.Gray, AutoSize = true }, 0, 10);
+
+        var btnRefresh = new Button { Text = "Refresh Status", Dock = DockStyle.Fill, Height = 25 };
+        btnRefresh.Click += (s, e) => UpdateCalibrationStatus();
+        sidePanel.Controls.Add(btnRefresh, 0, 11);
 
         mainLayout.Controls.Add(sidePanel, 1, 0);
         Controls.Add(mainLayout);
@@ -126,36 +194,65 @@ public partial class OffsetCalibrationForm : Form
         }
     }
 
-    private void AutoCalibrate()
+    private async System.Threading.Tasks.Task AutoCalibrate()
     {
-        var store = CalibrationStore.Load();
-        if (store.BoardConfig == null || !store.HasIntrinsics)
+        if (_picPreview.Image == null)
         {
-            MessageBox.Show(this, "Need ChArUco board config and lens calibration first.", "Missing",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "No camera frame available yet. Wait for the camera preview to appear.", "Error");
             return;
         }
 
-        if (_picPreview.Image == null)
+        var store = CameraManager.Instance.CalibrationStore;
+
+        var missing = new System.Text.StringBuilder();
+        if (store.BoardConfig == null) missing.Append("ChArUco board not configured. ");
+        if (!store.HasIntrinsics) missing.Append("Lens not calibrated. ");
+
+        if (missing.Length > 0)
         {
-            MessageBox.Show(this, "No camera frame available.", "Error");
+            MessageBox.Show(this,
+                $"Cannot auto-calibrate:\n{missing}\n\nSet up the ChArUco board and calibrate the lens first.",
+                "Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
+
+        _btnChArUco.Enabled = false;
+        _lblInfo.Text = "Computing...";
 
         try
         {
             using var bmp = new Bitmap(_picPreview.Image);
-            using var mat = CameraCalibrationEngine.BitmapToMat(bmp);
-            var engine = new CameraCalibrationEngine(store.BoardConfig);
-            var pose = engine.SolveCameraPose(mat, store.Intrinsics!);
+            var boardConfig = store.BoardConfig!;
+            var intrinsics = store.Intrinsics!;
 
-            if (pose == null)
+            var result = await System.Threading.Tasks.Task.Run(() =>
             {
-                MessageBox.Show(this, "ChArUco board not detected in current frame.", "Error");
+                using var mat = CameraCalibrationEngine.BitmapToMat(bmp);
+                var engine = new CameraCalibrationEngine(boardConfig);
+                var pose = engine.SolveCameraPose(mat, intrinsics);
+                if (pose == null)
+                {
+                    var detection = engine.DetectBoard(mat);
+                    return (null, detection);
+                }
+                return (pose, (CameraCalibrationEngine.DetectionResult?)null);
+            });
+
+            if (result.Item1 == null)
+            {
+                var detection = result.Item2!;
+                if (detection.MarkerIds == null || detection.MarkerIds.Size < 6)
+                    MessageBox.Show(this,
+                        $"Not enough ArUco markers found ({detection.MarkerIds?.Size ?? 0}/6). Move the camera so more of the board is visible.",
+                        "Detection Failed");
+                else
+                    MessageBox.Show(this,
+                        $"Board partially detected ({detection.MarkerIds.Size} markers, {detection.CharucoIds?.Size ?? 0} corners) but pose estimation failed.\nTry repositioning the board or camera.",
+                        "Pose Failed");
                 return;
             }
 
-            var (rvec, tvec, reproj) = pose.Value;
+            var (rvec, tvec, reproj) = result.Item1.Value;
 
             float boardWx = 0f, boardWy = 0f;
             float machineX = 0f, machineY = 0f;
@@ -171,16 +268,25 @@ public partial class OffsetCalibrationForm : Form
 
             _lblOffset.Text = $"Offset: ({_offsetX:F1}, {_offsetY:F1}) mm";
             _lblHeight.Text = $"Height: {_offsetZ:F1} mm";
-            _lblInfo.Text = $"Detected! RMSE: {reproj:F3} px\nBoard at ({boardWx:F0},{boardWy:F0})";
+            _lblInfo.Text = $"Detected! RMSE: {reproj:F3} px  Board at ({boardWx:F0},{boardWy:F0})";
             _btnSave.Enabled = true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Auto calibration error: {ex.Message}", "Error");
+            if (!IsDisposed)
+                MessageBox.Show(this, $"Auto calibration error: {ex.Message}", "Error");
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                _btnChArUco.Enabled = true;
+                if (_lblInfo.Text == "Computing...") _lblInfo.Text = "Ready";
+            }
         }
     }
 
-    private void ManualCalibrate()
+    private void PulseLaser()
     {
         if (!SerialInterface.Instance.IsConnected)
         {
@@ -188,25 +294,47 @@ public partial class OffsetCalibrationForm : Form
             return;
         }
 
-        var startPos = SerialInterface.Instance.MachinePosition;
+        _manualStartPos = SerialInterface.Instance.MachinePosition;
+        _btnLockOffset.Enabled = true;
+        UpdateManualOffset();
 
-        var result = MessageBox.Show(
-            "Manual Offset Calibration:\n\n" +
-            "1. Place material on the work area\n" +
-            "2. Click 'Pulse Laser' to create a burn mark at current position\n" +
-            "3. Use jog controls to align camera crosshair with the burn mark\n" +
-            "4. Click OK when aligned",
-            "Manual Offset", MessageBoxButtons.OKCancel);
+        var pos = _manualStartPos;
+        string cmd = string.Create(CultureInfo.InvariantCulture,
+            $"G0 X{pos.X:F2} Y{pos.Y:F2}\nM3 S500\nG4 P0.3\nM5");
+        SerialInterface.Instance.Write(cmd + "\n");
 
-        if (result != DialogResult.OK) return;
+        _lblInfo.Text = $"Pulsed at ({pos.X:F1},{pos.Y:F1}). Jog until camera crosshair aligns with burn mark.";
+    }
 
+    private void Jog(float dx, float dy)
+    {
+        if (!SerialInterface.Instance.IsConnected) return;
+        float step = (float)_nudJogStep.Value;
+        string cmd = string.Create(CultureInfo.InvariantCulture,
+            $"$J=G91 X{dx * step:F1} Y{dy * step:F1} F1000");
+        SerialInterface.Instance.Write(cmd + "\n");
+        Task.Run(async () =>
+        {
+            await Task.Delay(500);
+            this.BeginInvoke(new Action(UpdateManualOffset));
+        });
+    }
+
+    private void UpdateManualOffset()
+    {
+        if (!SerialInterface.Instance.IsConnected) return;
         var currentPos = SerialInterface.Instance.MachinePosition;
-        _offsetX = startPos.X - currentPos.X;
-        _offsetY = startPos.Y - currentPos.Y;
-
+        _offsetX = _manualStartPos.X - currentPos.X;
+        _offsetY = _manualStartPos.Y - currentPos.Y;
         _lblOffset.Text = $"Offset: ({_offsetX:F1}, {_offsetY:F1}) mm";
-        _lblHeight.Text = "Height: manually entered";
+    }
+
+    private void LockManualOffset()
+    {
+        UpdateManualOffset();
         _btnSave.Enabled = true;
+        _btnLockOffset.Enabled = false;
+        _lblInfo.Text = $"Offset locked: ({_offsetX:F1}, {_offsetY:F1}) mm. Enter height manually if needed, then Save.";
     }
 
     private void SaveOffset()

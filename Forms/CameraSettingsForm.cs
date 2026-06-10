@@ -24,7 +24,6 @@ namespace grbl_burn_em.Forms
             this.Text = "Camera Settings";
             this.Size = new System.Drawing.Size(460, 700);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.TopMost = true; // Keep on top of workbench
 
             _cameraControl = new CameraControl
             {

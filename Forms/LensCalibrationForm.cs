@@ -39,6 +39,8 @@ public partial class LensCalibrationForm : Form
     private CancellationTokenSource? _captureCts;
 
     private readonly List<Mat> _capturedFrames = new();
+    private Mat? _rawFrame;
+    private readonly object _rawFrameLock = new();
     private bool _calibrated;
     private CameraIntrinsics? _result;
 
@@ -67,13 +69,13 @@ public partial class LensCalibrationForm : Form
         _picPreview = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black };
         mainLayout.Controls.Add(_picPreview, 0, 0);
 
-        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new Padding(10) };
+        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new Padding(10), AutoScroll = true };
         sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
         sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
         sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 165));
         sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
+        sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 55));
         sidePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         sidePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
@@ -118,16 +120,19 @@ public partial class LensCalibrationForm : Form
         _btnAutoCapture.Click += async (s, e) => await AutoCapture();
         sidePanel.Controls.Add(_btnAutoCapture, 0, 4);
 
-        var pnlBtns = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
-        _btnCalibrate = new Button { Text = "Calibrate", Width = 100, Height = 30, Enabled = false };
+        var pnlBtns = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true };
+        _btnCalibrate = new Button { Text = "Calibrate", Width = 80, Height = 30, Enabled = false };
         _btnCalibrate.Click += (s, e) => RunCalibration();
-        _btnSave = new Button { Text = "Save", Width = 80, Height = 30, Enabled = false };
+        var btnSingleCal = new Button { Text = "Quick Calib", Width = 85, Height = 30, BackColor = Color.LightBlue };
+        btnSingleCal.Click += (s, e) => RunSingleViewCalibration();
+        _btnSave = new Button { Text = "Save", Width = 60, Height = 30, Enabled = false };
         _btnSave.Click += (s, e) => SaveCalibration();
-        _btnCancelScan = new Button { Text = "Stop", Width = 80, Height = 30, Enabled = false };
+        _btnCancelScan = new Button { Text = "Stop", Width = 60, Height = 30, Enabled = false };
         _btnCancelScan.Click += (s, e) => { _captureCancelled = true; _captureCts?.Cancel(); };
-        var btnClose = new Button { Text = "Close", Width = 80, Height = 30 };
+        var btnClose = new Button { Text = "Close", Width = 60, Height = 30 };
         btnClose.Click += (s, e) => { _captureCancelled = true; _captureCts?.Cancel(); Close(); };
         pnlBtns.Controls.Add(_btnCalibrate);
+        pnlBtns.Controls.Add(btnSingleCal);
         pnlBtns.Controls.Add(_btnSave);
         pnlBtns.Controls.Add(_btnCancelScan);
         pnlBtns.Controls.Add(btnClose);
@@ -181,7 +186,15 @@ public partial class LensCalibrationForm : Form
             using var mat = BitmapToMat(frame);
             frame.Dispose();
 
-            var store = CalibrationStore.Load();
+            // Store raw frame for capture
+            lock (_rawFrameLock)
+            {
+                var old = _rawFrame;
+                _rawFrame = mat.Clone();
+                old?.Dispose();
+            }
+
+            var store = CameraManager.Instance.CalibrationStore;
             if (store.BoardConfig == null) return;
 
             var engine = new CameraCalibrationEngine(store.BoardConfig);
@@ -202,9 +215,11 @@ public partial class LensCalibrationForm : Form
                     old?.Dispose();
 
                     if (detection.Detected)
-                        _lblStatus.Text = $"Board DETECTED: {detection.CharucoIds?.Size ?? 0} corners, {detection.MarkerIds?.Size ?? 0} markers (need 4+)";
+                        _lblStatus.Text = $"Board DETECTED: {detection.CharucoIds?.Size ?? 0} corners, {detection.MarkerIds?.Size ?? 0} markers (need 6+)";
+                    else if (detection.MarkerIds?.Size >= 6)
+                        _lblStatus.Text = $"{detection.MarkerIds.Size} markers found but only {detection.CharucoIds?.Size ?? 0} ChArUco corners (need 6+). Check board config.";
                     else if (detection.MarkerIds?.Size > 0)
-                        _lblStatus.Text = $"{detection.MarkerIds.Size} markers found (need 4+) - board not detected";
+                        _lblStatus.Text = $"{detection.MarkerIds.Size} markers found (need 6+) - move board into view";
                     else
                         _lblStatus.Text = "Board not detected";
                 }
@@ -223,68 +238,86 @@ public partial class LensCalibrationForm : Form
 
     private void CaptureCurrentView()
     {
-        if (_picPreview.Image == null) return;
+        Mat? rawCopy = null;
+        lock (_rawFrameLock)
+        {
+            if (_rawFrame != null) rawCopy = _rawFrame.Clone();
+        }
+        if (rawCopy == null) return;
 
         try
         {
-            var store = CalibrationStore.Load();
-            if (store.BoardConfig == null)
-            {
-                MessageBox.Show(this, "Please set up ChArUco board first.", "Warning");
-                return;
-            }
+            var store = CameraManager.Instance.CalibrationStore;
+            if (store.BoardConfig == null) { rawCopy.Dispose(); return; }
 
             var engine = new CameraCalibrationEngine(store.BoardConfig);
-            using var bmp = new Bitmap(_picPreview.Image);
-            using var mat = BitmapToMat(bmp);
-            var detection = engine.DetectBoard(mat);
+            var detection = engine.DetectBoard(rawCopy);
 
             if (!detection.Detected)
             {
-                MessageBox.Show(this, "ChArUco board not detected in this frame.\nEnsure the board is visible in the camera view.", "Warning");
+                rawCopy.Dispose();
+                MessageBox.Show(this, "ChArUco board not detected.", "Warning");
                 return;
             }
 
-            _capturedFrames.Add(mat.Clone());
+            _capturedFrames.Add(rawCopy);
             _lblCount.Text = $"{_capturedFrames.Count} views (need 6+)";
             _btnCalibrate.Enabled = _capturedFrames.Count >= 6;
         }
         catch (Exception ex)
         {
+            rawCopy?.Dispose();
             MessageBox.Show(this, $"Capture failed: {ex.Message}", "Error");
         }
     }
 
     private bool TryCaptureBoard()
     {
-        if (_picPreview.Image == null) return false;
+        Mat? rawCopy = null;
+        lock (_rawFrameLock)
+        {
+            if (_rawFrame != null)
+                rawCopy = _rawFrame.Clone();
+        }
+        if (rawCopy == null) return false;
 
         try
         {
-            var store = CalibrationStore.Load();
-            if (store.BoardConfig == null) return false;
+            var store = CameraManager.Instance.CalibrationStore;
+            if (store.BoardConfig == null) { rawCopy.Dispose(); return false; }
 
             var engine = new CameraCalibrationEngine(store.BoardConfig);
-            using var bmp = new Bitmap(_picPreview.Image);
-            using var mat = BitmapToMat(bmp);
-            var detection = engine.DetectBoard(mat);
+            var detection = engine.DetectBoard(rawCopy);
 
             if (detection.Detected)
             {
-                _capturedFrames.Add(mat.Clone());
+                _capturedFrames.Add(rawCopy);
                 return true;
             }
+
+            if (detection.MarkerIds is { Size: > 0 })
+                System.Diagnostics.Debug.WriteLine(
+                    $"TryCapture: {detection.MarkerIds.Size} markers, " +
+                    $"{detection.CharucoIds?.Size ?? 0} corners, " +
+                    $"Detected={detection.Detected}");
+            rawCopy.Dispose();
             return false;
         }
-        catch
+        catch (Exception ex)
         {
+            rawCopy.Dispose();
+            this.BeginInvoke(new Action(() =>
+            {
+                if (!IsDisposed)
+                    _lblStatus.Text = $"Capture error: {ex.Message}";
+            }));
             return false;
         }
     }
 
     private async Task AutoCapture()
     {
-        var store = CalibrationStore.Load();
+        var store = CameraManager.Instance.CalibrationStore;
         if (store.BoardConfig == null)
         {
             if (!IsDisposed) MessageBox.Show(this, "Please set up ChArUco board first.", "Warning");
@@ -394,11 +427,64 @@ public partial class LensCalibrationForm : Form
         }
     }
 
+    private void RunSingleViewCalibration()
+    {
+        if (_picPreview.Image == null) return;
+
+        try
+        {
+            var store = CameraManager.Instance.CalibrationStore;
+            if (store.BoardConfig == null)
+            {
+                MessageBox.Show(this, "Please set up ChArUco board first.", "Warning");
+                return;
+            }
+
+            var engine = new CameraCalibrationEngine(store.BoardConfig);
+
+            Mat? rawCopy = null;
+            lock (_rawFrameLock)
+            {
+                if (_rawFrame != null) rawCopy = _rawFrame.Clone();
+            }
+            if (rawCopy == null) return;
+
+            using var mat = rawCopy;
+            var result = engine.CalibrateSingleView(mat);
+
+            if (result == null)
+            {
+                var detection = engine.DetectBoard(mat);
+                string detail = detection.Detected
+                    ? $"Board detected ({detection.CharucoIds!.Size} corners, {detection.MarkerIds!.Size} markers) but calibration optimization diverged.\n\nSingle-view calibration is unstable with strong lens distortion.\nUse the scan grid (Auto Capture) instead."
+                    : detection.MarkerIds is { Size: > 0 }
+                        ? $"Only {detection.CharucoIds?.Size ?? 0} ChArUco corners from {detection.MarkerIds.Size} markers (need 6+).\nCheck board config (dictionary, square size, marker size) matches the physical board."
+                        : "Board not detected. Position the ChArUco board in the camera view.";
+                MessageBox.Show(this, detail, "Quick Calib Failed");
+                return;
+            }
+
+            _result = result;
+            _calibrated = true;
+            _btnSave.Enabled = true;
+
+            _lblResults.Text = $"Single-view calibrated!\nRMSE: {result.ReprojectionError:F4} px\n" +
+                $"fx=fy={result.CameraMatrix[0]:F1}\n" +
+                $"cx={result.CameraMatrix[2]:F1} cy={result.CameraMatrix[5]:F1}\n" +
+                $"k1={result.DistCoeffs[0]:F4} k2={result.DistCoeffs[1]:F4}";
+            _lblCount.Text = "1 view (single-image mode)";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Single-view error: {ex.Message}", "Error");
+        }
+    }
+
     private void RunCalibration()
     {
         try
         {
-            var store = CalibrationStore.Load();
+            var store = CameraManager.Instance.CalibrationStore;
             if (store.BoardConfig == null) return;
 
             var engine = new CameraCalibrationEngine(store.BoardConfig);
@@ -429,7 +515,7 @@ public partial class LensCalibrationForm : Form
     {
         if (_result == null) return;
 
-        var store = CalibrationStore.Load();
+        var store = CameraManager.Instance.CalibrationStore;
         store.Intrinsics = _result;
         store.Save();
         MessageBox.Show(this, "Lens calibration saved.", "Saved");
