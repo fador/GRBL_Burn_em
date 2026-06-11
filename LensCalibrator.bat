@@ -1,0 +1,3 @@
+@echo off
+echo Starting Standalone Lens Calibrator...
+start "" "bin\Debug\net9.0-windows10.0.19041.0\grbl_burn_em.exe" --calibrator
