@@ -323,8 +323,8 @@ public class CameraCalibrationEngine
         Tw[3] = sinR; Tw[4] = cosR;  Tw[5] = (double)boardWorldY;
         Tw[6] = 0;    Tw[7] = 0;     Tw[8] = 1;
 
-        var HworldToImage = MultiplyMat(H, Tw, 3);
-        return InvertMat3x3(HworldToImage);
+        var invH = InvertMat3x3(H);
+        return MultiplyMat(Tw, invH, 3);
     }
 
     public void UndistortImage(Mat src, Mat dst, CameraIntrinsics intrinsics)
@@ -452,7 +452,7 @@ public class CameraCalibrationEngine
                 CopyMemory(dst, src, (uint)(w * channels));
             }
             bmp.UnlockBits(bd);
-            if (channels == 6)
+            if (channels == 4)
             {
                 var rgb = new Mat();
                 CvInvoke.CvtColor(mat, rgb, ColorConversion.Bgra2Bgr);

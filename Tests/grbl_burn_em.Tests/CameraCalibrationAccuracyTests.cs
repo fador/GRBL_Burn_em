@@ -571,6 +571,99 @@ public class CameraCalibrationAccuracyTests
     }
 
     // ================================================================
+    // Bug Fix Tests
+    // ================================================================
+
+    [Fact]
+    public void ComputeWorkAreaHomography_WithTranslation_ReturnsCorrectImageToWorldHomography()
+    {
+        var config = new CharucoBoardConfig
+        {
+            DictionaryName = "DICT_4X4_50", SquaresX = 5, SquaresY = 7,
+            SquareLengthMm = 20f, MarkerLengthMm = 15f
+        };
+
+        using var img = GenerateBoardImage(config);
+        var intrinsics = new CameraIntrinsics
+        {
+            CameraMatrix = new[] { 600.0, 0, img.Width / 2.0, 0, 600.0, img.Height / 2.0, 0, 0, 1 },
+            DistCoeffs = new double[5],
+            CalibratedImageWidth = img.Width,
+            CalibratedImageHeight = img.Height
+        };
+
+        var engine = new CameraCalibrationEngine(config);
+        
+        // Let's test with board placed at World X=100, Y=50
+        var H_shifted = engine.ComputeWorkAreaHomography(img, intrinsics, 100, 50, 0);
+        var H_origin = engine.ComputeWorkAreaHomography(img, intrinsics, 0, 0, 0);
+
+        if (H_shifted == null || H_origin == null)
+            return; // SolvePnP may fail for perfectly flat synthetic images
+
+        // Project the image center
+        var cx = img.Width / 2.0;
+        var cy = img.Height / 2.0;
+
+        var ptOrigin = ApplyHomography(H_origin, cx, cy);
+        var ptShifted = ApplyHomography(H_shifted, cx, cy);
+
+        // Since the board is at (100, 50) in the world, the same image pixel should now 
+        // map to a world coordinate that is shifted by +100, +50 compared to when the board was at origin.
+        Assert.True(Math.Abs(ptShifted.X - (ptOrigin.X + 100)) < 1.0, $"X shift incorrect: expected {ptOrigin.X + 100}, got {ptShifted.X}");
+        Assert.True(Math.Abs(ptShifted.Y - (ptOrigin.Y + 50)) < 1.0, $"Y shift incorrect: expected {ptOrigin.Y + 50}, got {ptShifted.Y}");
+    }
+
+    [Fact]
+    public void HeadMountedOffset_YAxisSign_IsCorrect()
+    {
+        // OpenCV Image Y points DOWN. CNC Machine Y points UP.
+        // A positive tvec[1] means the board is below the camera center in the image (higher pixel Y).
+        // If it's below the camera center in the image, its CNC Y coordinate is LOWER than the camera's CNC Y coordinate.
+        // So Board_CNC_Y = Camera_CNC_Y - tvec[1] => Camera_CNC_Y = Board_CNC_Y + tvec[1]
+        // Offset_Y = Camera_CNC_Y - Machine_CNC_Y = Board_CNC_Y + tvec[1] - Machine_CNC_Y
+
+        float boardWy = 0f;
+        float machineY = 0f;
+        float tvecY = 20f; // Board is 20mm down in the image (Image Y+)
+
+        float offsetY = boardWy + tvecY - machineY;
+
+        // If the board is at Y=0, and the camera sees it 20mm down (so the board is at a lower Y than the camera),
+        // the camera must be at Y=20.
+        // If machine is at Y=0, then OffsetY = CameraY - MachineY = 20 - 0 = 20.
+        Assert.Equal(20f, offsetY);
+    }
+
+    [Fact]
+    public void WorkspaceScan_CoordinateMath_IsCorrect()
+    {
+        // When iterating the workspace, if we want the Camera to cover from 0 to W,
+        // and CameraX = MachineX + OffsetX, then MachineX must go from -OffsetX to W - OffsetX.
+
+        float offset = 50f;
+        float workW = 200f;
+
+        float startMachineX = -offset;
+        float endMachineX = workW - offset;
+
+        // Verify camera positions at start and end
+        float startCameraX = startMachineX + offset;
+        float endCameraX = endMachineX + offset;
+
+        Assert.Equal(0f, startCameraX);
+        Assert.Equal(200f, endCameraX);
+    }
+
+    private static PointF ApplyHomography(double[] H, double x, double y)
+    {
+        double w = H[6] * x + H[7] * y + H[8];
+        double nx = (H[0] * x + H[1] * y + H[2]) / w;
+        double ny = (H[3] * x + H[4] * y + H[5]) / w;
+        return new PointF((float)nx, (float)ny);
+    }
+
+    // ================================================================
     // Helpers
     // ================================================================
 

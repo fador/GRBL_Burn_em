@@ -409,9 +409,6 @@ namespace grbl_burn_em.Data.Pdf
                                 // tx = (-n / 1000) * FontSize * HScale
                                 float spacing = (float)n.RealValue;
                                 float tx = (-spacing / 1000f) * _state.FontSize * (_state.TextHScale / 100f);
-                                _textLineMatrix.Translate(tx, 0, MatrixOrder.Prepend); // Wait, TJ updates Text Matrix (Tm), not Text Line Matrix (Tlm) usually?
-                                // Actually TJ updates Tm. Tlm is start of line.
-                                // In this parser: _textMatrix is Tm. _textLineMatrix is Tlm.
                                 // Td/TD updates Tlm. TJ updates Tm. 
                                 // My code uses _textMatrix = _textLineMatrix.Clone() at start of line.
                                 // So here we must update _textMatrix.
@@ -638,7 +635,17 @@ namespace grbl_burn_em.Data.Pdf
             if (isStroked && !isFilled && IsWhite(_state.StrokeColor)) return;
             if (Math.Abs(_state.TextHScale) < 0.1f) return;
             
-            if (_state.ClipRegion != null && !_state.ClipRegion.IsVisible(pts[0])) return;
+            if (_state.ClipRegion != null)
+            {
+                using var bmp = new Bitmap(1, 1);
+                using var g = Graphics.FromImage(bmp);
+                var bounds = _state.ClipRegion.GetBounds(g);
+                
+                // Many PDF generators hide text by putting it in a tiny clipping region.
+                if (bounds.Width <= 0.1f || bounds.Height <= 0.1f) return;
+                
+                if (!_state.ClipRegion.IsVisible(pts[0])) return;
+            }
 
             // Effective Size
             float ctmScaleY = (float)Math.Sqrt(_state.CTM.Elements[2] * _state.CTM.Elements[2] + _state.CTM.Elements[3] * _state.CTM.Elements[3]);

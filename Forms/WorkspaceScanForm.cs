@@ -101,12 +101,29 @@ public partial class WorkspaceScanForm : Form
 
             float fovW = config.CameraOverlayWidth;
             float fovH = config.CameraOverlayHeight;
+            float shiftX = 0f;
+            float shiftY = 0f;
 
-            if (store.HasIntrinsics && store.Offset != null)
+            var memStore = CameraManager.Instance.CalibrationStore;
+            if (memStore.HasIntrinsics && memStore.HasOffset && memStore.Offset!.OffsetZ > 0)
             {
-                var engine = new CameraCalibrationEngine(store.BoardConfig ?? new CharucoBoardConfig());
-                var fov = engine.ComputeFovMm(store.Offset.OffsetZ, store.Intrinsics!);
-                if (!fov.IsEmpty) { fovW = fov.Width; fovH = fov.Height; }
+                var intrinsics = memStore.Intrinsics!;
+                if (intrinsics.CameraMatrix != null && intrinsics.CameraMatrix.Length >= 9 && intrinsics.CameraMatrix[0] > 0 && intrinsics.CameraMatrix[4] > 0)
+                {
+                    float fx = (float)intrinsics.CameraMatrix[0];
+                    float fy = (float)intrinsics.CameraMatrix[4];
+                    float cx = (float)intrinsics.CameraMatrix[2];
+                    float cy = (float)intrinsics.CameraMatrix[5];
+                    float w = intrinsics.CalibratedImageWidth;
+                    float h = intrinsics.CalibratedImageHeight;
+                    float z = memStore.Offset.OffsetZ;
+
+                    fovW = w * z / fx;
+                    fovH = h * z / fy;
+
+                    shiftX = (w / 2f - cx) * z / fx;
+                    shiftY = (cy - h / 2f) * z / fy;
+                }
             }
 
             if (fovW <= 10) fovW = config.CameraOverlayWidth;
@@ -125,9 +142,26 @@ public partial class WorkspaceScanForm : Form
             float offY = store.Offset?.OffsetY ?? config.CameraOverlayY;
 
             var points = new List<PointF>();
-            for (float y = offY; y <= workH + offY; y += stepY)
-                for (float x = offX; x <= workW + offX; x += stepX)
-                    points.Add(new PointF(x, y));
+            for (float y = -offY; y <= workH - offY; y += stepY)
+            {
+                for (float x = -offX; x <= workW - offX; x += stepX)
+                {
+                    float cx = Math.Clamp(x, 0, workW);
+                    float cy = Math.Clamp(y, 0, workH);
+
+                    bool isDuplicate = false;
+                    foreach (var p in points)
+                    {
+                        if (Math.Abs(p.X - cx) < 0.1f && Math.Abs(p.Y - cy) < 0.1f)
+                        {
+                            isDuplicate = true;
+                            break;
+                        }
+                    }
+                    if (!isDuplicate)
+                        points.Add(new PointF(cx, cy));
+                }
+            }
 
             CameraManager.Instance.CapturedFrames.Clear();
             int total = points.Count;
@@ -155,7 +189,7 @@ public partial class WorkspaceScanForm : Form
                 if (token.IsCancellationRequested) break;
                 await Task.Delay(500, token);
 
-                CameraManager.Instance.CaptureCurrentFrame(pt.X - offX, pt.Y - offY, fovW, fovH);
+                CameraManager.Instance.CaptureCurrentFrame(pt.X + offX + shiftX, pt.Y + offY + shiftY, fovW, fovH);
 
                 this.BeginInvoke(new Action(() =>
                 {

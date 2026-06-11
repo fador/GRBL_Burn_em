@@ -19,7 +19,6 @@ public partial class OffsetCalibrationForm : Form
     private Label _lblOffset = null!;
     private Label _lblHeight = null!;
     private Button _btnChArUco = null!;
-    private Button _btnManual = null!;
     private Button _btnSave = null!;
 
     private Button _btnPulse = null!;
@@ -263,7 +262,7 @@ public partial class OffsetCalibrationForm : Form
             }
 
             _offsetX = boardWx - (float)tvec[0] - machineX;
-            _offsetY = boardWy - (float)tvec[1] - machineY;
+            _offsetY = boardWy + (float)tvec[1] - machineY;
             _offsetZ = (float)tvec[2];
 
             _lblOffset.Text = $"Offset: ({_offsetX:F1}, {_offsetY:F1}) mm";

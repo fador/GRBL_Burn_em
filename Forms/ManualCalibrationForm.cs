@@ -58,25 +58,25 @@ public partial class ManualCalibrationForm : Form
         layout.Controls.Add(new Label { Text = "Camera Matrix", Font = new Font("Arial", 10, FontStyle.Bold), AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
         layout.SetColumnSpan(layout.Controls[0], 2);
 
-        (_nudFx, layout) = AddRow(layout, 1, "fx:", 800, 1, 10000);
-        (_nudFy, layout) = AddRow(layout, 2, "fy:", 800, 1, 10000);
-        (_nudCx, layout) = AddRow(layout, 3, "cx:", 640, 1, 10000);
-        (_nudCy, layout) = AddRow(layout, 4, "cy:", 480, 1, 10000);
+        (_nudFx, layout) = AddRow(layout, 1, "fx:", 800, 1, 1000000);
+        (_nudFy, layout) = AddRow(layout, 2, "fy:", 800, 1, 1000000);
+        (_nudCx, layout) = AddRow(layout, 3, "cx:", 640, -10000, 100000);
+        (_nudCy, layout) = AddRow(layout, 4, "cy:", 480, -10000, 100000);
 
         layout.Controls.Add(new Label { Text = "Distortion Coeffs", Font = new Font("Arial", 10, FontStyle.Bold), AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 5);
         layout.SetColumnSpan(layout.Controls[layout.Controls.Count - 1], 2);
 
-        (_nudK1, layout) = AddRow(layout, 6, "k1:", 0m, -5m, 5m, 4);
-        (_nudK2, layout) = AddRow(layout, 7, "k2:", 0m, -5m, 5m, 4);
-        (_nudP1, layout) = AddRow(layout, 8, "p1:", 0m, -1m, 1m, 4);
-        (_nudP2, layout) = AddRow(layout, 9, "p2:", 0m, -1m, 1m, 4);
-        (_nudK3, layout) = AddRow(layout, 10, "k3:", 0m, -5m, 5m, 4);
+        (_nudK1, layout) = AddRow(layout, 6, "k1:", 0m, -100m, 100m, 4);
+        (_nudK2, layout) = AddRow(layout, 7, "k2:", 0m, -100m, 100m, 4);
+        (_nudP1, layout) = AddRow(layout, 8, "p1:", 0m, -50m, 50m, 4);
+        (_nudP2, layout) = AddRow(layout, 9, "p2:", 0m, -50m, 50m, 4);
+        (_nudK3, layout) = AddRow(layout, 10, "k3:", 0m, -100m, 100m, 4);
 
         layout.Controls.Add(new Label { Text = "Image Size", Font = new Font("Arial", 10, FontStyle.Bold), AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 11);
         layout.SetColumnSpan(layout.Controls[layout.Controls.Count - 1], 2);
 
-        _nudImgW = new NumericUpDown { Minimum = 160, Maximum = 10000, Value = 1280, Width = 80 };
-        _nudImgH = new NumericUpDown { Minimum = 120, Maximum = 10000, Value = 960, Width = 80 };
+        _nudImgW = new NumericUpDown { Minimum = 1, Maximum = 100000, Value = 1280, Width = 80 };
+        _nudImgH = new NumericUpDown { Minimum = 1, Maximum = 100000, Value = 960, Width = 80 };
         var imgPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
         imgPanel.Controls.Add(new Label { Text = "W:" });
         imgPanel.Controls.Add(_nudImgW);
