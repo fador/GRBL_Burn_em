@@ -152,10 +152,6 @@ public class SvgExporter
         var gElem = new XElement(_svgNs + "g",
             new XAttribute("id", group.Name ?? "Group"));
 
-        var transform = GetTransform(group);
-        if (transform != null)
-            gElem.SetAttributeValue("transform", transform);
-
         foreach (var child in group.Children)
             ExportObject(gElem, defs, child);
 
@@ -265,40 +261,6 @@ public class SvgExporter
     }
 
     private void ExportText(XElement container, LaserText text)
-    {
-        if (text.PathId != Guid.Empty)
-        {
-            ExportWarpedText(container, text);
-            return;
-        }
-
-        float svgX = ToSvgX(text.Position.X);
-        float svgY = ToSvgY(text.Position.Y);
-
-        string anchor = text.Anchor switch
-        {
-            TextAnchor.Middle => "middle",
-            TextAnchor.End => "end",
-            _ => "start"
-        };
-
-        var elem = new XElement(_svgNs + "text",
-            new XAttribute("x", F(svgX)),
-            new XAttribute("y", F(svgY)),
-            new XAttribute("font-family", text.FontName),
-            new XAttribute("font-size", F(text.FontSize)),
-            new XAttribute("text-anchor", anchor),
-            new XAttribute("fill", GetColor(text)),
-            new XText(text.Text));
-
-        var transform = GetTransform(text);
-        if (transform != null)
-            elem.SetAttributeValue("transform", transform);
-
-        container.Add(elem);
-    }
-
-    private void ExportWarpedText(XElement container, LaserText text)
     {
         try
         {
@@ -440,10 +402,21 @@ public class SvgExporter
 
     private string? GetTransform(LaserObject obj)
     {
+        if (obj is LaserGroup) return null;
         if (Math.Abs(obj.Rotation) < 0.001f) return null;
 
-        float cx = obj.Position.X + obj.Size.Width / 2f;
-        float cy = obj.Position.Y + obj.Size.Height / 2f;
-        return $"rotate({F(obj.Rotation)} {F(ToSvgX(cx))} {F(ToSvgY(cy))})";
+        float rotCx, rotCy;
+        if (obj is LaserText)
+        {
+            rotCx = obj.Position.X;
+            rotCy = obj.Position.Y;
+        }
+        else
+        {
+            rotCx = obj.Position.X + obj.Size.Width / 2f;
+            rotCy = obj.Position.Y + obj.Size.Height / 2f;
+        }
+
+        return $"rotate({F(-obj.Rotation)} {F(ToSvgX(rotCx))} {F(ToSvgY(rotCy))})";
     }
 }
