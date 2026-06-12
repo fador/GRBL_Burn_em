@@ -18,13 +18,13 @@ public class MarlinGenerator : IGCodeGenerator
     public IEnumerable<string> Generate(IEnumerable<LaserObject> objects)
     {
         // Settings
-        string toolOn = AppConfiguration.Instance.ToolOnCommand;
-        string toolOff = AppConfiguration.Instance.ToolOffCommand;
-        bool usePwm = AppConfiguration.Instance.EnablePWM;
-        string pwmCmd = AppConfiguration.Instance.PwmCommand;
+        string toolOn = AppConfiguration.Instance.ActiveProfile.ToolOnCommand;
+        string toolOff = AppConfiguration.Instance.ActiveProfile.ToolOffCommand;
+        bool usePwm = AppConfiguration.Instance.ActiveProfile.EnablePWM;
+        string pwmCmd = AppConfiguration.Instance.ActiveProfile.PwmCommand;
         if (string.IsNullOrWhiteSpace(pwmCmd)) pwmCmd = "S";
 
-        float travelSpeed = AppConfiguration.Instance.DefaultTravelSpeed;
+        float travelSpeed = AppConfiguration.Instance.ActiveProfile.DefaultTravelSpeed;
 
         // Startup
         yield return "G21"; // Metric
@@ -285,12 +285,9 @@ public class MarlinGenerator : IGCodeGenerator
                      foreach(var line in toolOn.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                         yield return line;
                      
-                     foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval, minSeg, bicubic, dither))
+                     foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval, minSeg, bicubic, dither, pwmCmd))
                      {
-                         if(pwmCmd != "S")
-                            yield return line.Replace("S", pwmCmd);
-                         else
-                            yield return line;
+                         yield return line;
                      }
                      
                      foreach(var line in toolOff.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))

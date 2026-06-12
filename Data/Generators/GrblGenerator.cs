@@ -20,10 +20,17 @@ public class GrblGenerator : IGCodeGenerator
         // Startup
         yield return "G21"; // Metric
         yield return "G90"; // Absolute positioning
-        float travelSpeed = AppConfiguration.Instance.DefaultTravelSpeed;
+        float travelSpeed = AppConfiguration.Instance.ActiveProfile.DefaultTravelSpeed;
         yield return $"G0 F{travelSpeed:F0}"; // Set default travel speed
 
-        yield return "M4 S0"; // Dynamic laser mode, Laser Off
+        string toolOn = AppConfiguration.Instance.ActiveProfile.ToolOnCommand;
+        string toolOff = AppConfiguration.Instance.ActiveProfile.ToolOffCommand;
+        string pwmCmd = AppConfiguration.Instance.ActiveProfile.PwmCommand;
+        if (string.IsNullOrWhiteSpace(pwmCmd)) pwmCmd = "S";
+        
+        string toolOnZero = $"{toolOn} {pwmCmd}0";
+
+        yield return toolOnZero; // Dynamic laser mode, Laser Off
 
         foreach (var obj in objects)
         {
@@ -36,7 +43,7 @@ public class GrblGenerator : IGCodeGenerator
         }
 
         // Shutdown
-        yield return "M5"; // Laser Off
+        yield return AppConfiguration.Instance.ActiveProfile.ToolOffCommand; // Laser Off
         yield return "G0 X0 Y0"; // Return to home (optional, but good for preview)
     }
 
@@ -66,6 +73,9 @@ public class GrblGenerator : IGCodeGenerator
 
         float sVal = pwrPercent * 10f; // 0-100 -> 0-1000
         float fVal = speedVal;
+        
+        string pwmCmd = AppConfiguration.Instance.ActiveProfile.PwmCommand;
+        if (string.IsNullOrWhiteSpace(pwmCmd)) pwmCmd = "S";
 
         // If Mode is CUT, generate Vector GCode (unless Image)
         if (mode == LayerMode.Cut && !(obj is LaserImage))
@@ -113,7 +123,7 @@ public class GrblGenerator : IGCodeGenerator
                              }
                              else 
                              {
-                                 yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                                 yield return $"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}";
                              }
                              
                              lastPos = p;
@@ -123,7 +133,7 @@ public class GrblGenerator : IGCodeGenerator
                                  float dist = Math.Abs(p.X - subpathStart.X) + Math.Abs(p.Y - subpathStart.Y);
                                  if (dist > 0.001f)
                                  {
-                                     yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} S{sVal:F0}";
+                                     yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} {pwmCmd}{sVal:F0}";
                                      lastPos = subpathStart;
                                  }
                              }
@@ -164,10 +174,10 @@ public class GrblGenerator : IGCodeGenerator
                         // First point is Move.
                         for(int i=1; i<points.Length; i++)
                         {
-                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} S{sVal:F0}";
+                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} {pwmCmd}{sVal:F0}";
                         }
                         // Close loop
-                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} S{sVal:F0}";
+                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} {pwmCmd}{sVal:F0}";
                      }
                  }
                  yield return "G1 S0";
@@ -204,10 +214,10 @@ public class GrblGenerator : IGCodeGenerator
                         
                         for(int i=1; i<points.Length; i++)
                         {
-                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} S{sVal:F0}";
+                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} {pwmCmd}{sVal:F0}";
                         }
                         // Close loop
-                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} S{sVal:F0}";
+                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} {pwmCmd}{sVal:F0}";
                      }
                  }
                  yield return "G1 S0";
@@ -238,7 +248,7 @@ public class GrblGenerator : IGCodeGenerator
                 for (int i = 1; i < finalPoints.Length; i++)
                 {
                     var p = finalPoints[i];
-                    yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                    yield return $"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}";
                 }
                 yield return "G1 S0"; 
                 yield break;
@@ -284,7 +294,7 @@ public class GrblGenerator : IGCodeGenerator
                          for (int i = 1; i < points.Length; i++)
                          {
                              var p = points[i];
-                             yield return $"G1 X{p.X:F3} Y{p.Y:F3} S{sVal:F0}";
+                             yield return $"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}";
                          }
                     }
                 }
@@ -412,7 +422,7 @@ public class GrblGenerator : IGCodeGenerator
                 Speed = speedVal
             };
 
-            foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval, minSeg, bicubic, dither))
+            foreach (var line in Rasterizer.Rasterize(tempImg, sVal, fVal, interval, minSeg, bicubic, dither, pwmCmd))
             {
                 yield return line;
             }
@@ -513,18 +523,24 @@ public class GrblGenerator : IGCodeGenerator
             if (b.Bottom > maxY) maxY = b.Bottom;
         }
 
+        string toolOn = AppConfiguration.Instance.ActiveProfile.ToolOnCommand;
+        string toolOff = AppConfiguration.Instance.ActiveProfile.ToolOffCommand;
+        string pwmCmd = AppConfiguration.Instance.ActiveProfile.PwmCommand;
+        if (string.IsNullOrWhiteSpace(pwmCmd)) pwmCmd = "S";
+        string toolOnZero = $"{toolOn} {pwmCmd}0";
+
         yield return "G21";
         yield return "G90";
-        yield return "M4 S0"; 
+        yield return toolOnZero; 
 
         yield return $"G0 X{minX:F3} Y{minY:F3}";
         
         float sVal = power * 10f; 
         yield return $"G1 F{speed:F0}";
-        yield return $"G1 X{maxX:F3} Y{minY:F3} S{sVal:F0}";
-        yield return $"G1 X{maxX:F3} Y{maxY:F3} S{sVal:F0}";
-        yield return $"G1 X{minX:F3} Y{maxY:F3} S{sVal:F0}";
-        yield return "M5";
+        yield return $"G1 X{maxX:F3} Y{minY:F3} {pwmCmd}{sVal:F0}";
+        yield return $"G1 X{maxX:F3} Y{maxY:F3} {pwmCmd}{sVal:F0}";
+        yield return $"G1 X{minX:F3} Y{maxY:F3} {pwmCmd}{sVal:F0}";
+        yield return toolOff;
         yield return "G0 X0 Y0";
     }
 
@@ -533,9 +549,15 @@ public class GrblGenerator : IGCodeGenerator
         var enabled = objects.Where(o => o.IsEnabled).ToList();
         if (enabled.Count == 0) yield break;
 
+        string toolOn = AppConfiguration.Instance.ActiveProfile.ToolOnCommand;
+        string toolOff = AppConfiguration.Instance.ActiveProfile.ToolOffCommand;
+        string pwmCmd = AppConfiguration.Instance.ActiveProfile.PwmCommand;
+        if (string.IsNullOrWhiteSpace(pwmCmd)) pwmCmd = "S";
+        string toolOnZero = $"{toolOn} {pwmCmd}0";
+
         yield return "G21";
         yield return "G90";
-        yield return "M4 S0"; 
+        yield return toolOnZero; 
 
         float sVal = power * 10f; 
 
@@ -543,18 +565,18 @@ public class GrblGenerator : IGCodeGenerator
         {
             var b = obj.GetBounds();
             // Move to Start
-            yield return $"M4 S0";
+            yield return toolOnZero;
             yield return $"G0 X{b.Left:F3} Y{b.Top:F3}";
             
             // Cut Box
             yield return $"G1 F{speed:F0}";
-            yield return $"G1 X{b.Right:F3} Y{b.Top:F3} S{sVal:F0}";
-            yield return $"G1 X{b.Right:F3} Y{b.Bottom:F3} S{sVal:F0}";
-            yield return $"G1 X{b.Left:F3} Y{b.Bottom:F3} S{sVal:F0}";
-            yield return $"G1 X{b.Left:F3} Y{b.Top:F3} S{sVal:F0}";
+            yield return $"G1 X{b.Right:F3} Y{b.Top:F3} {pwmCmd}{sVal:F0}";
+            yield return $"G1 X{b.Right:F3} Y{b.Bottom:F3} {pwmCmd}{sVal:F0}";
+            yield return $"G1 X{b.Left:F3} Y{b.Bottom:F3} {pwmCmd}{sVal:F0}";
+            yield return $"G1 X{b.Left:F3} Y{b.Top:F3} {pwmCmd}{sVal:F0}";
         }
 
-        yield return "M5";
+        yield return toolOff;
         yield return "G0 X0 Y0";
     }
 
@@ -563,9 +585,15 @@ public class GrblGenerator : IGCodeGenerator
         var enabled = objects.Where(o => o.IsEnabled).ToList();
         if (enabled.Count == 0) yield break;
 
+        string toolOn = AppConfiguration.Instance.ActiveProfile.ToolOnCommand;
+        string toolOff = AppConfiguration.Instance.ActiveProfile.ToolOffCommand;
+        string pwmCmd = AppConfiguration.Instance.ActiveProfile.PwmCommand;
+        if (string.IsNullOrWhiteSpace(pwmCmd)) pwmCmd = "S";
+        string toolOnZero = $"{toolOn} {pwmCmd}0";
+
         yield return "G21";
         yield return "G90";
-        yield return "M4 S0"; 
+        yield return toolOnZero; 
 
         float sVal = power * 10f; 
         float size = 5.0f; // 10mm total width
@@ -577,18 +605,18 @@ public class GrblGenerator : IGCodeGenerator
             float cy = b.Y + b.Height / 2f;
 
             // Mark 1: TL to BR
-            yield return $"M4 S0";
+            yield return toolOnZero;
             yield return $"G0 X{cx - size:F3} Y{cy - size:F3}";
             yield return $"G1 F{speed:F0}";
-            yield return $"G1 X{cx + size:F3} Y{cy + size:F3} S{sVal:F0}";
+            yield return $"G1 X{cx + size:F3} Y{cy + size:F3} {pwmCmd}{sVal:F0}";
 
             // Mark 2: BL to TR
-            yield return $"M4 S0";
+            yield return toolOnZero;
             yield return $"G0 X{cx - size:F3} Y{cy + size:F3}";
-            yield return $"G1 X{cx + size:F3} Y{cy - size:F3} S{sVal:F0}";
+            yield return $"G1 X{cx + size:F3} Y{cy - size:F3} {pwmCmd}{sVal:F0}";
         }
 
-        yield return "M5";
+        yield return toolOff;
         yield return "G0 X0 Y0";
     }
 }

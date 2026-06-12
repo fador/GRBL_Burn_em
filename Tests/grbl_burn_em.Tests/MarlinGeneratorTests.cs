@@ -20,10 +20,10 @@ public class MarlinGeneratorTests
     private void Setup(string onCmd = "M3", string offCmd = "M5", bool pwm = true)
     {
         AppConfiguration.Reset();
-        AppConfiguration.Instance.ToolOnCommand = onCmd;
-        AppConfiguration.Instance.ToolOffCommand = offCmd;
-        AppConfiguration.Instance.EnablePWM = pwm;
-        AppConfiguration.Instance.DefaultTravelSpeed = 3000;
+        AppConfiguration.Instance.ActiveProfile.ToolOnCommand = onCmd;
+        AppConfiguration.Instance.ActiveProfile.ToolOffCommand = offCmd;
+        AppConfiguration.Instance.ActiveProfile.EnablePWM = pwm;
+        AppConfiguration.Instance.ActiveProfile.DefaultTravelSpeed = 3000;
         
         ProjectState.Instance.Layers.Clear();
         ProjectState.Instance.Layers.Add(new Layer("Default", Color.Black)
@@ -88,7 +88,7 @@ public class MarlinGeneratorTests
     public void TestCustomPwmCommand()
     {
         Setup("M3", "M5", true);
-        AppConfiguration.Instance.PwmCommand = "P";
+        AppConfiguration.Instance.ActiveProfile.PwmCommand = "P";
         
         var layerId = ProjectState.Instance.Layers[0].Id;
         var rect = new LaserRectangle

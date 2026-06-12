@@ -10,7 +10,7 @@ public partial class MainForm
     {
         if (!CheckSafetyBounds(ProjectState.Instance.Objects.ToList())) return;
 
-        string generatorName = AppConfiguration.Instance.GCodeGenerator;
+        string generatorName = AppConfiguration.Instance.ActiveProfile.GCodeGenerator;
 
         IGCodeGenerator? generator = null;
 
@@ -49,7 +49,7 @@ public partial class MainForm
     {
         if (!CheckSafetyBounds(ProjectState.Instance.Objects.ToList())) return;
 
-        string generatorName = AppConfiguration.Instance.GCodeGenerator;
+        string generatorName = AppConfiguration.Instance.ActiveProfile.GCodeGenerator;
         
         IGCodeGenerator? generator = null;
 
@@ -105,8 +105,8 @@ public partial class MainForm
             if (b.Bottom > maxY) maxY = b.Bottom;
         }
 
-        float workW = AppConfiguration.Instance.WorkAreaWidth;
-        float workH = AppConfiguration.Instance.WorkAreaHeight;
+        float workW = AppConfiguration.Instance.ActiveProfile.WorkAreaWidth;
+        float workH = AppConfiguration.Instance.ActiveProfile.WorkAreaHeight;
 
         bool outOfBounds = minX < 0 || minY < 0 || maxX > workW || maxY > workH;
 

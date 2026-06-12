@@ -12,7 +12,7 @@ namespace grbl_burn_em.Data.Generators;
 
 public static class Rasterizer
 {
-    public static IEnumerable<string> Rasterize(LaserImage image, float maxPower, float speed, float lineInterval, float minSegmentLength, bool enableBicubic, bool enableDithering)
+    public static IEnumerable<string> Rasterize(LaserImage image, float maxPower, float speed, float lineInterval, float minSegmentLength, bool enableBicubic, bool enableDithering, string pwmCmd = "S")
     {
         if (image.Image == null) yield break;
 
@@ -228,15 +228,15 @@ public static class Rasterizer
                 {
                     // Travel / Off
                     // Even inside the active area, we might have gaps.
-                    if(lastG0) yield return $"G1 X{nextX:F3} S0";
-                    else yield return $"X{nextX:F3} S0";
+                    if(lastG0) yield return $"G1 X{nextX:F3} {pwmCmd}0";
+                    else yield return $"X{nextX:F3} {pwmCmd}0";
                     lastG0 = false;
                 }
                 else
                 {
                     // Burn
-                    if(lastG0) yield return $"G1 X{nextX:F3} S{sValue:F0}";
-                    else yield return $"X{nextX:F3} S{sValue:F0}";
+                    if(lastG0) yield return $"G1 X{nextX:F3} {pwmCmd}{sValue:F0}";
+                    else yield return $"X{nextX:F3} {pwmCmd}{sValue:F0}";
                     lastG0 = false;
                 }
                 currentX = nextX;
@@ -245,7 +245,7 @@ public static class Rasterizer
         }
         
         if (disposeBmp) scanBmp.Dispose();
-        yield return "G0 S0"; 
+        yield return $"G0 {pwmCmd}0"; 
     }
 
     private static void ApplyDithering(Bitmap bmp)

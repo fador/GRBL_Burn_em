@@ -5,6 +5,7 @@
  * This file is part of the GRBL Burn'Em laser control software
  */
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace grbl_burn_em.Data;
 
@@ -18,6 +19,33 @@ public class AppConfiguration
         _instance = new AppConfiguration();
     }
 
+    public List<MachineProfile> MachineProfiles { get; set; } = new();
+    public string ActiveProfileId { get; set; } = "";
+
+    [JsonIgnore]
+    public MachineProfile ActiveProfile
+    {
+        get
+        {
+            if (MachineProfiles == null || MachineProfiles.Count == 0)
+            {
+                var defaultProfile = new MachineProfile { Name = "Default Machine" };
+                if (MachineProfiles == null) MachineProfiles = new List<MachineProfile>();
+                MachineProfiles.Add(defaultProfile);
+                ActiveProfileId = defaultProfile.Id;
+            }
+            
+            var profile = MachineProfiles.FirstOrDefault(p => p.Id == ActiveProfileId);
+            if (profile == null)
+            {
+                profile = MachineProfiles.First();
+                ActiveProfileId = profile.Id;
+            }
+            return profile;
+        }
+    }
+
+    // Legacy properties for backward compatibility migration
     public string LastPortName { get; set; } = "";
     public int BaudRate { get; set; } = 115200;
     public string GCodeGenerator { get; set; } = "Grbl";
@@ -25,6 +53,13 @@ public class AppConfiguration
     public float WorkAreaWidth { get; set; } = 400f;
     public float WorkAreaHeight { get; set; } = 400f;
     public string WorkOrigin { get; set; } = "BottomLeft";
+    public float DefaultTravelSpeed { get; set; } = 5000f;
+    public string ToolOnCommand { get; set; } = "M3";
+    public string ToolOffCommand { get; set; } = "M5";
+    public bool EnablePWM { get; set; } = true;
+    public string PwmCommand { get; set; } = "S";
+
+    // Global Settings
     public float RasterLineInterval { get; set; } = 0.3f;
     public float MinRasterSegmentLength { get; set; } = 0.2f;
     public bool EnableBicubicResampling { get; set; } = true;
@@ -35,20 +70,9 @@ public class AppConfiguration
     public float SvgCurveQuality { get; set; } = 0.002f; // Lower is better quality (more points)
 
     public bool Enable1BitDithering { get; set; } = false;
-    public float DefaultTravelSpeed { get; set; } = 5000f;
     public bool EmbedImagesInProject { get; set; } = false;
     public bool EnableSafetyBoundsCheck { get; set; } = true;
     
-    // Marlin / Plotter Settings
-    public string ToolOnCommand { get; set; } = "M3";
-    public string ToolOffCommand { get; set; } = "M5";
-    public bool EnablePWM { get; set; } = true;
-    public string PwmCommand { get; set; } = "S";
-
-
-
-
-
     // View Settings
     public float LastPanX { get; set; } = 0f;
     public float LastPanY { get; set; } = 0f;
@@ -90,19 +114,45 @@ public class AppConfiguration
 
     private static AppConfiguration Load()
     {
+        AppConfiguration? config = null;
         if (File.Exists(ConfigPath))
         {
             try
             {
                 var json = File.ReadAllText(ConfigPath);
-                var config = JsonSerializer.Deserialize<AppConfiguration>(json);
-                if (config != null) return config;
+                config = JsonSerializer.Deserialize<AppConfiguration>(json);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to load config: {ex.Message}");
             }
         }
-        return new AppConfiguration();
+        
+        config ??= new AppConfiguration();
+
+        // Migrate legacy settings if no profiles exist
+        if (config.MachineProfiles == null || config.MachineProfiles.Count == 0)
+        {
+            config.MachineProfiles = new List<MachineProfile>();
+            var defaultProfile = new MachineProfile
+            {
+                Name = "Default Machine",
+                PortName = config.LastPortName,
+                BaudRate = config.BaudRate > 0 ? config.BaudRate : 115200,
+                GCodeGenerator = string.IsNullOrEmpty(config.GCodeGenerator) ? "Grbl" : config.GCodeGenerator,
+                WorkAreaWidth = config.WorkAreaWidth > 0 ? config.WorkAreaWidth : 400f,
+                WorkAreaHeight = config.WorkAreaHeight > 0 ? config.WorkAreaHeight : 400f,
+                WorkOrigin = string.IsNullOrEmpty(config.WorkOrigin) ? "BottomLeft" : config.WorkOrigin,
+                DefaultTravelSpeed = config.DefaultTravelSpeed > 0 ? config.DefaultTravelSpeed : 5000f,
+                ToolOnCommand = string.IsNullOrEmpty(config.ToolOnCommand) ? "M3" : config.ToolOnCommand,
+                ToolOffCommand = string.IsNullOrEmpty(config.ToolOffCommand) ? "M5" : config.ToolOffCommand,
+                EnablePWM = config.EnablePWM,
+                PwmCommand = string.IsNullOrEmpty(config.PwmCommand) ? "S" : config.PwmCommand
+            };
+            config.MachineProfiles.Add(defaultProfile);
+            config.ActiveProfileId = defaultProfile.Id;
+        }
+
+        return config;
     }
 }

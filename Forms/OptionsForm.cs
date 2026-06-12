@@ -6,11 +6,20 @@
  */
 using grbl_burn_em.Data;
 
-
 namespace grbl_burn_em.Forms;
 
 public class OptionsForm : Form
 {
+    private ComboBox _cbProfiles = null!;
+    private Button _btnAddProfile = null!;
+    private Button _btnDeleteProfile = null!;
+    private List<MachineProfile> _editingProfiles = new();
+    private int _currentProfileIndex = -1;
+    private bool _isUpdatingUI = false;
+
+    private ComboBox _cbDeviceType = null!;
+    private TextBox _txtProfileName = null!;
+
     private ComboBox _cbPorts = null!;
     private ComboBox _cbBaud = null!;
     private ComboBox _cbGenerator = null!;
@@ -21,13 +30,11 @@ public class OptionsForm : Form
     private NumericUpDown _numSnapGrid = null!;
     private NumericUpDown _numTravelSpeed = null!;
 
-    // Marlin Controls
+    // Marlin / Plotter Controls
     private TextBox _txtToolOn = null!;
     private TextBox _txtToolOff = null!;
     private TextBox _txtPwmCmd = null!;
     private CheckBox _chkEnablePwm = null!;
-
-
 
     private CheckBox _chkBicubic = null!;
     private CheckBox _chkDither = null!;
@@ -38,7 +45,6 @@ public class OptionsForm : Form
     private NumericUpDown _numSvgQuality = null!;
     private CheckBox _chkEmbedImages = null!;
     private CheckBox _chkSafetyBounds = null!;
-
 
     private TabControl _tabs = null!;
 
@@ -71,23 +77,51 @@ public class OptionsForm : Form
     private void InitializeComponent()
     {
         this.Text = "Options";
-        this.Size = new Size(400, 600);
+        this.Size = new Size(420, 650);
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
         this.StartPosition = FormStartPosition.CenterParent;
 
+        var pnlTop = new Panel { Dock = DockStyle.Top, Height = 50 };
+        var lblProf = new Label { Text = "Profile:", Location = new Point(20, 15), AutoSize = true };
+        _cbProfiles = new ComboBox { Location = new Point(70, 12), Width = 160, DropDownStyle = ComboBoxStyle.DropDownList };
+        _btnAddProfile = new Button { Text = "Add", Location = new Point(240, 11), Width = 60 };
+        _btnDeleteProfile = new Button { Text = "Delete", Location = new Point(310, 11), Width = 60 };
+        
+        pnlTop.Controls.Add(lblProf);
+        pnlTop.Controls.Add(_cbProfiles);
+        pnlTop.Controls.Add(_btnAddProfile);
+        pnlTop.Controls.Add(_btnDeleteProfile);
+
+        _btnAddProfile.Click += BtnAddProfile_Click;
+        _btnDeleteProfile.Click += BtnDeleteProfile_Click;
+        _cbProfiles.SelectedIndexChanged += CbProfiles_SelectedIndexChanged;
+
         _tabs = new TabControl { Dock = DockStyle.Fill };
 
         // --- Connection Tab ---
         var tabConnection = new TabPage("Connection");
-        var lblPort = new Label { Text = "COM Port:", Location = new Point(20, 30), AutoSize = true };
-        _cbPorts = new ComboBox { Location = new Point(120, 27), Width = 180, DropDownStyle = ComboBoxStyle.DropDown };
         
-        var lblBaud = new Label { Text = "Baud Rate:", Location = new Point(20, 70), AutoSize = true };
-        _cbBaud = new ComboBox { Location = new Point(120, 67), Width = 180, DropDownStyle = ComboBoxStyle.DropDown };
+        var lblName = new Label { Text = "Profile Name:", Location = new Point(20, 20), AutoSize = true };
+        _txtProfileName = new TextBox { Location = new Point(120, 17), Width = 180 };
+        _txtProfileName.TextChanged += (s, e) => { if (!_isUpdatingUI && _currentProfileIndex >= 0) { _editingProfiles[_currentProfileIndex].Name = _txtProfileName.Text; UpdateProfileComboText(); } };
+
+        var lblType = new Label { Text = "Device Type:", Location = new Point(20, 60), AutoSize = true };
+        _cbDeviceType = new ComboBox { Location = new Point(120, 57), Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cbDeviceType.Items.AddRange(Enum.GetNames(typeof(DeviceType)));
+
+        var lblPort = new Label { Text = "COM Port:", Location = new Point(20, 100), AutoSize = true };
+        _cbPorts = new ComboBox { Location = new Point(120, 97), Width = 180, DropDownStyle = ComboBoxStyle.DropDown };
+        
+        var lblBaud = new Label { Text = "Baud Rate:", Location = new Point(20, 140), AutoSize = true };
+        _cbBaud = new ComboBox { Location = new Point(120, 137), Width = 180, DropDownStyle = ComboBoxStyle.DropDown };
         _cbBaud.Items.AddRange(new object[] { 9600, 19200, 38400, 57600, 115200, 230400, 250000 });
 
+        tabConnection.Controls.Add(lblName);
+        tabConnection.Controls.Add(_txtProfileName);
+        tabConnection.Controls.Add(lblType);
+        tabConnection.Controls.Add(_cbDeviceType);
         tabConnection.Controls.Add(lblPort);
         tabConnection.Controls.Add(_cbPorts);
         tabConnection.Controls.Add(lblBaud);
@@ -101,7 +135,6 @@ public class OptionsForm : Form
         _cbGenerator = new ComboBox { Location = new Point(160, 27), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
         _cbGenerator.Items.AddRange(new object[] { "Grbl", "Marlin", "Dummy" });
 
-
         var lblW = new Label { Text = "Work Width (mm):", Location = new Point(20, 70), AutoSize = true };
         _numWidth = new NumericUpDown { Location = new Point(160, 67), Width = 150, Minimum = 10, Maximum = 2000, DecimalPlaces = 0 };
         
@@ -112,9 +145,8 @@ public class OptionsForm : Form
         _cbOrigin = new ComboBox { Location = new Point(160, 147), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
         _cbOrigin.Items.AddRange(new object[] { "BottomLeft", "TopLeft", "Center" });
 
-        var lblTravel = new Label { Text = "Travel Speed (mm/min):", Location = new Point(20, 190), AutoSize = true };
+        var lblTravel = new Label { Text = "Travel Speed:", Location = new Point(20, 190), AutoSize = true };
         _numTravelSpeed = new NumericUpDown { Location = new Point(160, 187), Width = 150, Minimum = 100, Maximum = 20000, DecimalPlaces = 0, Increment = 100 };
-
 
         tabMachine.Controls.Add(lblGen);
         tabMachine.Controls.Add(_cbGenerator);
@@ -133,7 +165,7 @@ public class OptionsForm : Form
         var lblOff = new Label { Text = "Tool OFF Cmd:", Location = new Point(20, 290), AutoSize = true };
         _txtToolOff = new TextBox { Location = new Point(160, 287), Width = 150, Height = 50, Multiline = true, ScrollBars = ScrollBars.Vertical };
 
-        var lblPwm = new Label { Text = "PWM Cmd (Default S):", Location = new Point(20, 350), AutoSize = true };
+        var lblPwm = new Label { Text = "PWM Cmd:", Location = new Point(20, 350), AutoSize = true };
         _txtPwmCmd = new TextBox { Location = new Point(160, 347), Width = 50 };
 
         _chkEnablePwm = new CheckBox { Text = "Enable PWM", Location = new Point(220, 349), AutoSize = true };
@@ -146,13 +178,9 @@ public class OptionsForm : Form
         tabMachine.Controls.Add(_txtPwmCmd);
         tabMachine.Controls.Add(_chkEnablePwm);
 
-        _chkSafetyBounds = new CheckBox { Text = "Enable Safety Boundary Check", Location = new Point(20, 380), AutoSize = true };
-
-        tabMachine.Controls.Add(_chkSafetyBounds);
-
         _tabs.TabPages.Add(tabMachine);
 
-        // --- Raster / Image Tab ---
+        // --- Raster / Image Tab (Global) ---
         var tabRaster = new TabPage("Raster / Image");
         
         var lblInterval = new Label { Text = "Line Interval (mm):", Location = new Point(20, 30), AutoSize = true };
@@ -172,7 +200,7 @@ public class OptionsForm : Form
         tabRaster.Controls.Add(_chkDither);
         _tabs.TabPages.Add(tabRaster);
 
-        // --- View / Grid Tab ---
+        // --- View / Grid Tab (Global) ---
         var tabView = new TabPage("View / Grid");
 
         var lblSnap = new Label { Text = "Snap Grid Size (mm):", Location = new Point(20, 30), AutoSize = true };
@@ -185,11 +213,11 @@ public class OptionsForm : Form
         tabView.Controls.Add(_chkSkipSplash);
         _tabs.TabPages.Add(tabView);
 
-        // --- Import / Files Tab ---
+        // --- Import / Files Tab (Global) ---
         var tabImport = new TabPage("Files");
         
-        var lblSvgQ = new Label { Text = "SVG Curve Flatness (Lower=More Points):", Location = new Point(20, 30), AutoSize = true };
-        _numSvgQuality = new NumericUpDown { Location = new Point(250, 27), Width = 100, Minimum = 0.001m, Maximum = 10.0m, DecimalPlaces = 4, Increment = 0.001m };
+        var lblSvgQ = new Label { Text = "SVG Curve Flatness:", Location = new Point(20, 30), AutoSize = true };
+        _numSvgQuality = new NumericUpDown { Location = new Point(160, 27), Width = 100, Minimum = 0.001m, Maximum = 10.0m, DecimalPlaces = 4, Increment = 0.001m };
 
         tabImport.Controls.Add(lblSvgQ);
         tabImport.Controls.Add(_numSvgQuality);
@@ -197,111 +225,109 @@ public class OptionsForm : Form
         _chkEmbedImages = new CheckBox { Text = "Embed Images in Project File (Base64)", Location = new Point(20, 70), AutoSize = true, Width = 300 };
         tabImport.Controls.Add(_chkEmbedImages);
 
+        _chkSafetyBounds = new CheckBox { Text = "Enable Safety Boundary Check", Location = new Point(20, 100), AutoSize = true, Width = 300 };
+        tabImport.Controls.Add(_chkSafetyBounds);
+
         _tabs.TabPages.Add(tabImport);
-
-        // --- About Tab ---
-        var tabAbout = new TabPage("About");
-        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-        var lblVersion = new Label 
-        { 
-            Text = $"GRBL Burn'Em\nVersion: {version?.Major}.{version?.Minor}\n\nCreated by Fador\n(c) 2025", 
-            AutoSize = true, 
-            Location = new Point(50, 50),
-            Font = new Font(this.Font.FontFamily, 12, FontStyle.Bold),
-            TextAlign = ContentAlignment.MiddleCenter
-        };
-
-        var lnkGithub = new LinkLabel
-        {
-            Text = "https://github.com/fador/GRBL_Burn_em",
-            AutoSize = true,
-            Location = new Point(50, 180),
-            Font = new Font(this.Font.FontFamily, 10, FontStyle.Regular)
-        };
-        lnkGithub.LinkClicked += (s, e) => 
-        { 
-            try 
-            { 
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = lnkGithub.Text, UseShellExecute = true }); 
-            } 
-            catch { } 
-        };
-
-        tabAbout.Controls.Add(lblVersion);
-        tabAbout.Controls.Add(lnkGithub);
-        _tabs.TabPages.Add(tabAbout);
 
         // --- Bottom Panel for Buttons ---
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 50 };
         
-        _btnSave = new Button { Text = "Save", Location = new Point(180, 10), DialogResult = DialogResult.OK, Width = 80 };
-        _btnCancel = new Button { Text = "Cancel", Location = new Point(270, 10), DialogResult = DialogResult.Cancel, Width = 80 };
+        _btnSave = new Button { Text = "Save", Location = new Point(210, 10), DialogResult = DialogResult.OK, Width = 80 };
+        _btnCancel = new Button { Text = "Cancel", Location = new Point(300, 10), DialogResult = DialogResult.Cancel, Width = 80 };
         
         _btnSave.Click += BtnSave_Click;
         
         pnlBottom.Controls.Add(_btnSave);
         pnlBottom.Controls.Add(_btnCancel);
 
-        this.Controls.Add(_tabs); // Tabs Fill
-        this.Controls.Add(pnlBottom); // Bottom panel dock
+        this.Controls.Add(_tabs);
+        this.Controls.Add(pnlTop);
+        this.Controls.Add(pnlBottom);
         
         this.AcceptButton = _btnSave;
         this.CancelButton = _btnCancel;
     }
 
+    private void UpdateProfileComboText()
+    {
+        if (_cbProfiles.SelectedIndex >= 0 && _currentProfileIndex >= 0)
+        {
+            int idx = _cbProfiles.SelectedIndex;
+            _cbProfiles.Items[idx] = _editingProfiles[_currentProfileIndex].Name;
+        }
+    }
+
+    private void CbProfiles_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        if (_isUpdatingUI) return;
+        
+        // Save current to editing list
+        if (_currentProfileIndex >= 0 && _currentProfileIndex < _editingProfiles.Count)
+        {
+            SaveUIToProfile(_editingProfiles[_currentProfileIndex]);
+        }
+
+        _currentProfileIndex = _cbProfiles.SelectedIndex;
+        
+        if (_currentProfileIndex >= 0 && _currentProfileIndex < _editingProfiles.Count)
+        {
+            LoadProfileToUI(_editingProfiles[_currentProfileIndex]);
+        }
+    }
+
+    private void BtnAddProfile_Click(object? sender, EventArgs e)
+    {
+        var newProfile = new MachineProfile { Name = "New Device" };
+        _editingProfiles.Add(newProfile);
+        _cbProfiles.Items.Add(newProfile.Name);
+        _cbProfiles.SelectedIndex = _editingProfiles.Count - 1;
+    }
+
+    private void BtnDeleteProfile_Click(object? sender, EventArgs e)
+    {
+        if (_editingProfiles.Count <= 1)
+        {
+            MessageBox.Show("You must have at least one machine profile.");
+            return;
+        }
+
+        if (_currentProfileIndex >= 0)
+        {
+            _editingProfiles.RemoveAt(_currentProfileIndex);
+            _cbProfiles.Items.RemoveAt(_currentProfileIndex);
+            _currentProfileIndex = -1;
+            _cbProfiles.SelectedIndex = 0;
+        }
+    }
+
     private void LoadSettings()
     {
-        // Populate Ports
+        // Clone profiles
+        _editingProfiles.Clear();
+        foreach (var p in AppConfiguration.Instance.MachineProfiles)
+        {
+            _editingProfiles.Add(p.Clone());
+        }
+
+        // Populate Ports globally
         var ports = SerialInterface.Instance.GetAvailablePorts();
         _cbPorts.Items.Clear();
         _cbPorts.Items.AddRange(ports);
 
-        // Select Configured Port
-        string lastPort = AppConfiguration.Instance.LastPortName;
-        if (!string.IsNullOrEmpty(lastPort))
+        _isUpdatingUI = true;
+        _cbProfiles.Items.Clear();
+        foreach (var p in _editingProfiles)
         {
-             if (!_cbPorts.Items.Contains(lastPort))
-             {
-                 _cbPorts.Items.Add(lastPort);
-             }
-             _cbPorts.SelectedItem = lastPort;
-             _cbPorts.Text = lastPort;
+            _cbProfiles.Items.Add(p.Name);
         }
-        else if (_cbPorts.Items.Count > 0)
-        {
-            _cbPorts.SelectedIndex = 0;
-        }
+        _isUpdatingUI = false;
 
-        // Select Configured Baud
-        int baud = AppConfiguration.Instance.BaudRate;
-        if (_cbBaud.Items.Contains(baud))
-        {
-            _cbBaud.SelectedItem = baud;
-        }
-        else
-        {
-            _cbBaud.Text = baud.ToString();
-            _cbBaud.SelectedItem = baud.ToString();
-        }
-
-        // Select Configured Generator
-        string gen = AppConfiguration.Instance.GCodeGenerator;
-        if (_cbGenerator.Items.Contains(gen))
-        {
-            _cbGenerator.SelectedItem = gen;
-        }
-        else
-        {
-            _cbGenerator.SelectedIndex = 0;
-        }
-
-        _numWidth.Value = (decimal)AppConfiguration.Instance.WorkAreaWidth;
-        _numHeight.Value = (decimal)AppConfiguration.Instance.WorkAreaHeight;
+        // Load Global Settings
         _numInterval.Value = (decimal)AppConfiguration.Instance.RasterLineInterval;
         _numMinSegment.Value = (decimal)AppConfiguration.Instance.MinRasterSegmentLength;
         _numSnapGrid.Value = (decimal)AppConfiguration.Instance.SnapGridSize;
-        _numTravelSpeed.Value = (decimal)AppConfiguration.Instance.DefaultTravelSpeed;
-
+        
         _chkBicubic.Checked = AppConfiguration.Instance.EnableBicubicResampling;
         _chkDither.Checked = AppConfiguration.Instance.Enable1BitDithering;
         _chkSkipSplash.Checked = AppConfiguration.Instance.SkipSplashScreen;
@@ -311,45 +337,105 @@ public class OptionsForm : Form
         if (q > _numSvgQuality.Maximum) q = _numSvgQuality.Maximum;
         _numSvgQuality.Value = q;
         
-        string org = AppConfiguration.Instance.WorkOrigin;
-        if (_cbOrigin.Items.Contains(org)) _cbOrigin.SelectedItem = org;
-        else _cbOrigin.SelectedIndex = 0;
-        
         _chkEmbedImages.Checked = AppConfiguration.Instance.EmbedImagesInProject;
         _chkSafetyBounds.Checked = AppConfiguration.Instance.EnableSafetyBoundsCheck;
 
-        _txtToolOn.Text = AppConfiguration.Instance.ToolOnCommand;
-        _txtToolOff.Text = AppConfiguration.Instance.ToolOffCommand;
-        _txtPwmCmd.Text = AppConfiguration.Instance.PwmCommand;
-        _chkEnablePwm.Checked = AppConfiguration.Instance.EnablePWM;
+        // Select Active Profile
+        int activeIdx = _editingProfiles.FindIndex(p => p.Id == AppConfiguration.Instance.ActiveProfileId);
+        if (activeIdx >= 0)
+        {
+            _cbProfiles.SelectedIndex = activeIdx;
+        }
+        else if (_editingProfiles.Count > 0)
+        {
+            _cbProfiles.SelectedIndex = 0;
+        }
     }
 
+    private void LoadProfileToUI(MachineProfile profile)
+    {
+        _isUpdatingUI = true;
+        _txtProfileName.Text = profile.Name;
+        
+        if (_cbDeviceType.Items.Contains(profile.Type.ToString()))
+            _cbDeviceType.SelectedItem = profile.Type.ToString();
+        else
+            _cbDeviceType.SelectedIndex = 0;
 
+        if (!string.IsNullOrEmpty(profile.PortName) && !_cbPorts.Items.Contains(profile.PortName))
+        {
+             _cbPorts.Items.Add(profile.PortName);
+        }
+        _cbPorts.Text = profile.PortName;
 
+        if (_cbBaud.Items.Contains(profile.BaudRate))
+        {
+            _cbBaud.SelectedItem = profile.BaudRate;
+        }
+        else
+        {
+            _cbBaud.Text = profile.BaudRate.ToString();
+        }
+
+        if (_cbGenerator.Items.Contains(profile.GCodeGenerator))
+            _cbGenerator.SelectedItem = profile.GCodeGenerator;
+        else
+            _cbGenerator.SelectedIndex = 0;
+
+        _numWidth.Value = (decimal)profile.WorkAreaWidth;
+        _numHeight.Value = (decimal)profile.WorkAreaHeight;
+        
+        if (_cbOrigin.Items.Contains(profile.WorkOrigin)) 
+            _cbOrigin.SelectedItem = profile.WorkOrigin;
+        else 
+            _cbOrigin.SelectedIndex = 0;
+
+        _numTravelSpeed.Value = (decimal)profile.DefaultTravelSpeed;
+
+        _txtToolOn.Text = profile.ToolOnCommand;
+        _txtToolOff.Text = profile.ToolOffCommand;
+        _txtPwmCmd.Text = profile.PwmCommand;
+        _chkEnablePwm.Checked = profile.EnablePWM;
+        _isUpdatingUI = false;
+    }
+
+    private void SaveUIToProfile(MachineProfile profile)
+    {
+        profile.Name = _txtProfileName.Text;
+        if (Enum.TryParse<DeviceType>(_cbDeviceType.SelectedItem?.ToString(), out var dt))
+        {
+            profile.Type = dt;
+        }
+        profile.PortName = _cbPorts.Text;
+        if (int.TryParse(_cbBaud.Text, out int baud)) profile.BaudRate = baud;
+        
+        if (_cbGenerator.SelectedItem != null)
+            profile.GCodeGenerator = _cbGenerator.SelectedItem.ToString() ?? "Grbl";
+
+        profile.WorkAreaWidth = (float)_numWidth.Value;
+        profile.WorkAreaHeight = (float)_numHeight.Value;
+        if (_cbOrigin.SelectedItem != null)
+             profile.WorkOrigin = _cbOrigin.SelectedItem.ToString() ?? "BottomLeft";
+
+        profile.DefaultTravelSpeed = (float)_numTravelSpeed.Value;
+        profile.ToolOnCommand = _txtToolOn.Text;
+        profile.ToolOffCommand = _txtToolOff.Text;
+        profile.PwmCommand = _txtPwmCmd.Text;
+        profile.EnablePWM = _chkEnablePwm.Checked;
+    }
 
     private void BtnSave_Click(object? sender, EventArgs e)
     {
-        if (!string.IsNullOrEmpty(_cbPorts.Text))
+        // Save current UI state to the selected profile
+        if (_currentProfileIndex >= 0 && _currentProfileIndex < _editingProfiles.Count)
         {
-            AppConfiguration.Instance.LastPortName = _cbPorts.Text;
-        }
-        
-        if (!string.IsNullOrEmpty(_cbBaud.Text) && int.TryParse(_cbBaud.Text, out int baud))
-        {
-            AppConfiguration.Instance.BaudRate = baud;
+            SaveUIToProfile(_editingProfiles[_currentProfileIndex]);
         }
 
-        if (_cbGenerator.SelectedItem != null)
-        {
-            AppConfiguration.Instance.GCodeGenerator = _cbGenerator.SelectedItem.ToString() ?? "Grbl";
-        }
-
-        AppConfiguration.Instance.WorkAreaWidth = (float)_numWidth.Value;
-        AppConfiguration.Instance.WorkAreaHeight = (float)_numHeight.Value;
+        // Apply global settings
         AppConfiguration.Instance.RasterLineInterval = (float)_numInterval.Value;
         AppConfiguration.Instance.MinRasterSegmentLength = (float)_numMinSegment.Value;
         AppConfiguration.Instance.SnapGridSize = (float)_numSnapGrid.Value;
-        AppConfiguration.Instance.DefaultTravelSpeed = (float)_numTravelSpeed.Value;
 
         AppConfiguration.Instance.EnableBicubicResampling = _chkBicubic.Checked;
         AppConfiguration.Instance.Enable1BitDithering = _chkDither.Checked;
@@ -358,14 +444,17 @@ public class OptionsForm : Form
         AppConfiguration.Instance.EmbedImagesInProject = _chkEmbedImages.Checked;
         AppConfiguration.Instance.EnableSafetyBoundsCheck = _chkSafetyBounds.Checked;
 
-        AppConfiguration.Instance.ToolOnCommand = _txtToolOn.Text;
-        AppConfiguration.Instance.ToolOffCommand = _txtToolOff.Text;
-        AppConfiguration.Instance.PwmCommand = _txtPwmCmd.Text;
-        AppConfiguration.Instance.EnablePWM = _chkEnablePwm.Checked;
-
-
-        if(_cbOrigin.SelectedItem != null)
-             AppConfiguration.Instance.WorkOrigin = _cbOrigin.SelectedItem.ToString() ?? "BottomLeft";
+        // Apply profiles
+        AppConfiguration.Instance.MachineProfiles = _editingProfiles.Select(p => p.Clone()).ToList();
+        
+        if (_currentProfileIndex >= 0 && _currentProfileIndex < AppConfiguration.Instance.MachineProfiles.Count)
+        {
+            AppConfiguration.Instance.ActiveProfileId = AppConfiguration.Instance.MachineProfiles[_currentProfileIndex].Id;
+        }
+        else if (AppConfiguration.Instance.MachineProfiles.Count > 0)
+        {
+            AppConfiguration.Instance.ActiveProfileId = AppConfiguration.Instance.MachineProfiles[0].Id;
+        }
 
         AppConfiguration.Instance.Save();
         this.Close();

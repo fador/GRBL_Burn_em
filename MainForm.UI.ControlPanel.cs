@@ -9,6 +9,38 @@ public partial class MainForm
     {
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown };
         
+        var lblDevice = new Label { Text = "Device Profile:", AutoSize = true, Margin = new Padding(3, 5, 3, 0) };
+        var cbDevices = new ComboBox { Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
+        
+        Action refreshDevices = () => 
+        {
+            cbDevices.Items.Clear();
+            foreach(var profile in AppConfiguration.Instance.MachineProfiles)
+            {
+                cbDevices.Items.Add(profile.Name);
+            }
+            int idx = AppConfiguration.Instance.MachineProfiles.FindIndex(p => p.Id == AppConfiguration.Instance.ActiveProfileId);
+            if (idx >= 0) cbDevices.SelectedIndex = idx;
+        };
+        refreshDevices();
+
+        cbDevices.SelectedIndexChanged += (s, e) =>
+        {
+            if (cbDevices.SelectedIndex >= 0)
+            {
+                AppConfiguration.Instance.ActiveProfileId = AppConfiguration.Instance.MachineProfiles[cbDevices.SelectedIndex].Id;
+                AppConfiguration.Instance.Save();
+                if (SerialInterface.Instance.IsConnected)
+                {
+                    SerialInterface.Instance.Disconnect();
+                }
+                if (_workbench != null) _workbench.Invalidate();
+            }
+        };
+
+        flow.Controls.Add(lblDevice);
+        flow.Controls.Add(cbDevices);
+
         var btnConnect = new Button { Text = "Connect", Width = 200 };
         
         // Connect Logic
@@ -20,8 +52,8 @@ public partial class MainForm
              }
              else
              {
-                 string port = AppConfiguration.Instance.LastPortName;
-                 int baud = AppConfiguration.Instance.BaudRate;
+                 string port = AppConfiguration.Instance.ActiveProfile.PortName;
+                 int baud = AppConfiguration.Instance.ActiveProfile.BaudRate;
                  if (string.IsNullOrEmpty(port))
                  {
                      MessageBox.Show("Please select a COM port in Options.", "Configuration Missing");
@@ -74,7 +106,8 @@ public partial class MainForm
                  {
                      if (xMax > 0) 
                      {
-                         AppConfiguration.Instance.WorkAreaWidth = xMax;
+                         AppConfiguration.Instance.ActiveProfile.WorkAreaWidth = xMax;
+                         AppConfiguration.Instance.Save();
                          _workbench.Invalidate();
                      }
                  }
@@ -85,7 +118,8 @@ public partial class MainForm
                  {
                      if (yMax > 0) 
                      {
-                         AppConfiguration.Instance.WorkAreaHeight = yMax;
+                         AppConfiguration.Instance.ActiveProfile.WorkAreaHeight = yMax;
+                         AppConfiguration.Instance.Save();
                          _workbench.Invalidate();
                      }
                  }

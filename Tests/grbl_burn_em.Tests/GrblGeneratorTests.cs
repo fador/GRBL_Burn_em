@@ -38,7 +38,7 @@ public class GrblGeneratorTests
 
         Assert.Contains("G21", gcode);
         Assert.Contains("G90", gcode);
-        Assert.Contains("M4 S0", gcode);
+        Assert.Contains("M3 S0", gcode);
         Assert.Contains("M5", gcode);
         Assert.Contains("G0 X0 Y0", gcode);
     }
