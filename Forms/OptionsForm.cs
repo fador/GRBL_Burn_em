@@ -278,10 +278,16 @@ public class OptionsForm : Form
 
     private void BtnAddProfile_Click(object? sender, EventArgs e)
     {
-        var newProfile = new MachineProfile { Name = "New Device" };
-        _editingProfiles.Add(newProfile);
-        _cbProfiles.Items.Add(newProfile.Name);
-        _cbProfiles.SelectedIndex = _editingProfiles.Count - 1;
+        using (var dlg = new PresetSelectionForm())
+        {
+            if (dlg.ShowDialog() == DialogResult.OK && dlg.SelectedProfile != null)
+            {
+                var newProfile = dlg.SelectedProfile;
+                _editingProfiles.Add(newProfile);
+                _cbProfiles.Items.Add(newProfile.Name);
+                _cbProfiles.SelectedIndex = _cbProfiles.Items.Count - 1;
+            }
+        }
     }
 
     private void BtnDeleteProfile_Click(object? sender, EventArgs e)
