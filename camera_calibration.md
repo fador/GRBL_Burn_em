@@ -12,6 +12,10 @@ GRBL Burn'Em supports two camera setups: **stationary** (fixed above the work ar
 6. **Start Camera**, select "Network Camera (Emulator)"
 7. Follow the calibration steps below
 
+The emulator's **Board X/Y** is the **board origin** (outer top-left corner of the
+board): the board extends from (Board X, Board Y) toward +X/+Y, matching the
+registration convention. The board is drawn with its axes aligned to the machine axes.
+
 ## Workflow Overview
 
 ```
@@ -76,7 +80,7 @@ Computes intrinsic camera parameters (focal length, principal point, distortion)
 Grid indicators: ✓ (board detected), ✗ (skipped)
 
 ### Calibration
-- Click **Calibrate** (requires 3+ captured views)
+- Click **Calibrate** (requires 6+ captured views)
 - Review results: RMSE (reprojection error), fx/fy/cx/cy, k1/k2
 - Click **Save**
 
@@ -104,6 +108,15 @@ For a camera fixed above the work area. Computes an image-to-world homography.
 4. Verifies board detection, computes homography and camera pose
 5. Click **Save**
 
+**Convention:** the board position refers to the **board origin** — the outer
+top-left corner of the board (the corner of the top-left square) — and the board's
+axes must point along the machine's +X and +Y directions. For example, a 100×140 mm
+board placed with origin at (100, 50) covers the rectangle X∈[100,200], Y∈[50,190].
+
+After saving, enable the camera overlay — a stationary camera with registration is
+automatically warped and aligned to the work area using the homography (the manual
+Overlay X/Y/W/H settings are ignored while registration is active).
+
 Output:
 ```json
 "Registration": {
@@ -123,9 +136,10 @@ For a camera attached to the laser head. Computes the offset between laser focal
 ### Auto (ChArUco)
 1. Complete lens calibration first
 2. Place the ChArUco board on the work area at a known position
-3. Move the machine head over the board
-4. Click **Auto (ChArUco Board)**
-5. Computes camera-to-laser offset from board detection + machine position
+3. Enter the board's **X, Y and Rotation** (board origin, see Stationary Registration)
+4. Move the machine head over the board
+5. Click **Auto (ChArUco Board)**
+6. Computes camera-to-laser offset from board detection + machine position
 
 ### Manual (Burn Mark)
 1. Place material on the work area
@@ -186,7 +200,7 @@ Or run `Emulator\bin\Debug\net9.0-windows10.0.19041.0\grbl_burn_em_emulator.exe`
 | ChArUco Board | Dictionary | Select ArUco marker dictionary |
 | ChArUco Board | Squares | Number of chessboard squares |
 | ChArUco Board | Board size | Physical board size in mm |
-| ChArUco Board | Board X/Y | Position on virtual bed |
+| ChArUco Board | Board X/Y | Board origin (outer top-left corner) on virtual bed |
 | Jog Controls | D-pad | Move the virtual machine |
 | Jog Controls | Step/Feed | Movement parameters |
 | Toolbar | Clear Bed | Reset virtual bed to beige |
@@ -203,6 +217,10 @@ Or run `Emulator\bin\Debug\net9.0-windows10.0.19041.0\grbl_burn_em_emulator.exe`
 4. Board Setup: DICT_4X4_50, 5x5 squares, 24mm square, 17mm marker
 5. Lens Calibration: Auto Capture → Calibrate → Save
 6. The emulated camera will detect real ArUco patterns rendered on the virtual bed
+7. Stationary Registration: enter the board origin position (emulator Board X/Y),
+   compute and save — the live overlay is then warped onto the work area
+8. Head-Mounted Offset: enter board origin + rotation, run Auto — the result should
+   match the emulator's configured Cam Offset
 
 ## Configuration File
 

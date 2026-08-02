@@ -92,38 +92,43 @@ public class CameraCalibrationEngine
 
         if (charucoIds.Size < 6) return null;
 
-        int cornerCount = charucoIds.Size;
-        var idsArr = charucoIds.ToArray();
-        var cornersArr = charucoCorners.ToArray();
-
-        var objPts3D = new MCvPoint3D32f[cornerCount];
-        var imgPtsF = new PointF[cornerCount];
-        for (int i = 0; i < cornerCount; i++)
-        {
-            imgPtsF[i] = cornersArr[i];
-            int cid = idsArr[i];
-            int row = cid / BoardConfig.SquaresX;
-            int col = cid % BoardConfig.SquaresX;
-            objPts3D[i] = new MCvPoint3D32f(col * BoardConfig.SquareLengthMm, row * BoardConfig.SquareLengthMm, 0);
-        }
-
         int imgW = image.Width, imgH = image.Height;
+        double fInit = Math.Max(imgW, imgH);
         using var cameraMatrix = MatFromArray(new double[] {
-            Math.Max(imgW, imgH), 0, imgW / 2.0, 0, Math.Max(imgW, imgH), imgH / 2.0, 0, 0, 1
+            fInit, 0, imgW / 2.0,
+            0, fInit, imgH / 2.0,
+            0, 0, 1
         }, 3, 3);
         using var distCoeffs = MatFromArray(new double[5], 5, 1);
 
-        var allObj = new MCvPoint3D32f[][] { objPts3D };
-        var allImg = new PointF[][] { imgPtsF };
+        using var allCorners = new VectorOfVectorOfPointF();
+        allCorners.Push(charucoCorners);
+        using var allIds = new VectorOfVectorOfInt();
+        allIds.Push(charucoIds);
+
+        var rvecs = new VectorOfMat();
+        var tvecs = new VectorOfMat();
 
         var flags = CalibType.UseIntrinsicGuess | CalibType.FixAspectRatio
                   | CalibType.FixPrincipalPoint | CalibType.ZeroTangentDist
                   | CalibType.FixK3;
 
-        double rmse = CvInvoke.CalibrateCamera(
-            allObj, allImg, new Size(imgW, imgH),
-            cameraMatrix, distCoeffs, flags, new MCvTermCriteria(30, 0.001),
-            out Mat[] rvecs, out Mat[] tvecs);
+        double rmse;
+        try
+        {
+            rmse = ArucoInvoke.CalibrateCameraCharuco(
+                allCorners, allIds, board, new Size(imgW, imgH),
+                cameraMatrix, distCoeffs, rvecs, tvecs, flags,
+                new MCvTermCriteria(30, 0.001));
+        }
+        catch
+        {
+            rvecs.Dispose();
+            tvecs.Dispose();
+            return null;
+        }
+        rvecs.Dispose();
+        tvecs.Dispose();
 
         double[] cm = new double[9];
         double[] dc = new double[5];
@@ -230,34 +235,19 @@ public class CameraCalibrationEngine
         if (!detection.Detected) return null;
 
         int cornerCount = detection.CharucoIds!.Size;
-        var idsArr = detection.CharucoIds.ToArray();
-        var cornersArr = detection.CharucoCorners!.ToArray();
+        if (cornerCount < 6) return null;
 
-        var objPts = new PointF[cornerCount];
-        var imgPts = new PointF[cornerCount];
-        for (int i = 0; i < cornerCount; i++)
-        {
-            imgPts[i] = cornersArr[i];
-            int id = idsArr[i];
-            int row = id / BoardConfig.SquaresX;
-            int col = id % BoardConfig.SquaresX;
-            objPts[i] = new PointF(col * BoardConfig.SquareLengthMm, row * BoardConfig.SquareLengthMm);
-        }
-
-        if (cornerCount < 6)
-            return null;
-
+        using var board = BoardConfig.CreateBoard();
         using var cm = MatFromArray(intrinsics.CameraMatrix, 3, 3);
         using var dc = MatFromArray(intrinsics.DistCoeffs, 5, 1);
         using var rvecMat = new Mat();
         using var tvecMat = new Mat();
-        using var vObj = new VectorOfPointF(objPts);
-        using var vImg = new VectorOfPointF(imgPts);
 
         bool ok;
         try
         {
-            ok = CvInvoke.SolvePnP(vObj, vImg, cm, dc, rvecMat, tvecMat, false, SolvePnpMethod.Iterative);
+            ok = ArucoInvoke.EstimatePoseCharucoBoard(
+                detection.CharucoCorners!, detection.CharucoIds, board, cm, dc, rvecMat, tvecMat, false);
         }
         catch
         {
@@ -269,7 +259,7 @@ public class CameraCalibrationEngine
         Marshal.Copy(rvecMat.DataPointer, rvec, 0, 3);
         Marshal.Copy(tvecMat.DataPointer, tvec, 0, 3);
 
-        double reproj = ComputeReprojectionError(vObj, vImg, rvec, tvec, cm, dc);
+        double reproj = ComputeCharucoReprojectionError(detection, rvec, tvec, cm, dc);
         return (rvec, tvec, reproj);
     }
 
@@ -366,29 +356,123 @@ public class CameraCalibrationEngine
                 new Bgr(255, 0, 0).MCvScalar);
     }
 
-    private static double ComputeReprojectionError(
-        VectorOfPointF objPoints, VectorOfPointF imgPoints,
-        double[] rvec, double[] tvec, Mat cameraMatrix, Mat distCoeffs)
+    /// <summary>
+    /// Maps ChArUco corner IDs to board-plane coordinates (mm). OpenCV indexes the
+    /// chessboard corners row-major with (SquaresX-1) corners per row, starting at
+    /// the outer top-left corner of the board: corner id = row*(SquaresX-1) + col,
+    /// position = ((col+1)*squareLength, (row+1)*squareLength).
+    /// </summary>
+    private MCvPoint3D32f[] GetBoardObjectPoints(int[] charucoIds)
     {
-        using var rvecMat = MatFromArray(rvec, 3, 1);
-        using var tvecMat = MatFromArray(tvec, 3, 1);
-        using var proj = new Mat();
-        CvInvoke.ProjectPoints(objPoints, rvecMat, tvecMat, cameraMatrix, distCoeffs, proj);
+        int cornersPerRow = BoardConfig.SquaresX - 1;
+        var pts = new MCvPoint3D32f[charucoIds.Length];
+        for (int i = 0; i < charucoIds.Length; i++)
+        {
+            int row = charucoIds[i] / cornersPerRow;
+            int col = charucoIds[i] % cornersPerRow;
+            pts[i] = new MCvPoint3D32f(
+                (col + 1) * BoardConfig.SquareLengthMm,
+                (row + 1) * BoardConfig.SquareLengthMm, 0);
+        }
+        return pts;
+    }
+
+    private double ComputeCharucoReprojectionError(
+        DetectionResult detection, double[] rvec, double[] tvec, Mat cameraMatrix, Mat distCoeffs)
+    {
+        var objPts = GetBoardObjectPoints(detection.CharucoIds!.ToArray());
+        var imgPts = detection.CharucoCorners!.ToArray();
+        double[] cm = new double[9];
+        double[] dc = new double[5];
+        Marshal.Copy(cameraMatrix.DataPointer, cm, 0, 9);
+        Marshal.Copy(distCoeffs.DataPointer, dc, 0, Math.Min(5, distCoeffs.Rows * distCoeffs.Cols));
+        return ComputeReprojectionError(objPts, imgPts, rvec, tvec, cm, dc);
+    }
+
+    private static double ComputeReprojectionError(
+        MCvPoint3D32f[] objPoints, PointF[] imgPoints,
+        double[] rvec, double[] tvec, double[] cameraMatrix, double[] distCoeffs)
+    {
+        if (cameraMatrix.Length < 6 || distCoeffs.Length < 4 || objPoints.Length == 0)
+            return double.MaxValue;
+
+        double[] R = RodriguesToMatrix(rvec);
+        double fx = cameraMatrix[0], fy = cameraMatrix[4];
+        double cx = cameraMatrix[2], cy = cameraMatrix[5];
+        double k1 = distCoeffs[0], k2 = distCoeffs[1];
+        double p1 = distCoeffs[2], p2 = distCoeffs[3];
+        double k3 = distCoeffs.Length > 4 ? distCoeffs[4] : 0;
 
         double totalErr = 0;
-        int count = Math.Min(imgPoints.Size, proj.Rows);
-        var imgArr = imgPoints.ToArray();
-
+        int count = Math.Min(imgPoints.Length, objPoints.Length);
         for (int i = 0; i < count; i++)
         {
-            double[] projPt = new double[2];
-            Marshal.Copy(proj.DataPointer + i * proj.Step, projPt, 0, 2);
-            double dx = (double)imgArr[i].X - projPt[0];
-            double dy = (double)imgArr[i].Y - projPt[1];
+            double Xc = R[0] * objPoints[i].X + R[1] * objPoints[i].Y + R[2] * objPoints[i].Z + tvec[0];
+            double Yc = R[3] * objPoints[i].X + R[4] * objPoints[i].Y + R[5] * objPoints[i].Z + tvec[1];
+            double Zc = R[6] * objPoints[i].X + R[7] * objPoints[i].Y + R[8] * objPoints[i].Z + tvec[2];
+            if (Zc <= 0) return double.MaxValue;
+
+            double xn = Xc / Zc, yn = Yc / Zc;
+            double r2 = xn * xn + yn * yn;
+            double radial = 1 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2;
+            double xd = xn * radial + 2 * p1 * xn * yn + p2 * (r2 + 2 * xn * xn);
+            double yd = yn * radial + p1 * (r2 + 2 * yn * yn) + 2 * p2 * xn * yn;
+
+            double u = fx * xd + cx;
+            double v = fy * yd + cy;
+            double dx = u - imgPoints[i].X;
+            double dy = v - imgPoints[i].Y;
             totalErr += Math.Sqrt(dx * dx + dy * dy);
         }
 
         return count > 0 ? totalErr / count : double.MaxValue;
+    }
+
+    /// <summary>
+    /// Converts a rotation vector (Rodrigues) to a 3x3 row-major rotation matrix.
+    /// </summary>
+    public static double[] RodriguesToMatrix(double[] rvec)
+    {
+        double theta = Math.Sqrt(rvec[0] * rvec[0] + rvec[1] * rvec[1] + rvec[2] * rvec[2]);
+        var R = new double[9];
+        if (theta < 1e-12)
+        {
+            R[0] = 1; R[4] = 1; R[8] = 1;
+            return R;
+        }
+
+        double rx = rvec[0] / theta, ry = rvec[1] / theta, rz = rvec[2] / theta;
+        double c = Math.Cos(theta), s = Math.Sin(theta), v = 1 - c;
+        R[0] = rx * rx * v + c;     R[1] = rx * ry * v - rz * s; R[2] = rx * rz * v + ry * s;
+        R[3] = rx * ry * v + rz * s; R[4] = ry * ry * v + c;     R[5] = ry * rz * v - rx * s;
+        R[6] = rx * rz * v - ry * s; R[7] = ry * rz * v + rx * s; R[8] = rz * rz * v + c;
+        return R;
+    }
+
+    /// <summary>
+    /// Projects a board-plane point (mm, Z=0) to distorted image pixels using the
+    /// pinhole + radial/tangential distortion model (identical to OpenCV).
+    /// </summary>
+    public static PointF ProjectBoardPoint(
+        double bx, double by, double[] rvec, double[] tvec, CameraIntrinsics intrinsics)
+    {
+        double[] R = RodriguesToMatrix(rvec);
+        double fx = intrinsics.CameraMatrix[0], fy = intrinsics.CameraMatrix[4];
+        double cx = intrinsics.CameraMatrix[2], cy = intrinsics.CameraMatrix[5];
+        double[] dc = intrinsics.DistCoeffs;
+        double k1 = dc[0], k2 = dc[1], p1 = dc[2], p2 = dc[3], k3 = dc.Length > 4 ? dc[4] : 0;
+
+        double Xc = R[0] * bx + R[1] * by + tvec[0];
+        double Yc = R[3] * bx + R[4] * by + tvec[1];
+        double Zc = R[6] * bx + R[7] * by + tvec[2];
+
+        double xn = Xc / Zc, yn = Yc / Zc;
+        double r2 = xn * xn + yn * yn;
+        double radial = 1 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2;
+        double xd = xn * radial + 2 * p1 * xn * yn + p2 * (r2 + 2 * xn * xn);
+        double yd = yn * radial + p1 * (r2 + 2 * yn * yn) + 2 * p2 * xn * yn;
+
+        return new PointF((float)(fx * xd + cx), (float)(fy * yd + cy));
     }
 
     private static Mat MatFromArray(double[] data, int rows, int cols)
@@ -479,7 +563,7 @@ public class CameraCalibrationEngine
             CvInvoke.CvtColor(mat, temp1, ColorConversion.Gray2Bgr);
             display = temp1;
         }
-        else if (mat.NumberOfChannels == 6)
+        else if (mat.NumberOfChannels == 4)
         {
             temp2 = new Mat();
             CvInvoke.CvtColor(mat, temp2, ColorConversion.Bgra2Bgr);

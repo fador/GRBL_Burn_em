@@ -7,7 +7,10 @@
 using System;
 using System.Drawing;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Emgu.CV;
+using Emgu.CV.CvEnum;
 using grbl_burn_em.Data;
 
 namespace grbl_burn_em.Forms;
@@ -26,6 +29,10 @@ public partial class OffsetCalibrationForm : Form
     private Button _btnJogYMinus = null!, _btnJogYPlus = null!;
     private NumericUpDown _nudJogStep = null!;
     private Button _btnLockOffset = null!;
+
+    private NumericUpDown _nudBoardX = null!;
+    private NumericUpDown _nudBoardY = null!;
+    private NumericUpDown _nudBoardRot = null!;
 
     private float _offsetX, _offsetY, _offsetZ;
     private PointF _manualStartPos;
@@ -76,17 +83,31 @@ public partial class OffsetCalibrationForm : Form
         _picPreview = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black };
         mainLayout.Controls.Add(_picPreview, 0, 0);
 
-        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 12, Padding = new Padding(8) };
+        var sidePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 13, Padding = new Padding(8) };
 
         _lblInfo = new Label { Text = "Checking calibration status...", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = true };
         sidePanel.Controls.Add(_lblInfo, 0, 0);
 
+        var boardGroup = new GroupBox { Text = "Board position on work area", Dock = DockStyle.Fill };
+        var boardLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3 };
+        boardLayout.Controls.Add(new Label { Text = "Board X (mm):", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
+        _nudBoardX = new NumericUpDown { Minimum = -5000, Maximum = 5000, DecimalPlaces = 2, Width = 85 };
+        boardLayout.Controls.Add(_nudBoardX, 1, 0);
+        boardLayout.Controls.Add(new Label { Text = "Board Y (mm):", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
+        _nudBoardY = new NumericUpDown { Minimum = -5000, Maximum = 5000, DecimalPlaces = 2, Width = 85 };
+        boardLayout.Controls.Add(_nudBoardY, 1, 1);
+        boardLayout.Controls.Add(new Label { Text = "Rotation (deg):", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft }, 0, 2);
+        _nudBoardRot = new NumericUpDown { Minimum = -360, Maximum = 360, DecimalPlaces = 1, Width = 85 };
+        boardLayout.Controls.Add(_nudBoardRot, 1, 2);
+        boardGroup.Controls.Add(boardLayout);
+        sidePanel.Controls.Add(boardGroup, 0, 1);
+
         _btnChArUco = new Button { Text = "Auto (ChArUco Board)", Dock = DockStyle.Fill, Height = 40 };
         _btnChArUco.Click += async (s, e) => await AutoCalibrate();
-        sidePanel.Controls.Add(_btnChArUco, 0, 1);
+        sidePanel.Controls.Add(_btnChArUco, 0, 2);
 
         var sep = new Label { Text = "--- or ---", TextAlign = ContentAlignment.MiddleCenter, Height = 22 };
-        sidePanel.Controls.Add(sep, 0, 2);
+        sidePanel.Controls.Add(sep, 0, 3);
 
         // Manual controls
         var manualPanel = new Panel { Dock = DockStyle.Fill, Height = 160 };
@@ -119,21 +140,21 @@ public partial class OffsetCalibrationForm : Form
         manualLayout.Controls.Add(stepPanel, 0, 3);
 
         manualPanel.Controls.Add(manualLayout);
-        sidePanel.Controls.Add(manualPanel, 0, 3);
+        sidePanel.Controls.Add(manualPanel, 0, 4);
 
         _btnLockOffset = new Button { Text = "Lock Current Offset", Dock = DockStyle.Fill, Height = 35, Enabled = false };
         _btnLockOffset.Click += (s, e) => LockManualOffset();
-        sidePanel.Controls.Add(_btnLockOffset, 0, 4);
+        sidePanel.Controls.Add(_btnLockOffset, 0, 5);
 
         _lblOffset = new Label { Text = "Offset: -- mm", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Height = 25 };
-        sidePanel.Controls.Add(_lblOffset, 0, 5);
+        sidePanel.Controls.Add(_lblOffset, 0, 6);
 
         _lblHeight = new Label { Text = "Height: -- mm", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Height = 25 };
-        sidePanel.Controls.Add(_lblHeight, 0, 6);
+        sidePanel.Controls.Add(_lblHeight, 0, 7);
 
         _btnSave = new Button { Text = "Save Offset", Dock = DockStyle.Fill, Height = 35, Enabled = false };
         _btnSave.Click += (s, e) => SaveOffset();
-        sidePanel.Controls.Add(_btnSave, 0, 7);
+        sidePanel.Controls.Add(_btnSave, 0, 8);
 
         var movePanel = new Panel { Dock = DockStyle.Fill };
         var moveLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
@@ -152,14 +173,14 @@ public partial class OffsetCalibrationForm : Form
         moveLayout.Controls.Add(goY);
         moveLayout.Controls.Add(btnGo);
         movePanel.Controls.Add(moveLayout);
-        sidePanel.Controls.Add(movePanel, 0, 8);
+        sidePanel.Controls.Add(movePanel, 0, 9);
 
-        sidePanel.Controls.Add(new Label { Text = "", AutoSize = true }, 0, 9);
-        sidePanel.Controls.Add(new Label { Text = "Manual: place material under laser, pulse to burn mark, jog until camera crosshair aligns with mark, then Lock.", Font = new Font("Arial", 7), ForeColor = Color.Gray, AutoSize = true }, 0, 10);
+        sidePanel.Controls.Add(new Label { Text = "", AutoSize = true }, 0, 10);
+        sidePanel.Controls.Add(new Label { Text = "Manual: place material under laser, pulse to burn mark, jog until camera crosshair aligns with mark, then Lock.", Font = new Font("Arial", 7), ForeColor = Color.Gray, AutoSize = true }, 0, 11);
 
         var btnRefresh = new Button { Text = "Refresh Status", Dock = DockStyle.Fill, Height = 25 };
         btnRefresh.Click += (s, e) => UpdateCalibrationStatus();
-        sidePanel.Controls.Add(btnRefresh, 0, 11);
+        sidePanel.Controls.Add(btnRefresh, 0, 12);
 
         mainLayout.Controls.Add(sidePanel, 1, 0);
         Controls.Add(mainLayout);
@@ -253,7 +274,9 @@ public partial class OffsetCalibrationForm : Form
 
             var (rvec, tvec, reproj) = result.Item1.Value;
 
-            float boardWx = 0f, boardWy = 0f;
+            float boardWx = (float)_nudBoardX.Value;
+            float boardWy = (float)_nudBoardY.Value;
+            float boardRotDeg = (float)_nudBoardRot.Value;
             float machineX = 0f, machineY = 0f;
             if (SerialInterface.Instance.IsConnected)
             {
@@ -261,9 +284,32 @@ public partial class OffsetCalibrationForm : Form
                 machineX = pos.X; machineY = pos.Y;
             }
 
-            _offsetX = boardWx - (float)tvec[0] - machineX;
-            _offsetY = boardWy + (float)tvec[1] - machineY;
-            _offsetZ = (float)tvec[2];
+            // Camera center in the board coordinate frame: C_b = -R^T * tvec,
+            // where R/tvec map board coordinates to camera coordinates.
+            using (var rvecMat = new Mat(3, 1, DepthType.Cv64F, 1))
+            {
+                Marshal.Copy(rvec, 0, rvecMat.DataPointer, 3);
+                using var rotMat = new Mat();
+                CvInvoke.Rodrigues(rvecMat, rotMat);
+                double[] R = new double[9];
+                Marshal.Copy(rotMat.DataPointer, R, 0, 9);
+
+                double t0 = tvec[0], t1 = tvec[1], t2 = tvec[2];
+                double cbx = -(R[0] * t0 + R[3] * t1 + R[6] * t2);
+                double cby = -(R[1] * t0 + R[4] * t1 + R[7] * t2);
+                double cbz = -(R[2] * t0 + R[5] * t1 + R[8] * t2);
+
+                // Board -> world: rotate by the entered angle, translate to the board origin.
+                double rad = boardRotDeg * Math.PI / 180.0;
+                double cosR = Math.Cos(rad), sinR = Math.Sin(rad);
+                double camWorldX = cosR * cbx - sinR * cby + boardWx;
+                double camWorldY = sinR * cbx + cosR * cby + boardWy;
+                double camWorldZ = cbz;
+
+                _offsetX = (float)(camWorldX - machineX);
+                _offsetY = (float)(camWorldY - machineY);
+                _offsetZ = (float)camWorldZ;
+            }
 
             _lblOffset.Text = $"Offset: ({_offsetX:F1}, {_offsetY:F1}) mm";
             _lblHeight.Text = $"Height: {_offsetZ:F1} mm";

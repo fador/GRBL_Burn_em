@@ -92,6 +92,27 @@ public class CameraCalibrationAccuracyTests
         Assert.Null(det.CharucoIds);
     }
 
+    [Fact]
+    public void DetectBoard_FullBoardView_YieldsAllInternalCorners()
+    {
+        var config = new CharucoBoardConfig
+        {
+            DictionaryName = "DICT_4X4_50", SquaresX = 5, SquaresY = 7,
+            SquareLengthMm = 20f, MarkerLengthMm = 15f
+        };
+
+        using var img = GenerateBoardImage(config);
+        var engine = new CameraCalibrationEngine(config);
+        var det = engine.DetectBoard(img);
+
+        Assert.True(det.Detected);
+        // 5x7 squares -> (5-1)*(7-1) = 24 internal corners, ids 0..23 row-major.
+        Assert.Equal(24, det.CharucoIds!.Size);
+        var ids = det.CharucoIds.ToArray();
+        Assert.Equal(0, ids.Min());
+        Assert.Equal(23, ids.Max());
+    }
+
     // ================================================================
     // Lens Calibration Tests
     // ================================================================
@@ -193,9 +214,9 @@ public class CameraCalibrationAccuracyTests
         for (int i = 0; i < boardPts.Length; i++)
         {
             int id = idsArr[i];
-            int row = id / config.SquaresX;
-            int col = id % config.SquaresX;
-            boardPts[i] = new MCvPoint3D32f(col * 20f, row * 20f, 0);
+            int row = id / (config.SquaresX - 1);
+            int col = id % (config.SquaresX - 1);
+            boardPts[i] = new MCvPoint3D32f((col + 1) * 20f, (row + 1) * 20f, 0);
         }
 
         var frames = new List<Mat>();
@@ -324,6 +345,85 @@ public class CameraCalibrationAccuracyTests
 
         var engine = new CameraCalibrationEngine(config);
         Assert.Null(engine.SolveCameraPose(empty, intrinsics));
+    }
+
+    [Fact]
+    public void SolveCameraPose_SyntheticPerspectiveView_RecoversPoseAndHomography()
+    {
+        var config = new CharucoBoardConfig
+        {
+            DictionaryName = "DICT_4X4_50", SquaresX = 5, SquaresY = 7,
+            SquareLengthMm = 20f, MarkerLengthMm = 15f
+        };
+
+        int imgW = 1280, imgH = 960;
+        double fx = 800, fy = 800, cx = 640, cy = 480;
+        var intrinsics = new CameraIntrinsics
+        {
+            CameraMatrix = new[] { fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0 },
+            DistCoeffs = new double[5],
+            CalibratedImageWidth = imgW,
+            CalibratedImageHeight = imgH
+        };
+
+        using var boardImg = GenerateBoardImage(config);
+
+        // Known pose of the board relative to the camera.
+        double rx = 0.15, ry = -0.1, rz = 0.05;
+        double tx = 20, ty = -15, tz = 300;
+
+        float L = config.SquareLengthMm;
+        var boardCorners = new MCvPoint3D32f[]
+        {
+            new(0, 0, 0),
+            new(config.SquaresX * L, 0, 0),
+            new(config.SquaresX * L, config.SquaresY * L, 0),
+            new(0, config.SquaresY * L, 0)
+        };
+
+        double[] rvecTrue = { rx, ry, rz };
+        double[] tvecTrue = { tx, ty, tz };
+        var imgPts = new PointF[4];
+        for (int i = 0; i < 4; i++)
+            imgPts[i] = CameraCalibrationEngine.ProjectBoardPoint(
+                boardCorners[i].X, boardCorners[i].Y, rvecTrue, tvecTrue, intrinsics);
+
+        // Warp the generated board image into the perspective view. The board region in
+        // the generated image is [80, 80+5*120] x [80, 80+7*120] (120 px per 20 mm square).
+        const int margin = 80;
+        const int pxPerSquare = 120;
+        var srcPts = new PointF[]
+        {
+            new(margin, margin),
+            new(margin + config.SquaresX * pxPerSquare, margin),
+            new(margin + config.SquaresX * pxPerSquare, margin + config.SquaresY * pxPerSquare),
+            new(margin, margin + config.SquaresY * pxPerSquare)
+        };
+
+        using var H = CvInvoke.GetPerspectiveTransform(srcPts, imgPts);
+        using var view = new Mat(imgH, imgW, DepthType.Cv8U, 1);
+        view.SetTo(new MCvScalar(0));
+        CvInvoke.WarpPerspective(boardImg, view, H, new System.Drawing.Size(imgW, imgH));
+
+        var engine = new CameraCalibrationEngine(config);
+        var pose = engine.SolveCameraPose(view, intrinsics);
+
+        Assert.NotNull(pose);
+        Assert.True(pose.Value.reprojError < 1.0, $"reproj error {pose.Value.reprojError:F3}");
+        Assert.True(pose.Value.tvec[2] > 0, $"camera must be in front of the board (tz={pose.Value.tvec[2]:F1})");
+
+        // Homography round-trip: image -> world must map the projected board corners back
+        // to their true board coordinates (board placed at world origin, no rotation).
+        var H_img2world = engine.ComputeWorkAreaHomography(view, intrinsics, 0, 0, 0);
+        Assert.NotNull(H_img2world);
+        for (int i = 0; i < 4; i++)
+        {
+            var w = ApplyHomography(H_img2world, imgPts[i].X, imgPts[i].Y);
+            Assert.True(Math.Abs(w.X - boardCorners[i].X) < 3.0,
+                $"corner {i}: world X {w.X:F1} vs {boardCorners[i].X:F1}");
+            Assert.True(Math.Abs(w.Y - boardCorners[i].Y) < 3.0,
+                $"corner {i}: world Y {w.Y:F1} vs {boardCorners[i].Y:F1}");
+        }
     }
 
     // ================================================================
@@ -516,6 +616,32 @@ public class CameraCalibrationAccuracyTests
         Assert.True(bmp.Width > 0 && bmp.Height > 0);
     }
 
+    [Fact]
+    public void SavePreviewImage_OutputIsDetectable()
+    {
+        var config = new CharucoBoardConfig
+        {
+            DictionaryName = "DICT_4X4_50", SquaresX = 5, SquaresY = 7,
+            SquareLengthMm = 20f, MarkerLengthMm = 15f
+        };
+
+        var path = Path.Combine(Path.GetTempPath(), "charuco_board_test.png");
+        try
+        {
+            config.SavePreviewImage(path);
+            using var img = CvInvoke.Imread(path, ImreadModes.Grayscale);
+            Assert.False(img.IsEmpty);
+
+            var engine = new CameraCalibrationEngine(config);
+            var det = engine.DetectBoard(img);
+            Assert.True(det.Detected, "Saved board PNG must be detectable (no inversion)");
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     // ================================================================
     // CalibrationStore Tests
     // ================================================================
@@ -598,8 +724,8 @@ public class CameraCalibrationAccuracyTests
         var H_shifted = engine.ComputeWorkAreaHomography(img, intrinsics, 100, 50, 0);
         var H_origin = engine.ComputeWorkAreaHomography(img, intrinsics, 0, 0, 0);
 
-        if (H_shifted == null || H_origin == null)
-            return; // SolvePnP may fail for perfectly flat synthetic images
+        Assert.NotNull(H_shifted);
+        Assert.NotNull(H_origin);
 
         // Project the image center
         var cx = img.Width / 2.0;
@@ -633,6 +759,42 @@ public class CameraCalibrationAccuracyTests
         // the camera must be at Y=20.
         // If machine is at Y=0, then OffsetY = CameraY - MachineY = 20 - 0 = 20.
         Assert.Equal(20f, offsetY);
+    }
+
+    [Fact]
+    public void OffsetFormula_RotationAware_RecoversCameraPosition()
+    {
+        // Board origin at world (100, 50). Camera above the board looking straight down
+        // with image-up aligned to machine +Y: board->camera R = diag(1,-1,-1), and
+        // tvec = board origin in camera frame = (Bx-Cx, Cy-By, Cz).
+        double[] R = { 1, 0, 0, 0, -1, 0, 0, 0, -1 };
+        double[] t = { 100 - 150, 60 - 50, 100 }; // camera at (150, 60, 100)
+
+        // Camera center in board frame: C_b = -R^T * t
+        double cbx = -(R[0] * t[0] + R[3] * t[1] + R[6] * t[2]);
+        double cby = -(R[1] * t[0] + R[4] * t[1] + R[7] * t[2]);
+        double cbz = -(R[2] * t[0] + R[5] * t[1] + R[8] * t[2]);
+
+        float boardWx = 100f, boardWy = 50f;
+        double camWorldX = cbx + boardWx;
+        double camWorldY = cby + boardWy;
+
+        Assert.Equal(150, camWorldX, 3);
+        Assert.Equal(60, camWorldY, 3);
+        Assert.Equal(100, cbz, 3);
+
+        // Same formula with a board rotated 30 degrees: the camera center in the board
+        // frame is rotated accordingly, and the recovery must still give the camera
+        // world position.
+        double theta = 30 * Math.PI / 180.0;
+        double cosT = Math.Cos(theta), sinT = Math.Sin(theta);
+        double dx = 150 - boardWx, dy = 60 - boardWy;
+        double cbXr = cosT * dx + sinT * dy;
+        double cbYr = -sinT * dx + cosT * dy;
+        double recX = cosT * cbXr - sinT * cbYr + boardWx;
+        double recY = sinT * cbXr + cosT * cbYr + boardWy;
+        Assert.Equal(150, recX, 3);
+        Assert.Equal(60, recY, 3);
     }
 
     [Fact]

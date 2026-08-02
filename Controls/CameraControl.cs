@@ -30,6 +30,8 @@ namespace grbl_burn_em.Controls
         private Button _btnRefresh = null!;
         private CheckBox _chkMounted = null!;
 
+        private long _lastOverlayProcessMs;
+
         public CameraControl()
         {
             InitializeComponent();
@@ -395,46 +397,87 @@ namespace grbl_burn_em.Controls
 
         private void OnFrameReceived(Bitmap frame)
         {
-            if (_chkOverlay.Checked)
+            if (!_chkOverlay.Checked)
             {
-                try
+                frame.Dispose();
+                return;
+            }
+
+            try
+            {
+                var store = CameraManager.Instance.CalibrationStore;
+                var config = AppConfiguration.Instance;
+
+                // Stationary camera with registration: rectify the frame into world coordinates.
+                if (store.HasRegistration && !config.CameraIsMounted)
                 {
-                    this.BeginInvoke(new Action(() => 
+                    if (Environment.TickCount64 - _lastOverlayProcessMs < 150)
+                    {
+                        frame.Dispose();
+                        return;
+                    }
+                    _lastOverlayProcessMs = Environment.TickCount64;
+
+                    if (!CameraOverlayMapper.TryCreateRectifiedOverlay(
+                            frame, store.Registration!.Homography,
+                            out var rectified, out var worldPos, out var worldSize))
+                    {
+                        frame.Dispose();
+                        return;
+                    }
+
+                    this.BeginInvoke(new Action(() =>
                     {
                         var wb = GetWorkbench();
                         if (wb != null && !_chkOverlay.IsDisposed)
                         {
-                            // Prevent fighting over the same frame if multiple controls are open
-                            if (wb.OverlayImage == frame) 
-                            {
-                                return;
-                            }
-
                             var old = wb.OverlayImage;
-                            wb.OverlayImage = frame;
-                            
-                            var config = AppConfiguration.Instance;
+                            wb.OverlayImage = rectified;
                             wb.OverlayImageOpacity = config.CameraOverlayOpacity;
-                            wb.OverlayImagePosition = new PointF(config.CameraOverlayX, config.CameraOverlayY);
-                            wb.OverlayImageSize = new SizeF(config.CameraOverlayWidth, config.CameraOverlayHeight);
-                            
+                            wb.OverlayImagePosition = worldPos;
+                            wb.OverlayImageSize = worldSize;
                             wb.Invalidate();
                             old?.Dispose();
                         }
                         else
                         {
-                            frame.Dispose();
+                            rectified.Dispose();
                         }
                     }));
+                    frame.Dispose();
+                    return;
                 }
-                catch (Exception ex)
+
+                this.BeginInvoke(new Action(() =>
                 {
-                    System.Diagnostics.Debug.WriteLine($"Overlay Update Error: {ex.Message}");
-                    frame.Dispose(); 
-                }
+                    var wb = GetWorkbench();
+                    if (wb != null && !_chkOverlay.IsDisposed)
+                    {
+                        // Prevent fighting over the same frame if multiple controls are open
+                        if (wb.OverlayImage == frame)
+                        {
+                            return;
+                        }
+
+                        var old = wb.OverlayImage;
+                        wb.OverlayImage = frame;
+
+                        wb.OverlayImageOpacity = config.CameraOverlayOpacity;
+                        wb.OverlayImagePosition = new PointF(config.CameraOverlayX, config.CameraOverlayY);
+                        wb.OverlayImageSize = new SizeF(config.CameraOverlayWidth, config.CameraOverlayHeight);
+
+                        wb.Invalidate();
+                        old?.Dispose();
+                    }
+                    else
+                    {
+                        frame.Dispose();
+                    }
+                }));
             }
-            else
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"Overlay Update Error: {ex.Message}");
                 frame.Dispose();
             }
         }

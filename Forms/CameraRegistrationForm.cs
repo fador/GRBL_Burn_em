@@ -27,6 +27,9 @@ public partial class CameraRegistrationForm : Form
 
     private StationaryRegistration? _registration;
 
+    private Mat? _rawFrame;
+    private readonly object _rawFrameLock = new();
+
     public CameraRegistrationForm()
     {
         InitializeComponent();
@@ -119,7 +122,15 @@ public partial class CameraRegistrationForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) CameraManager.Instance.FrameReceived -= OnFrameReceived;
+        if (disposing)
+        {
+            CameraManager.Instance.FrameReceived -= OnFrameReceived;
+            lock (_rawFrameLock)
+            {
+                _rawFrame?.Dispose();
+                _rawFrame = null;
+            }
+        }
         base.Dispose(disposing);
     }
 
@@ -130,6 +141,13 @@ public partial class CameraRegistrationForm : Form
         {
             using var mat = BitmapToMat(frame);
             frame.Dispose();
+
+            lock (_rawFrameLock)
+            {
+                var old = _rawFrame;
+                _rawFrame = mat.Clone();
+                old?.Dispose();
+            }
 
             var store = CameraManager.Instance.CalibrationStore;
             if (store.BoardConfig == null || !store.HasIntrinsics)
@@ -174,14 +192,18 @@ public partial class CameraRegistrationForm : Form
                 return;
             }
 
-            if (_picPreview.Image == null)
+            Mat? rawCopy = null;
+            lock (_rawFrameLock)
             {
-                MessageBox.Show(this, "No camera frame available.", "Error");
+                if (_rawFrame != null) rawCopy = _rawFrame.Clone();
+            }
+            if (rawCopy == null)
+            {
+                MessageBox.Show(this, "No camera frame available yet. Wait for the preview.", "Error");
                 return;
             }
 
-            using var bmp = new Bitmap(_picPreview.Image);
-            using var mat = BitmapToMat(bmp);
+            using var mat = rawCopy;
 
             var engine = new CameraCalibrationEngine(store.BoardConfig);
             var result = engine.ComputeWorkAreaHomographyWithPose(
