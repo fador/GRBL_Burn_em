@@ -333,6 +333,168 @@ public class CameraCalibrationEngine
         return dst;
     }
 
+    /// <summary>
+    /// Returns a copy of the intrinsics scaled to a different image resolution
+    /// (fx, fy, cx, cy scale proportionally; distortion coefficients are unchanged).
+    /// Intrinsics calibrated at one resolution must be scaled before use with frames
+    /// of another resolution, otherwise undistortion and FOV math are wrong.
+    /// </summary>
+    public static CameraIntrinsics ScaleIntrinsics(CameraIntrinsics src, int newWidth, int newHeight)
+    {
+        if (!src.IsValid || newWidth <= 0 || newHeight <= 0) return src;
+        int oldW = src.CalibratedImageWidth > 0 ? src.CalibratedImageWidth : newWidth;
+        int oldH = src.CalibratedImageHeight > 0 ? src.CalibratedImageHeight : newHeight;
+        if (oldW == newWidth && oldH == newHeight) return src;
+
+        double sx = (double)newWidth / oldW;
+        double sy = (double)newHeight / oldH;
+        var cm = (double[])src.CameraMatrix.Clone();
+        cm[0] *= sx; cm[2] *= sx;
+        cm[4] *= sy; cm[5] *= sy;
+
+        return new CameraIntrinsics
+        {
+            CameraMatrix = cm,
+            DistCoeffs = (double[])src.DistCoeffs.Clone(),
+            ReprojectionError = src.ReprojectionError,
+            UsedViewCount = src.UsedViewCount,
+            CalibratedImageWidth = newWidth,
+            CalibratedImageHeight = newHeight
+        };
+    }
+
+    /// <summary>
+    /// Computes the world FOV and principal-point offset for a head-mounted scan
+    /// frame at the given height, using intrinsics scaled to the live frame size.
+    /// fovW/fovH are the frame's size in the world (mm); shiftX/shiftY is where the
+    /// frame center sits relative to the camera position (principal point offset).
+    /// </summary>
+    public static (float fovW, float fovH, float shiftX, float shiftY) ComputeScanGeometry(
+        CameraIntrinsics intrinsics, float cameraHeightMm, int frameWidth, int frameHeight)
+    {
+        var scaled = ScaleIntrinsics(intrinsics, frameWidth, frameHeight);
+        double fx = scaled.CameraMatrix[0];
+        double fy = scaled.CameraMatrix[4];
+        double cx = scaled.CameraMatrix[2];
+        double cy = scaled.CameraMatrix[5];
+
+        float fovW = (float)(frameWidth * cameraHeightMm / fx);
+        float fovH = (float)(frameHeight * cameraHeightMm / fy);
+        float shiftX = (float)((frameWidth / 2.0 - cx) * cameraHeightMm / fx);
+        float shiftY = (float)((cy - frameHeight / 2.0) * cameraHeightMm / fy);
+        return (fovW, fovH, shiftX, shiftY);
+    }
+
+    /// <summary>
+    /// Converts a captured scan frame to a 32bpp ARGB bitmap whose alpha is:
+    /// - zero outside the valid region of the undistorted image (lens distortion
+    ///   pulls content away from the borders, leaving black margins otherwise), and
+    /// - feathered to zero over the outer edge fraction of each side so overlapping
+    ///   scan frames blend together without hard seams.
+    /// </summary>
+    public static Bitmap CreateScanFrame(Bitmap src, CameraIntrinsics? intrinsics, float featherFraction = 0.12f)
+    {
+        int w = src.Width, h = src.Height;
+        var dst = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+        byte[]? validity = (intrinsics != null && intrinsics.IsValid)
+            ? GetUndistortValidity(w, h, intrinsics)
+            : null;
+
+        float featherX = Math.Max(1f, w * featherFraction);
+        float featherY = Math.Max(1f, h * featherFraction);
+
+        var srcData = src.LockBits(new Rectangle(0, 0, w, h),
+            System.Drawing.Imaging.ImageLockMode.ReadOnly, src.PixelFormat);
+        var dstData = dst.LockBits(new Rectangle(0, 0, w, h),
+            System.Drawing.Imaging.ImageLockMode.WriteOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try
+        {
+            int srcChannels = System.Drawing.Image.GetPixelFormatSize(src.PixelFormat) / 8;
+            for (int y = 0; y < h; y++)
+            {
+                IntPtr sp = srcData.Scan0 + y * srcData.Stride;
+                IntPtr dp = dstData.Scan0 + y * dstData.Stride;
+                float ay = Math.Min(1f, Math.Min(y, h - 1 - y) / featherY);
+                for (int x = 0; x < w; x++)
+                {
+                    int soff = x * srcChannels;
+                    byte b = Marshal.ReadByte(sp + soff);
+                    byte g = Marshal.ReadByte(sp + soff + 1);
+                    byte r = Marshal.ReadByte(sp + soff + 2);
+
+                    float ax = Math.Min(1f, Math.Min(x, w - 1 - x) / featherX);
+                    float alpha = Math.Min(ax, ay);
+                    if (validity != null) alpha *= validity[y * w + x] / 255f;
+
+                    int doff = x * 4;
+                    Marshal.WriteByte(dp + doff, b);
+                    Marshal.WriteByte(dp + doff + 1, g);
+                    Marshal.WriteByte(dp + doff + 2, r);
+                    Marshal.WriteByte(dp + doff + 3, (byte)(alpha * 255f));
+                }
+            }
+        }
+        finally
+        {
+            src.UnlockBits(srcData);
+            dst.UnlockBits(dstData);
+        }
+        return dst;
+    }
+
+    private static readonly object ValidityCacheLock = new();
+    private static readonly Dictionary<(int W, int H, long Key), byte[]> ValidityCache = new();
+
+    /// <summary>
+    /// Per-pixel mask of the undistorted image: 255 where the undistortion has source
+    /// data, 0 in the black margins that appear when distortion pulls content inward.
+    /// Computed once per (size, intrinsics) and cached.
+    /// </summary>
+    private static byte[] GetUndistortValidity(int w, int h, CameraIntrinsics intrinsics)
+    {
+        long key = 17;
+        foreach (var v in intrinsics.CameraMatrix) key = key * 31 + BitConverter.DoubleToInt64Bits(v);
+        foreach (var v in intrinsics.DistCoeffs) key = key * 31 + BitConverter.DoubleToInt64Bits(v);
+
+        lock (ValidityCacheLock)
+        {
+            if (ValidityCache.TryGetValue((w, h, key), out var cached)) return cached;
+        }
+
+        var mask = ComputeUndistortValidity(w, h, intrinsics);
+
+        lock (ValidityCacheLock)
+        {
+            if (ValidityCache.Count > 16) ValidityCache.Clear();
+            ValidityCache[(w, h, key)] = mask;
+        }
+        return mask;
+    }
+
+    private static byte[] ComputeUndistortValidity(int w, int h, CameraIntrinsics intrinsics)
+    {
+        using var cm = MatFromArray(intrinsics.CameraMatrix, 3, 3);
+        using var dc = MatFromArray(intrinsics.DistCoeffs, 5, 1);
+        using var identity = MatFromArray(new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 }, 3, 3);
+        using var mapX = new Mat();
+        using var mapY = new Mat();
+        var size = new System.Drawing.Size(w, h);
+        CvInvoke.InitUndistortRectifyMap(cm, dc, identity, cm, size, DepthType.Cv32F, 1, mapX, mapY);
+
+        // Remapping a white image shows exactly where the undistortion has source
+        // data: 255 inside, 0 (border value) outside.
+        using var white = new Mat(h, w, DepthType.Cv8U, 1);
+        white.SetTo(new MCvScalar(255));
+        using var validity = new Mat();
+        CvInvoke.Remap(white, validity, mapX, mapY, Inter.Linear, BorderType.Constant, new MCvScalar(0));
+
+        var bytes = new byte[w * h];
+        Marshal.Copy(validity.DataPointer, bytes, 0, bytes.Length);
+        return bytes;
+    }
+
     public SizeF ComputeFovMm(float cameraHeightMm, CameraIntrinsics intrinsics)
     {
         if (!intrinsics.IsValid || cameraHeightMm <= 0) return SizeF.Empty;

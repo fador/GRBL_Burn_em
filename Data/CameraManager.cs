@@ -45,6 +45,11 @@ namespace grbl_burn_em.Data
         public CalibrationStore CalibrationStore { get; private set; } = new();
         public List<CapturedFrame> CapturedFrames { get; private set; } = new List<CapturedFrame>();
         private object _framesLock = new object();
+
+        /// <summary>Size of the most recently received camera frame (used to scale
+        /// intrinsics to the live resolution before undistortion / FOV math).</summary>
+        public int LastFrameWidth { get; private set; }
+        public int LastFrameHeight { get; private set; }
         
         private volatile bool _isRunning = false;
         public bool IsRunning => _isRunning && _mediaCapture != null;
@@ -176,6 +181,8 @@ namespace grbl_burn_em.Data
                                          using (var ms = new MemoryStream(data))
                                          {
                                               Bitmap bmp = new Bitmap(ms);
+                                              LastFrameWidth = bmp.Width;
+                                              LastFrameHeight = bmp.Height;
                                               FrameReceived?.Invoke(bmp);
                                          }
                                      }
@@ -210,6 +217,8 @@ namespace grbl_burn_em.Data
                      Bitmap? bmp = SoftwareBitmapToBitmap(sb);
                      if (bmp != null)
                      {
+                      LastFrameWidth = bmp.Width;
+                      LastFrameHeight = bmp.Height;
                       if (FrameReceived != null)
                       {
                            FrameReceived.Invoke(bmp);
@@ -382,9 +391,13 @@ namespace grbl_burn_em.Data
             {
                  var img = tcs.Task.Result;
                  Bitmap frame = UndistortFrame(img);
+                 // Feather the edges (and mask the undistortion margins) so that
+                 // overlapping scan frames blend together without hard seams.
+                 Bitmap scanFrame = CameraCalibrationEngine.CreateScanFrame(frame, CalibrationStore.Intrinsics);
+                 frame.Dispose();
                  lock(_framesLock)
                  {
-                     CapturedFrames.Add(new CapturedFrame(frame, worldX, worldY, width, height));
+                     CapturedFrames.Add(new CapturedFrame(scanFrame, worldX, worldY, width, height));
                  }
                  img.Dispose();
             }
@@ -398,9 +411,12 @@ namespace grbl_burn_em.Data
 
             try
             {
+                // The intrinsics may have been calibrated at a different resolution
+                // than the live frames - scale them before undistorting.
+                var scaled = CameraCalibrationEngine.ScaleIntrinsics(intrinsics, frame.Width, frame.Height);
                 using var mat = CameraCalibrationEngine.BitmapToMat(frame);
                 var engine = new CameraCalibrationEngine(CalibrationStore.BoardConfig ?? new CharucoBoardConfig());
-                using var undistorted = engine.UndistortImage(mat, intrinsics);
+                using var undistorted = engine.UndistortImage(mat, scaled);
                 return CameraCalibrationEngine.MatToBitmap(undistorted);
             }
             catch

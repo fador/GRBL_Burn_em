@@ -110,20 +110,25 @@ public partial class WorkspaceScanForm : Form
                 var intrinsics = memStore.Intrinsics!;
                 if (intrinsics.CameraMatrix != null && intrinsics.CameraMatrix.Length >= 9 && intrinsics.CameraMatrix[0] > 0 && intrinsics.CameraMatrix[4] > 0)
                 {
-                    float fx = (float)intrinsics.CameraMatrix[0];
-                    float fy = (float)intrinsics.CameraMatrix[4];
-                    float cx = (float)intrinsics.CameraMatrix[2];
-                    float cy = (float)intrinsics.CameraMatrix[5];
-                    float w = intrinsics.CalibratedImageWidth;
-                    float h = intrinsics.CalibratedImageHeight;
+                    // Use the LIVE frame resolution (fall back to the calibration
+                    // resolution). Intrinsics are scaled internally so the FOV math
+                    // stays correct even if the camera resolution changed since
+                    // calibration.
+                    int fw = CameraManager.Instance.LastFrameWidth > 0
+                        ? CameraManager.Instance.LastFrameWidth
+                        : intrinsics.CalibratedImageWidth;
+                    int fh = CameraManager.Instance.LastFrameHeight > 0
+                        ? CameraManager.Instance.LastFrameHeight
+                        : intrinsics.CalibratedImageHeight;
                     float z = memStore.Offset.OffsetZ;
 
-                    fovW = w * z / fx;
-                    fovH = h * z / fy;
-
-                    shiftX = (w / 2f - cx) * z / fx;
-                    shiftY = (cy - h / 2f) * z / fy;
+                    (fovW, fovH, shiftX, shiftY) =
+                        CameraCalibrationEngine.ComputeScanGeometry(intrinsics, z, fw, fh);
                 }
+            }
+            else if (!memStore.HasIntrinsics)
+            {
+                _lblStatus.Text = "Lens not calibrated - frames will NOT be undistorted.";
             }
 
             if (fovW <= 10) fovW = config.CameraOverlayWidth;
