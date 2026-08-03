@@ -7,10 +7,7 @@
 using System;
 using System.Drawing;
 using System.Globalization;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
-using Emgu.CV;
-using Emgu.CV.CvEnum;
 using grbl_burn_em.Data;
 
 namespace grbl_burn_em.Forms;
@@ -284,32 +281,11 @@ public partial class OffsetCalibrationForm : Form
                 machineX = pos.X; machineY = pos.Y;
             }
 
-            // Camera center in the board coordinate frame: C_b = -R^T * tvec,
-            // where R/tvec map board coordinates to camera coordinates.
-            using (var rvecMat = new Mat(3, 1, DepthType.Cv64F, 1))
-            {
-                Marshal.Copy(rvec, 0, rvecMat.DataPointer, 3);
-                using var rotMat = new Mat();
-                CvInvoke.Rodrigues(rvecMat, rotMat);
-                double[] R = new double[9];
-                Marshal.Copy(rotMat.DataPointer, R, 0, 9);
-
-                double t0 = tvec[0], t1 = tvec[1], t2 = tvec[2];
-                double cbx = -(R[0] * t0 + R[3] * t1 + R[6] * t2);
-                double cby = -(R[1] * t0 + R[4] * t1 + R[7] * t2);
-                double cbz = -(R[2] * t0 + R[5] * t1 + R[8] * t2);
-
-                // Board -> world: rotate by the entered angle, translate to the board origin.
-                double rad = boardRotDeg * Math.PI / 180.0;
-                double cosR = Math.Cos(rad), sinR = Math.Sin(rad);
-                double camWorldX = cosR * cbx - sinR * cby + boardWx;
-                double camWorldY = sinR * cbx + cosR * cby + boardWy;
-                double camWorldZ = cbz;
-
-                _offsetX = (float)(camWorldX - machineX);
-                _offsetY = (float)(camWorldY - machineY);
-                _offsetZ = (float)camWorldZ;
-            }
+            var (ox, oy, oz) = CameraCalibrationEngine.ComputeHeadMountedOffset(
+                rvec, tvec, boardWx, boardWy, boardRotDeg, machineX, machineY);
+            _offsetX = ox;
+            _offsetY = oy;
+            _offsetZ = oz;
 
             _lblOffset.Text = $"Offset: ({_offsetX:F1}, {_offsetY:F1}) mm";
             _lblHeight.Text = $"Height: {_offsetZ:F1} mm";

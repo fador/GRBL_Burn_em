@@ -764,11 +764,13 @@ public class CameraCalibrationAccuracyTests
     [Fact]
     public void OffsetFormula_RotationAware_RecoversCameraPosition()
     {
-        // Board origin at world (100, 50). Camera above the board looking straight down
-        // with image-up aligned to machine +Y: board->camera R = diag(1,-1,-1), and
-        // tvec = board origin in camera frame = (Bx-Cx, Cy-By, Cz).
-        double[] R = { 1, 0, 0, 0, -1, 0, 0, 0, -1 };
-        double[] t = { 100 - 150, 60 - 50, 100 }; // camera at (150, 60, 100)
+        // OpenCV board frame: +X right, +Y down the paper, +Z INTO the board (down).
+        // Board origin at world (100, 50). Camera above the board at world (150, 60),
+        // height 100 -> camera center in board coords: (50, 10, -100). The emulator's
+        // flipped camera has R = I (axes aligned), so tvec = board origin in camera
+        // coords = -(camera center in board coords).
+        double[] R = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+        double[] t = { -50, -10, 100 };
 
         // Camera center in board frame: C_b = -R^T * t
         double cbx = -(R[0] * t[0] + R[3] * t[1] + R[6] * t[2]);
@@ -781,7 +783,8 @@ public class CameraCalibrationAccuracyTests
 
         Assert.Equal(150, camWorldX, 3);
         Assert.Equal(60, camWorldY, 3);
-        Assert.Equal(100, cbz, 3);
+        Assert.Equal(-100, cbz, 3); // board z points down: camera above has negative z
+        Assert.Equal(100, Math.Abs(cbz), 3); // OffsetZ is the distance above the plane
 
         // Same formula with a board rotated 30 degrees: the camera center in the board
         // frame is rotated accordingly, and the recovery must still give the camera

@@ -428,83 +428,16 @@ public partial class EmulatorForm : Form
 
     private void DrawCharucoBoard()
     {
-        int squares = (int)_nudBoardSquares.Value;
-        float boardSizeMm = (float)_nudBoardSize.Value;
-        float squareSizeMm = boardSizeMm / squares;
-        float markerSizeMm = squareSizeMm * 0.7f;
+        var rect = EmulatorBoardRenderer.DrawBoard(
+            _bedBitmap, _scale, _boardX, _boardY,
+            (int)_nudBoardSquares.Value, (float)_nudBoardSize.Value,
+            GetSelectedDictionary(),
+            _hasBoard ? new Rectangle(_lastBoardBx, _lastBoardBy, _lastBoardPx, _lastBoardPy) : null);
 
-        // Board origin (outer top-left corner of the board) is placed at CNC (Board X, Board Y).
-        int boardPx = (int)(boardSizeMm * _scale);
-        int bx = (int)(_boardX * _scale);
-        int by = _bedHeight - (int)(_boardY * _scale);
-
-        var dict = GetSelectedDictionary();
-
-        int pxPerSquare = 80;
-        int margin = pxPerSquare;
-        int imgW = squares * pxPerSquare + 2 * margin;
-        int imgH = squares * pxPerSquare + 2 * margin;
-
-        using var board = new CharucoBoard(squares, squares, squareSizeMm, markerSizeMm, dict);
-        using var boardImg = new Mat();
-        ArucoInvoke.GenerateImage(board, new Size(imgW, imgH), boardImg, margin, 1);
-
-        int boardW = boardImg.Width;
-        int boardH = boardImg.Height;
-
-        using var srcBmp = new Bitmap(boardW, boardH, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-        var bd = srcBmp.LockBits(new Rectangle(0, 0, boardW, boardH),
-            System.Drawing.Imaging.ImageLockMode.WriteOnly, srcBmp.PixelFormat);
-
-        if (boardImg.NumberOfChannels == 1)
-        {
-            for (int y = 0; y < boardH; y++)
-            {
-                IntPtr src = boardImg.DataPointer + y * boardImg.Step;
-                IntPtr dst = bd.Scan0 + y * bd.Stride;
-                for (int x = 0; x < boardW; x++)
-                {
-                    byte v = System.Runtime.InteropServices.Marshal.ReadByte(src + x);
-                    System.Runtime.InteropServices.Marshal.WriteByte(dst + x * 3, v);
-                    System.Runtime.InteropServices.Marshal.WriteByte(dst + x * 3 + 1, v);
-                    System.Runtime.InteropServices.Marshal.WriteByte(dst + x * 3 + 2, v);
-                }
-            }
-        }
-        srcBmp.UnlockBits(bd);
-
-        // Flip vertically so the board's +Y axis points toward machine +Y (CNC Y-up),
-        // matching the registration convention (board axes along machine +X/+Y).
-        srcBmp.RotateFlip(RotateFlipType.RotateNoneFlipY);
-
-        // The bitmap contains a 1-square margin on each side. Scale so the board region
-        // (squares x squares) maps to the physical board size and place the board origin
-        // (bottom-left of the board region after the flip) at CNC (Board X, Board Y).
-        float scalePx = boardPx / (float)squares;
-        int destW = (int)MathF.Round(imgW * scalePx);
-        int destH = (int)MathF.Round(imgH * scalePx);
-        int destX = bx - (int)MathF.Round(margin * scalePx);
-        int destY = by - (int)MathF.Round((margin + squares * pxPerSquare) * scalePx);
-
-        lock (_bedBitmap)
-        {
-            using var g = Graphics.FromImage(_bedBitmap);
-
-            if (_hasBoard)
-            {
-                using var clearBrush = new SolidBrush(Color.Beige);
-                g.FillRectangle(clearBrush, _lastBoardBx, _lastBoardBy, _lastBoardPx, _lastBoardPy);
-            }
-
-            g.CompositingQuality = CompositingQuality.HighQuality;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.DrawImage(srcBmp, destX, destY, destW, destH);
-        }
-
-        _lastBoardBx = destX;
-        _lastBoardBy = destY;
-        _lastBoardPx = destW;
-        _lastBoardPy = destH;
+        _lastBoardBx = rect.X;
+        _lastBoardBy = rect.Y;
+        _lastBoardPx = rect.Width;
+        _lastBoardPy = rect.Height;
         _hasBoard = true;
 
         _workArea.Invalidate();

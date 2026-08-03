@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\grbl_burn_em.csproj" />
+    <ProjectReference Include="..\..\Emulator\grbl_burn_em_emulator.csproj" />
   </ItemGroup>
 
 </Project>

@@ -100,14 +100,15 @@ namespace grbl_burn_em.Controls
                          {
                              // Frame.WorldX/Y is Center of Camera
                              // Frame.Width/Height is FOV size
-                             // Top-Left:
+                             // The camera frame is flipped (image up = machine -Y):
+                             // the frame's top row maps to the world's -Y side.
                              float x = frame.WorldX - frame.Width / 2;
-                             float y = frame.WorldY + frame.Height / 2; // Y-Up: Top is Y+H/2
+                             float y = frame.WorldY - frame.Height / 2;
                              
                              PointF[] destPoints = {
-                                 new PointF(x, y),                 // UL (World Top-Left)
+                                 new PointF(x, y),                 // frame top (World -Y side)
                                  new PointF(x + frame.Width, y),   // UR
-                                 new PointF(x, y - frame.Height)   // DL (World Bottom-Left)
+                                 new PointF(x, y + frame.Height)   // frame bottom (World +Y side)
                              };
                              
                              g.DrawImage(frame.Image, destPoints, 
@@ -138,16 +139,17 @@ namespace grbl_burn_em.Controls
                  using var ia = new System.Drawing.Imaging.ImageAttributes();
                  ia.SetColorMatrix(cm);
                  
-                 // Dest Rect
+                 // Dest Rect — the camera frame is flipped (image up = machine -Y),
+                 // so the frame's top row is drawn at the world's -Y side.
                  float x = config.CameraOverlayX;
                  float y = config.CameraOverlayY;
                  float w = config.CameraOverlayWidth;
                  float h = config.CameraOverlayHeight;
                  
                  PointF[] destPoints = {
-                     new PointF(x, y),         // UL (Upper Left of source maps here) -> World Top-Left
-                     new PointF(x + w, y),     // UR -> World Top-Right
-                     new PointF(x, y - h)      // DL -> World Bottom-Left
+                     new PointF(x, y),         // frame top
+                     new PointF(x + w, y),     // UR
+                     new PointF(x, y + h)      // frame bottom (World +Y side)
                  };
                  
                  try

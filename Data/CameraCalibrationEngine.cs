@@ -389,6 +389,36 @@ public class CameraCalibrationEngine
         return ComputeReprojectionError(objPts, imgPts, rvec, tvec, cm, dc);
     }
 
+    /// <summary>
+    /// Computes the head-mounted camera-to-laser offset from the board pose.
+    /// The camera center in the board frame is C_b = -R^T * tvec; board -> world is a
+    /// rotation by boardWorldRotationDeg plus translation to the board origin; the
+    /// offset is camera world position minus the machine head position.
+    /// Note: OpenCV's board frame has its z axis pointing into the board, so a camera
+    /// above the board has a negative z; OffsetZ is the perpendicular distance above
+    /// the board plane (|C_b.z|), which also makes it immune to the solvePnP
+    /// front/back-plane ambiguity.
+    /// </summary>
+    public static (float offsetX, float offsetY, float offsetZ) ComputeHeadMountedOffset(
+        double[] rvec, double[] tvec,
+        float boardWorldX, float boardWorldY, float boardWorldRotationDeg,
+        float machineX, float machineY)
+    {
+        double[] R = RodriguesToMatrix(rvec);
+
+        double t0 = tvec[0], t1 = tvec[1], t2 = tvec[2];
+        double cbx = -(R[0] * t0 + R[3] * t1 + R[6] * t2);
+        double cby = -(R[1] * t0 + R[4] * t1 + R[7] * t2);
+        double cbz = -(R[2] * t0 + R[5] * t1 + R[8] * t2);
+
+        double rad = boardWorldRotationDeg * Math.PI / 180.0;
+        double cosR = Math.Cos(rad), sinR = Math.Sin(rad);
+        double camWorldX = cosR * cbx - sinR * cby + boardWorldX;
+        double camWorldY = sinR * cbx + cosR * cby + boardWorldY;
+
+        return ((float)(camWorldX - machineX), (float)(camWorldY - machineY), (float)Math.Abs(cbz));
+    }
+
     private static double ComputeReprojectionError(
         MCvPoint3D32f[] objPoints, PointF[] imgPoints,
         double[] rvec, double[] tvec, double[] cameraMatrix, double[] distCoeffs)

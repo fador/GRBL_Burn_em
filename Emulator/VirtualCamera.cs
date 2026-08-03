@@ -74,6 +74,11 @@ public class VirtualCamera
             }
         }
 
+        // The camera is mounted "upside down" (image up = machine -Y). This mirrors the
+        // frame so the ChArUco board content appears unmirrored, keeping ArUco markers
+        // detectable while the board's axes stay aligned with the machine axes.
+        frame.RotateFlip(RotateFlipType.RotateNoneFlipY);
+
         return frame;
     }
 

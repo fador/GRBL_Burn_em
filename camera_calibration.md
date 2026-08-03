@@ -16,6 +16,15 @@ The emulator's **Board X/Y** is the **board origin** (outer top-left corner of t
 board): the board extends from (Board X, Board Y) toward +X/+Y, matching the
 registration convention. The board is drawn with its axes aligned to the machine axes.
 
+The emulated camera is mounted with the image vertically flipped (image up = machine
+-Y, like a physically rotated overhead camera). This keeps the printed markers
+undistorted in the feed — ArUco markers are not mirror-symmetric, so the board must
+never be rendered mirrored.
+
+**Hint:** after connecting, jog the machine so the ChArUco board is roughly centered
+in the camera view (use the jog controls in the emulator or the "Go to" box in the
+calibration dialogs). At least 6 markers must be visible for detection.
+
 ## Workflow Overview
 
 ```
@@ -249,7 +258,8 @@ All calibration data is stored in `calibration.json` in the application director
 
 | Problem | Solution |
 |---------|----------|
-| Board not detected | Ensure board is in camera FOV. Increase lighting. Check dictionary matches. |
+| Board not detected | Ensure board is in camera FOV with at least 6 markers visible. Increase lighting. Check dictionary matches. |
+| Emulator board not detected | Jog the head so the board is centered in the camera view (FOV 120x90 shows ~2 marker rows when the head is at 0,0). |
 | Calibration fails (RMSE > 2.0) | Remove blurry/outlier views. Capture 7+ sharp views at different angles. |
 | Auto capture captures nothing | Board not in view. Adjust machine position or increase grid step/rows. |
 | "Camera not running" | Start camera in Camera Settings first. |
