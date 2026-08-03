@@ -73,7 +73,7 @@ public class CalibrationGridGenerator
                     Power = power,
                     Speed = speed,
                     Mode = IsEngrave ? LayerMode.Fill : LayerMode.Cut,
-                    Name = $"Grid P{power:0} S{speed:0}"
+                    Name = FormattableString.Invariant($"Grid P{power:0} S{speed:0}")
                 };
                 result.Add(rect);
                 
@@ -102,7 +102,7 @@ public class CalibrationGridGenerator
                 {
                     var lblX = new LaserText
                     {
-                        Text = $"{xVal:0}",
+                        Text = FormattableString.Invariant($"{xVal:0}"),
                         FontSize = 3,
                         Position = new PointF(currentX, StartY - 3),
                         Rotation = 0
@@ -117,7 +117,7 @@ public class CalibrationGridGenerator
             // Y Axis Label (Left of Row)
             var lblY = new LaserText
             {
-                Text = $"{yVal:0}",
+                Text = FormattableString.Invariant($"{yVal:0}"),
                 FontSize = 3,
                 Position = new PointF(StartX - 7, currentY + CellSize/2 - 1.5f)
             };

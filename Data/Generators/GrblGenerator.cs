@@ -21,7 +21,7 @@ public class GrblGenerator : IGCodeGenerator
         yield return "G21"; // Metric
         yield return "G90"; // Absolute positioning
         float travelSpeed = AppConfiguration.Instance.ActiveProfile.DefaultTravelSpeed;
-        yield return $"G0 F{travelSpeed:F0}"; // Set default travel speed
+        yield return FormattableString.Invariant($"G0 F{travelSpeed:F0}"); // Set default travel speed
 
         string toolOn = AppConfiguration.Instance.ActiveProfile.ToolOnCommand;
         string toolOff = AppConfiguration.Instance.ActiveProfile.ToolOffCommand;
@@ -47,7 +47,7 @@ public class GrblGenerator : IGCodeGenerator
         yield return "G0 X0 Y0"; // Return to home (optional, but good for preview)
     }
 
-    private IEnumerable<string> GenerateObject(LaserObject obj)
+    private IEnumerable<string> GenerateObject(LaserObject obj, float? inheritedPower = null, float? inheritedSpeed = null)
     {
         // Get Layer Settings first
         var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId) 
@@ -57,15 +57,20 @@ public class GrblGenerator : IGCodeGenerator
 
         if (obj is LaserGroup group && mode == LayerMode.Cut)
         {
-            foreach (var child in group.Children)
+            float? gPower = inheritedPower ?? group.Power;
+            float? gSpeed = inheritedSpeed ?? group.Speed;
+            var children = group.Rotation != 0
+                ? LaserGroup.CreateRotatedChildren(group)
+                : (IEnumerable<LaserObject>)group.Children;
+            foreach (var child in children)
             {
-                foreach (var line in GenerateObject(child)) yield return line;
+                foreach (var line in GenerateObject(child, gPower, gSpeed)) yield return line;
             }
             yield break;
         }
 
-        float pwrPercent = obj.Power ?? layer?.Power ?? 100f;
-        float speedVal = obj.Speed ?? layer?.Speed ?? 1000f;
+        float pwrPercent = inheritedPower ?? obj.Power ?? layer?.Power ?? 100f;
+        float speedVal = inheritedSpeed ?? obj.Speed ?? layer?.Speed ?? 1000f;
 
         // Force Fill for Images (they are always raster) works naturally
         // But if user sets Image layer to "Cut", what happens? Images can't be cut effectively without vectorizing.
@@ -118,12 +123,12 @@ public class GrblGenerator : IGCodeGenerator
                              {
                                  subpathStart = p;
                                  yield return "G1 S0"; 
-                                 yield return $"G0 X{p.X:F3} Y{p.Y:F3}";
-                                 yield return $"G1 F{fVal:F0}"; 
+                                 yield return FormattableString.Invariant($"G0 X{p.X:F3} Y{p.Y:F3}");
+                                 yield return FormattableString.Invariant($"G1 F{fVal:F0}"); 
                              }
                              else 
                              {
-                                 yield return $"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}";
+                                 yield return FormattableString.Invariant($"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}");
                              }
                              
                              lastPos = p;
@@ -133,7 +138,7 @@ public class GrblGenerator : IGCodeGenerator
                                  float dist = Math.Abs(p.X - subpathStart.X) + Math.Abs(p.Y - subpathStart.Y);
                                  if (dist > 0.001f)
                                  {
-                                     yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} {pwmCmd}{sVal:F0}";
+                                     yield return FormattableString.Invariant($"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} {pwmCmd}{sVal:F0}");
                                      lastPos = subpathStart;
                                  }
                              }
@@ -166,18 +171,18 @@ public class GrblGenerator : IGCodeGenerator
                      if (points.Length > 0)
                      {
                         yield return "G1 S0";
-                        yield return $"G0 X{points[0].X:F3} Y{points[0].Y:F3}";
-                        yield return $"G1 F{fVal:F0}"; // G1 to apply speed? Start Logic.
+                        yield return FormattableString.Invariant($"G0 X{points[0].X:F3} Y{points[0].Y:F3}");
+                        yield return FormattableString.Invariant($"G1 F{fVal:F0}"); // G1 to apply speed? Start Logic.
                         // Actually Start usually means move to start.
                         // G1 Sxxx is Power.
                         
                         // First point is Move.
                         for(int i=1; i<points.Length; i++)
                         {
-                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} {pwmCmd}{sVal:F0}";
+                            yield return FormattableString.Invariant($"G1 X{points[i].X:F3} Y{points[i].Y:F3} {pwmCmd}{sVal:F0}");
                         }
                         // Close loop
-                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} {pwmCmd}{sVal:F0}";
+                        yield return FormattableString.Invariant($"G1 X{points[0].X:F3} Y{points[0].Y:F3} {pwmCmd}{sVal:F0}");
                      }
                  }
                  yield return "G1 S0";
@@ -209,15 +214,15 @@ public class GrblGenerator : IGCodeGenerator
                      if (points.Length > 0)
                      {
                         yield return "G1 S0";
-                        yield return $"G0 X{points[0].X:F3} Y{points[0].Y:F3}";
-                        yield return $"G1 F{fVal:F0}"; 
+                        yield return FormattableString.Invariant($"G0 X{points[0].X:F3} Y{points[0].Y:F3}");
+                        yield return FormattableString.Invariant($"G1 F{fVal:F0}"); 
                         
                         for(int i=1; i<points.Length; i++)
                         {
-                            yield return $"G1 X{points[i].X:F3} Y{points[i].Y:F3} {pwmCmd}{sVal:F0}";
+                            yield return FormattableString.Invariant($"G1 X{points[i].X:F3} Y{points[i].Y:F3} {pwmCmd}{sVal:F0}");
                         }
                         // Close loop
-                        yield return $"G1 X{points[0].X:F3} Y{points[0].Y:F3} {pwmCmd}{sVal:F0}";
+                        yield return FormattableString.Invariant($"G1 X{points[0].X:F3} Y{points[0].Y:F3} {pwmCmd}{sVal:F0}");
                      }
                  }
                  yield return "G1 S0";
@@ -242,13 +247,13 @@ public class GrblGenerator : IGCodeGenerator
 
                 // Move to start
                 var start = finalPoints[0];
-                yield return $"G0 X{start.X:F3} Y{start.Y:F3}";
-                yield return $"G1 F{fVal:F0}"; 
+                yield return FormattableString.Invariant($"G0 X{start.X:F3} Y{start.Y:F3}");
+                yield return FormattableString.Invariant($"G1 F{fVal:F0}"); 
 
                 for (int i = 1; i < finalPoints.Length; i++)
                 {
                     var p = finalPoints[i];
-                    yield return $"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}";
+                    yield return FormattableString.Invariant($"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}");
                 }
                 yield return "G1 S0"; 
                 yield break;
@@ -288,13 +293,13 @@ public class GrblGenerator : IGCodeGenerator
                          var points = gPath.PathPoints;
                          var p0 = points[0];
                          
-                         yield return $"G0 X{p0.X:F3} Y{p0.Y:F3}";
-                         yield return $"G1 F{fVal:F0}";
+                         yield return FormattableString.Invariant($"G0 X{p0.X:F3} Y{p0.Y:F3}");
+                         yield return FormattableString.Invariant($"G1 F{fVal:F0}");
                          
                          for (int i = 1; i < points.Length; i++)
                          {
                              var p = points[i];
-                             yield return $"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}";
+                             yield return FormattableString.Invariant($"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}");
                          }
                     }
                 }
@@ -437,9 +442,14 @@ public class GrblGenerator : IGCodeGenerator
 
         if (obj is LaserGroup group)
         {
-            foreach (var child in group.Children)
+            using (var groupPath = new GraphicsPath())
             {
-                AddObjectToPath(path, child);
+                foreach (var child in group.Children)
+                {
+                    AddObjectToPath(groupPath, child);
+                }
+                ApplyRotationIfNeeded(groupPath, group.Rotation);
+                path.AddPath(groupPath, false);
             }
             return;
         }
@@ -504,6 +514,19 @@ public class GrblGenerator : IGCodeGenerator
             }
         }
     }
+
+    private static void ApplyRotationIfNeeded(GraphicsPath gp, float rotationDeg)
+    {
+        if (rotationDeg == 0 || gp.PointCount == 0) return;
+        var b = gp.GetBounds();
+        float cx = b.X + b.Width / 2f;
+        float cy = b.Y + b.Height / 2f;
+        using (var m = new System.Drawing.Drawing2D.Matrix())
+        {
+            m.RotateAt(rotationDeg, new PointF(cx, cy));
+            gp.Transform(m);
+        }
+    }
     public IEnumerable<string> GenerateFraming(IEnumerable<LaserObject> objects, float power, float speed)
     {
         var enabled = objects.Where(o => o.IsEnabled).ToList();
@@ -533,13 +556,13 @@ public class GrblGenerator : IGCodeGenerator
         yield return "G90";
         yield return toolOnZero; 
 
-        yield return $"G0 X{minX:F3} Y{minY:F3}";
+        yield return FormattableString.Invariant($"G0 X{minX:F3} Y{minY:F3}");
         
         float sVal = power * 10f; 
-        yield return $"G1 F{speed:F0}";
-        yield return $"G1 X{maxX:F3} Y{minY:F3} {pwmCmd}{sVal:F0}";
-        yield return $"G1 X{maxX:F3} Y{maxY:F3} {pwmCmd}{sVal:F0}";
-        yield return $"G1 X{minX:F3} Y{maxY:F3} {pwmCmd}{sVal:F0}";
+        yield return FormattableString.Invariant($"G1 F{speed:F0}");
+        yield return FormattableString.Invariant($"G1 X{maxX:F3} Y{minY:F3} {pwmCmd}{sVal:F0}");
+        yield return FormattableString.Invariant($"G1 X{maxX:F3} Y{maxY:F3} {pwmCmd}{sVal:F0}");
+        yield return FormattableString.Invariant($"G1 X{minX:F3} Y{maxY:F3} {pwmCmd}{sVal:F0}");
         yield return toolOff;
         yield return "G0 X0 Y0";
     }
@@ -566,14 +589,14 @@ public class GrblGenerator : IGCodeGenerator
             var b = obj.GetBounds();
             // Move to Start
             yield return toolOnZero;
-            yield return $"G0 X{b.Left:F3} Y{b.Top:F3}";
+            yield return FormattableString.Invariant($"G0 X{b.Left:F3} Y{b.Top:F3}");
             
             // Cut Box
-            yield return $"G1 F{speed:F0}";
-            yield return $"G1 X{b.Right:F3} Y{b.Top:F3} {pwmCmd}{sVal:F0}";
-            yield return $"G1 X{b.Right:F3} Y{b.Bottom:F3} {pwmCmd}{sVal:F0}";
-            yield return $"G1 X{b.Left:F3} Y{b.Bottom:F3} {pwmCmd}{sVal:F0}";
-            yield return $"G1 X{b.Left:F3} Y{b.Top:F3} {pwmCmd}{sVal:F0}";
+            yield return FormattableString.Invariant($"G1 F{speed:F0}");
+            yield return FormattableString.Invariant($"G1 X{b.Right:F3} Y{b.Top:F3} {pwmCmd}{sVal:F0}");
+            yield return FormattableString.Invariant($"G1 X{b.Right:F3} Y{b.Bottom:F3} {pwmCmd}{sVal:F0}");
+            yield return FormattableString.Invariant($"G1 X{b.Left:F3} Y{b.Bottom:F3} {pwmCmd}{sVal:F0}");
+            yield return FormattableString.Invariant($"G1 X{b.Left:F3} Y{b.Top:F3} {pwmCmd}{sVal:F0}");
         }
 
         yield return toolOff;
@@ -606,14 +629,14 @@ public class GrblGenerator : IGCodeGenerator
 
             // Mark 1: TL to BR
             yield return toolOnZero;
-            yield return $"G0 X{cx - size:F3} Y{cy - size:F3}";
-            yield return $"G1 F{speed:F0}";
-            yield return $"G1 X{cx + size:F3} Y{cy + size:F3} {pwmCmd}{sVal:F0}";
+            yield return FormattableString.Invariant($"G0 X{cx - size:F3} Y{cy - size:F3}");
+            yield return FormattableString.Invariant($"G1 F{speed:F0}");
+            yield return FormattableString.Invariant($"G1 X{cx + size:F3} Y{cy + size:F3} {pwmCmd}{sVal:F0}");
 
             // Mark 2: BL to TR
             yield return toolOnZero;
-            yield return $"G0 X{cx - size:F3} Y{cy + size:F3}";
-            yield return $"G1 X{cx + size:F3} Y{cy - size:F3} {pwmCmd}{sVal:F0}";
+            yield return FormattableString.Invariant($"G0 X{cx - size:F3} Y{cy + size:F3}");
+            yield return FormattableString.Invariant($"G1 X{cx + size:F3} Y{cy - size:F3} {pwmCmd}{sVal:F0}");
         }
 
         yield return toolOff;

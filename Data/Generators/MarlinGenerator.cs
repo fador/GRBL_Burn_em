@@ -30,8 +30,7 @@ public class MarlinGenerator : IGCodeGenerator
         yield return "G21"; // Metric
         yield return "G90"; // Absolute positioning
         
-        yield return $"G0 F{travelSpeed:F0}"; // Set default travel speed
-
+        yield return FormattableString.Invariant($"G0 F{travelSpeed:F0}"); // Set default travel speed
         // Initial Tool Off
         foreach(var line in toolOff.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
             yield return line;
@@ -40,7 +39,7 @@ public class MarlinGenerator : IGCodeGenerator
         {
             if (!obj.IsEnabled) continue;
             
-            foreach (var line in GenerateObject(obj, toolOn, toolOff, usePwm, pwmCmd))
+            foreach (var line in GenerateObject(obj, toolOn: toolOn, toolOff: toolOff, usePwm: usePwm, pwmCmd: pwmCmd))
             {
                 yield return line;
             }
@@ -53,9 +52,16 @@ public class MarlinGenerator : IGCodeGenerator
         yield return "G0 X0 Y0"; // Return to home
     }
 
-    private IEnumerable<string> GenerateObject(LaserObject obj, string toolOn, string toolOff, bool usePwm, string pwmCmd)
+    private IEnumerable<string> GenerateObject(LaserObject obj, float? inheritedPower = null, float? inheritedSpeed = null,
+        string? toolOn = null, string? toolOff = null, bool? usePwm = null, string? pwmCmd = null)
 
     {
+        toolOn ??= AppConfiguration.Instance.ActiveProfile.ToolOnCommand;
+        toolOff ??= AppConfiguration.Instance.ActiveProfile.ToolOffCommand;
+        usePwm ??= AppConfiguration.Instance.ActiveProfile.EnablePWM;
+        pwmCmd ??= AppConfiguration.Instance.ActiveProfile.PwmCommand;
+        if (string.IsNullOrWhiteSpace(pwmCmd)) pwmCmd = "S";
+
         var layer = ProjectState.Instance.Layers.FirstOrDefault(l => l.Id == obj.LayerId) 
                     ?? ProjectState.Instance.Layers.FirstOrDefault();
         
@@ -63,16 +69,21 @@ public class MarlinGenerator : IGCodeGenerator
 
         if (obj is LaserGroup group && mode == LayerMode.Cut)
         {
-            foreach (var child in group.Children)
+            float? gPower = inheritedPower ?? group.Power;
+            float? gSpeed = inheritedSpeed ?? group.Speed;
+            var children = group.Rotation != 0
+                ? LaserGroup.CreateRotatedChildren(group)
+                : (IEnumerable<LaserObject>)group.Children;
+            foreach (var child in children)
             {
-                foreach (var line in GenerateObject(child, toolOn, toolOff, usePwm, pwmCmd)) yield return line;
+                foreach (var line in GenerateObject(child, gPower, gSpeed, toolOn, toolOff, usePwm, pwmCmd)) yield return line;
             }
             yield break;
         }
 
 
-        float pwrPercent = obj.Power ?? layer?.Power ?? 100f;
-        float speedVal = obj.Speed ?? layer?.Speed ?? 1000f;
+        float pwrPercent = inheritedPower ?? obj.Power ?? layer?.Power ?? 100f;
+        float speedVal = inheritedSpeed ?? obj.Speed ?? layer?.Speed ?? 1000f;
 
         // If usePwm is true, S-value is scaled 0-255 or 0-1000? 
         // Marlin typically uses 0-255 for fan/laser (M106/M3), but some setups use 0-1000 or custom.
@@ -135,10 +146,10 @@ public class MarlinGenerator : IGCodeGenerator
                              foreach(var line in toolOff.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                                 yield return line;
                                 
-                             yield return $"G0 X{p.X:F3} Y{p.Y:F3}";
+                             yield return FormattableString.Invariant($"G0 X{p.X:F3} Y{p.Y:F3}");
                              
                              // Update Feedrate for upcoming cut
-                             yield return $"G1 F{fVal:F0}"; 
+                             yield return FormattableString.Invariant($"G1 F{fVal:F0}"); 
                              
                              // Tool On (Multiline support)
                              var onLines = toolOn.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -150,10 +161,10 @@ public class MarlinGenerator : IGCodeGenerator
                          else 
                          {
                              // Line (G1)
-                             if (usePwm)
-                                yield return $"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}";
+                             if (usePwm == true)
+                                yield return FormattableString.Invariant($"G1 X{p.X:F3} Y{p.Y:F3} {pwmCmd}{sVal:F0}");
                              else
-                                yield return $"G1 X{p.X:F3} Y{p.Y:F3}";
+                                yield return FormattableString.Invariant($"G1 X{p.X:F3} Y{p.Y:F3}");
                          }
 
                          
@@ -163,10 +174,10 @@ public class MarlinGenerator : IGCodeGenerator
                          {
                              // Draw line back to subpath start
                              // This is a CUT move
-                             if (usePwm)
-                                yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} {pwmCmd}{sVal:F0}";
+                             if (usePwm == true)
+                                yield return FormattableString.Invariant($"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3} {pwmCmd}{sVal:F0}");
                              else
-                                yield return $"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3}";
+                                yield return FormattableString.Invariant($"G1 X{subpathStart.X:F3} Y{subpathStart.Y:F3}");
                              
                              lastPos = subpathStart;
                          }
@@ -280,7 +291,7 @@ public class MarlinGenerator : IGCodeGenerator
                     Speed = speedVal
                 };
                 
-                if (usePwm)
+                if (usePwm == true)
                 {
                      foreach(var line in toolOn.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                         yield return line;
@@ -310,9 +321,24 @@ public class MarlinGenerator : IGCodeGenerator
 
         if (obj is LaserGroup group)
         {
-            foreach (var child in group.Children)
+            using (var groupPath = new GraphicsPath())
             {
-                AddObjectToPath(path, child);
+                foreach (var child in group.Children)
+                {
+                    AddObjectToPath(groupPath, child);
+                }
+                if (group.Rotation != 0 && groupPath.PointCount > 0)
+                {
+                    var b = groupPath.GetBounds();
+                    float cx = b.X + b.Width / 2f;
+                    float cy = b.Y + b.Height / 2f;
+                    using (var m = new System.Drawing.Drawing2D.Matrix())
+                    {
+                        m.RotateAt(group.Rotation, new PointF(cx, cy));
+                        groupPath.Transform(m);
+                    }
+                }
+                path.AddPath(groupPath, false);
             }
             return;
         }

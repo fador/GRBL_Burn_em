@@ -22,10 +22,125 @@ public class LaserGroup : LaserObject
 
     public override void Draw(Graphics g, float scale)
     {
+        var state = g.Save();
+        if (Rotation != 0)
+        {
+            var b = GetBounds();
+            if (!b.IsEmpty)
+            {
+                float cx = b.X + b.Width / 2f;
+                float cy = b.Y + b.Height / 2f;
+                g.TranslateTransform(cx, cy);
+                g.RotateTransform(Rotation);
+                g.TranslateTransform(-cx, -cy);
+            }
+        }
         foreach (var child in Children)
         {
             child.Draw(g, scale);
         }
+        g.Restore(state);
+    }
+
+    /// <summary>
+    /// Returns deep copies of the group's children with the group's rotation baked
+    /// into their geometry (rotation around the group's bounds center). Used by the
+    /// G-code generators so rotated groups cut rotated.
+    /// </summary>
+    public static List<LaserObject> CreateRotatedChildren(LaserGroup group)
+    {
+        var result = new List<LaserObject>();
+        if (group.Rotation == 0)
+        {
+            foreach (var child in group.Children) result.Add(child.Clone());
+            return result;
+        }
+
+        var b = group.GetBounds();
+        // Note: a degenerate bounds (e.g. a horizontal line, height 0) is still a
+        // valid rotation center - only skip when there are no children at all.
+        float cx = b.X + b.Width / 2f;
+        float cy = b.Y + b.Height / 2f;
+        if (group.Children.Count == 0) return result;
+        float rad = group.Rotation * (float)Math.PI / 180f;
+        float cos = (float)Math.Cos(rad);
+        float sin = (float)Math.Sin(rad);
+
+        foreach (var child in group.Children)
+        {
+            var clone = child.Clone();
+
+            if (clone is LaserPath path)
+            {
+                for (int i = 0; i < path.Points.Count; i++)
+                    path.Points[i] = RotatePoint(path.Points[i], cx, cy, cos, sin);
+                path.UpdateBounds();
+                result.Add(path);
+            }
+            else if (clone is LaserBezier bezier)
+            {
+                for (int i = 0; i < bezier.Points.Count; i++)
+                    bezier.Points[i] = RotatePoint(bezier.Points[i], cx, cy, cos, sin);
+                bezier.UpdateBounds();
+                result.Add(bezier);
+            }
+            else if (clone is LaserGroup nestedGroup)
+            {
+                // Bake the nested group's rotation into its children, then apply the
+                // outer rotation to each flattened child.
+                foreach (var inner in CreateRotatedChildren(nestedGroup))
+                {
+                    if (inner is LaserPath ip)
+                    {
+                        for (int i = 0; i < ip.Points.Count; i++)
+                            ip.Points[i] = RotatePoint(ip.Points[i], cx, cy, cos, sin);
+                        ip.UpdateBounds();
+                    }
+                    else if (inner is LaserBezier ib)
+                    {
+                        for (int i = 0; i < ib.Points.Count; i++)
+                            ib.Points[i] = RotatePoint(ib.Points[i], cx, cy, cos, sin);
+                        ib.UpdateBounds();
+                    }
+                    else
+                    {
+                        inner.Position = RotatePoint(inner.Position, cx, cy, cos, sin);
+                        inner.Rotation += group.Rotation;
+                    }
+                    result.Add(inner);
+                }
+            }
+            else if (clone is LaserText text)
+            {
+                // Text rotates around its Position (see LaserText.GetPath), so the
+                // origin point is rotated and the text's own rotation is added.
+                text.Position = RotatePoint(text.Position, cx, cy, cos, sin);
+                text.Rotation += group.Rotation;
+                result.Add(text);
+            }
+            else
+            {
+                // Shapes (rect/circle/image) rotate around their own center: rotate the
+                // center around the group center, then re-derive the top-left position.
+                PointF center = new PointF(
+                    clone.Position.X + clone.Size.Width / 2f,
+                    clone.Position.Y + clone.Size.Height / 2f);
+                PointF newCenter = RotatePoint(center, cx, cy, cos, sin);
+                clone.Position = new PointF(
+                    newCenter.X - clone.Size.Width / 2f,
+                    newCenter.Y - clone.Size.Height / 2f);
+                clone.Rotation += group.Rotation;
+                result.Add(clone);
+            }
+        }
+        return result;
+    }
+
+    private static PointF RotatePoint(PointF p, float cx, float cy, float cos, float sin)
+    {
+        float dx = p.X - cx;
+        float dy = p.Y - cy;
+        return new PointF(cx + dx * cos - dy * sin, cy + dx * sin + dy * cos);
     }
 
     public override bool HitTest(PointF point, float tolerance)
@@ -48,7 +163,10 @@ public class LaserGroup : LaserObject
         foreach(var child in Children)
         {
             var b = child.GetBounds();
-            if (b.IsEmpty) continue;
+            // Skip only children with no geometry at all (default rect 0,0,0,0).
+            // NOTE: a degenerate bounds like a horizontal line (height 0) is still
+            // meaningful - RectangleF.IsEmpty would wrongly skip it.
+            if (b.Left == 0 && b.Top == 0 && b.Width == 0 && b.Height == 0) continue;
             
             if (b.Left < minX) minX = b.Left;
             if (b.Top < minY) minY = b.Top;

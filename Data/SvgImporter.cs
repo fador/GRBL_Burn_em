@@ -825,6 +825,10 @@ public class SvgImporter
 
         while (i < tokens.Count)
         {
+            // A malformed path (truncated or non-numeric tokens) must not crash the
+            // import - stop parsing this path and keep whatever was built so far.
+            try
+            {
             char cmd = tokens[i][0];
             if (char.IsLetter(cmd))
             {
@@ -961,6 +965,12 @@ public class SvgImporter
                     gp.CloseFigure();
                     currentPoint = startPoint;
                     break;
+            }
+            }
+            catch (Exception)
+            {
+                // Malformed path data - stop parsing this path, keep partial geometry.
+                break;
             }
         }
         return gp;

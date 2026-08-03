@@ -29,6 +29,12 @@ public class SerialInterface
 
     public string MachineState { get; private set; } = "Unknown";
     public PointF MachinePosition { get; private set; } = new PointF(0, 0);
+
+    /// <summary>
+    /// True once the machine reported "$32=1" (GRBL laser mode), where the laser is
+    /// turned off during feed hold. Used for the pause laser-safety warning.
+    /// </summary>
+    public bool LaserModeEnabled { get; private set; }
     
     private StringBuilder _rxBuffer = new StringBuilder();
     public event Action<int, int>? BufferLimitsReceived;
@@ -278,6 +284,10 @@ public class SerialInterface
                          } 
                          else 
                          {
+                            if (line.StartsWith("$32="))
+                            {
+                                LaserModeEnabled = line.Length > 4 && line[4] == '1';
+                            }
                             LineReceived?.Invoke(line);
                          }
                      }

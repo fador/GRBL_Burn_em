@@ -78,11 +78,18 @@ public partial class MainForm
                 using var ofd = new OpenFileDialog { Filter = "Laser Project|*.json" };
                 if (ofd.ShowDialog() == DialogResult.OK)
                 {
-                     ProjectSerializer.Load(ofd.FileName);
-                     CommandManager.Instance.Clear();
-                     InitializeLayers(); 
-                     _layerList.Refresh();
-                     _workbench.Invalidate();
+                    try
+                    {
+                        ProjectSerializer.Load(ofd.FileName);
+                        CommandManager.Instance.Clear();
+                        InitializeLayers(); 
+                        _layerList.Refresh();
+                        _workbench.Invalidate();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Failed to open project: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
                 }
             });
 

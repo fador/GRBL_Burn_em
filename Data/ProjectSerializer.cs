@@ -335,10 +335,27 @@ public static class ProjectSerializer
         var options = new JsonSerializerOptions { WriteIndented = true };
         options.Converters.Add(new ColorJsonConverter());
         var json = JsonSerializer.Serialize(dto, options);
-        File.WriteAllText(path, json);
+
+        // Write atomically so a crash mid-save cannot corrupt an existing project.
+        string tmpPath = path + ".tmp";
+        File.WriteAllText(tmpPath, json);
+        File.Move(tmpPath, path, overwrite: true);
     }
 
     public static void Load(string path)
+    {
+        try
+        {
+            LoadCore(path);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to load project: {ex.Message}");
+            throw new InvalidDataException($"The project file could not be read: {ex.Message}", ex);
+        }
+    }
+
+    private static void LoadCore(string path)
     {
         if (!File.Exists(path)) return;
         var json = File.ReadAllText(path);

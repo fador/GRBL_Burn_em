@@ -51,8 +51,9 @@ public class GCodeSimulator
                     float nextX = commands.ContainsKey('X') ? (isAbsolute ? commands['X'] : currentPos.X + commands['X']) : currentPos.X;
                     float nextY = commands.ContainsKey('Y') ? (isAbsolute ? commands['Y'] : currentPos.Y + commands['Y']) : currentPos.Y;
                     
+                    // S is modal in real GRBL - a G0 block does NOT reset the laser.
+                    // Only an explicit S word on the block changes power.
                     float movePower = currentPower;
-                    if (g == 0) movePower = 0; // G0 is travel
                     if (commands.ContainsKey('S')) movePower = commands['S'];
                     
                     if (commands.ContainsKey('F')) currentFeedRate = commands['F'];

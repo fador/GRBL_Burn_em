@@ -21,7 +21,7 @@ public static class Rasterizer
         // We assume 0-255 grayscale.
 
         // Initial setup
-        yield return $"G0 F{speed}"; // Set feed rate
+        yield return FormattableString.Invariant($"G0 F{speed:F0}"); // Set feed rate
 
         float startX = image.Position.X;
         float startY = image.Position.Y;
@@ -206,7 +206,11 @@ public static class Rasterizer
             float endScanX = startX + preOffset + activeLength;
 
             float currentX = scanForward ? startScanX : endScanX;
-            yield return $"G0 X{currentX:F3} Y{currentY:F3}";
+            // Laser safety: S is modal in GRBL - the previous row's last segment may
+            // have left the laser on at full power. Emit S0 BEFORE the travel move so
+            // the laser is off during the rapid to the next scan line.
+            yield return FormattableString.Invariant($"{pwmCmd}0");
+            yield return FormattableString.Invariant($"G0 X{currentX:F3} Y{currentY:F3}");
             bool lastG0 = true;
 
             // Loop logic
@@ -228,15 +232,15 @@ public static class Rasterizer
                 {
                     // Travel / Off
                     // Even inside the active area, we might have gaps.
-                    if(lastG0) yield return $"G1 X{nextX:F3} {pwmCmd}0";
-                    else yield return $"X{nextX:F3} {pwmCmd}0";
+                    if(lastG0) yield return FormattableString.Invariant($"G1 X{nextX:F3} {pwmCmd}0");
+                    else yield return FormattableString.Invariant($"X{nextX:F3} {pwmCmd}0");
                     lastG0 = false;
                 }
                 else
                 {
                     // Burn
-                    if(lastG0) yield return $"G1 X{nextX:F3} {pwmCmd}{sValue:F0}";
-                    else yield return $"X{nextX:F3} {pwmCmd}{sValue:F0}";
+                    if(lastG0) yield return FormattableString.Invariant($"G1 X{nextX:F3} {pwmCmd}{sValue:F0}");
+                    else yield return FormattableString.Invariant($"X{nextX:F3} {pwmCmd}{sValue:F0}");
                     lastG0 = false;
                 }
                 currentX = nextX;
@@ -245,7 +249,7 @@ public static class Rasterizer
         }
         
         if (disposeBmp) scanBmp.Dispose();
-        yield return $"G0 {pwmCmd}0"; 
+        yield return FormattableString.Invariant($"G0 {pwmCmd}0"); 
     }
 
     private static void ApplyDithering(Bitmap bmp)

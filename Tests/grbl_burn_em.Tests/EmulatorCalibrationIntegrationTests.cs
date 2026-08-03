@@ -16,6 +16,7 @@ namespace grbl_burn_em.Tests;
 /// (EmulatorBoardRenderer + VirtualCamera) and feeding the frames into the
 /// application's calibration engine.
 /// </summary>
+[Collection("Emulator")]
 public class EmulatorCalibrationIntegrationTests
 {
     private const float BedScale = 1.5f;

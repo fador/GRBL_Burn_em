@@ -108,8 +108,8 @@ public class SvgExporter
         var defs = new XElement(_svgNs + "defs");
         var svg = new XElement(_svgNs + "svg",
             new XAttribute("xmlns", _svgNs.NamespaceName),
-            new XAttribute("width", $"{_viewWidth:F3}mm"),
-            new XAttribute("height", $"{_viewHeight:F3}mm"),
+            new XAttribute("width", FormattableString.Invariant($"{_viewWidth:F3}mm")),
+            new XAttribute("height", FormattableString.Invariant($"{_viewHeight:F3}mm")),
             new XAttribute("viewBox", $"0 0 {F(_viewWidth)} {F(_viewHeight)}"),
             defs);
 

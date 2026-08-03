@@ -845,18 +845,24 @@ public class LaserText : LaserObject
 
     public override RectangleF GetBounds()
     {
-        if (Rotation == 0)
-        {
-            float offsetX = 0;
-            if (Anchor == TextAnchor.Middle) offsetX = -Size.Width / 2f;
-            else if (Anchor == TextAnchor.End) offsetX = -Size.Width;
-            return new RectangleF(Position.X + offsetX, Position.Y - Size.Height, Size.Width, Size.Height);
-        }
+        if (string.IsNullOrEmpty(Text))
+            return new RectangleF(Position, Size);
 
-        using (var gp = GetPath())
+        // Use the actual glyph geometry - the em-size approximation used before could
+        // be off by the font descent, which matters for the safety-bounds check.
+        try
         {
-            return gp.GetBounds();
+            using (var gp = GetPath())
+            {
+                var b = gp.GetBounds();
+                if (!b.IsEmpty) return b;
+            }
         }
+        catch
+        {
+            // Fall back to the approximation if the font is unavailable.
+        }
+        return new RectangleF(Position, Size);
     }
 
     public override void Draw(Graphics g, float scale)

@@ -320,8 +320,7 @@ public partial class OffsetCalibrationForm : Form
         UpdateManualOffset();
 
         var pos = _manualStartPos;
-        string cmd = string.Create(CultureInfo.InvariantCulture,
-            $"G0 X{pos.X:F2} Y{pos.Y:F2}\nM3 S500\nG4 P0.3\nM5");
+        string cmd = FormattableString.Invariant($"G0 X{pos.X:F2} Y{pos.Y:F2}\nM3 S500\nG4 P0.3\nM5");
         SerialInterface.Instance.Write(cmd + "\n");
 
         _lblInfo.Text = $"Pulsed at ({pos.X:F1},{pos.Y:F1}). Jog until camera crosshair aligns with burn mark.";

@@ -56,10 +56,18 @@ public class GCodeParser
 
                 foreach (var part in parts)
                 {
-                    if (part.StartsWith("G0")) { currentMode = CommandType.Travel; currentPower = 0; }
-                    else if (part.StartsWith("G1")) { currentMode = CommandType.Cut; }
-                    else if (part.StartsWith("M3") || part.StartsWith("M4")) { isLaserOn = true; }
-                    else if (part.StartsWith("M5")) { isLaserOn = false; currentPower = 0; }
+                    if (TryParseCode(part, out int code))
+                    {
+                        switch (code)
+                        {
+                            case 0: currentMode = CommandType.Travel; break; // G0 does NOT change S (modal)
+                            case 1: currentMode = CommandType.Cut; break;
+                            case 3:
+                            case 4: isLaserOn = true; break;
+                            case 5:
+                            case 30: isLaserOn = false; currentPower = 0; break;
+                        }
+                    }
                     else if (part.StartsWith("X")) { newX = ParseValue(part.Substring(1)); hasMove = true; }
                     else if (part.StartsWith("Y")) { newY = ParseValue(part.Substring(1)); hasMove = true; }
                     else if (part.StartsWith("S")) { currentPower = ParseValue(part.Substring(1)); }
@@ -106,5 +114,23 @@ public class GCodeParser
             return result;
         }
         return 0;
+    }
+
+    /// <summary>
+    /// Parses a G/M word with an exact numeric code, e.g. "G1" -> 1, "M30" -> 30,
+    /// "M3S500" -> 3 (letter followed by digits, then optional words).
+    /// Returns false for axis words ("X10") or anything without a numeric code.
+    /// </summary>
+    private static bool TryParseCode(string part, out int code)
+    {
+        code = 0;
+        if (part.Length < 2) return false;
+        char letter = part[0];
+        if (letter != 'G' && letter != 'M') return false;
+
+        int i = 1;
+        while (i < part.Length && char.IsDigit(part[i])) i++;
+        if (i == 1) return false;
+        return int.TryParse(part.Substring(1, i - 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out code);
     }
 }

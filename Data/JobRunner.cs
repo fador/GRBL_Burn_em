@@ -7,9 +7,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-
 using System.Linq;
 using System.Threading;
+using System.Windows.Forms;
 
 namespace grbl_burn_em.Data;
 
@@ -24,23 +24,37 @@ public class JobRunner
     private Queue<int> _sentLineLengths = new Queue<int>();
 
     private long _lastProgressTicks = 0;
-    private const long ProgressInterval = 1000000; // 100ms 
-    
-    private bool _isRunning = false;
-    private bool _isPaused = false;
-    
+    private const long ProgressInterval = 1000000; // 100ms
+
+    private volatile bool _isRunning = false;
+    private volatile bool _isPaused = false;
+    private bool _allLinesSent = false;
+
+    // Completion: after the last line is sent, the job is done when all lines were
+    // acknowledged ('ok' drained) AND GRBL reports Idle. Give up if the machine goes
+    // silent or never finishes.
+    private long _completionWaitStartTicks;
+    private const long CompletionWaitTimeout = 10 * 60 * 10000000L; // 10 minutes
+    private long _lastStatusTicks;
+    private const long StatusStarvationTimeout = 5 * 10000000L; // 5s without status reports
+
     public event Action<int, int>? ProgressChanged; // Current, Total
     public event Action? JobCompleted;
-    
+    public event Action<string>? JobFailed;
+    public event Action? JobStopped;
+
     public bool IsRunning => _isRunning;
     public bool IsPaused => _isPaused;
+
+    private bool _laserModeWarned;
 
     public JobRunner()
     {
         SerialInterface.Instance.LineReceived += OnSerialLineReceived;
-        //SerialInterface.Instance.BufferLimitsReceived += OnBufferLimits;
+        SerialInterface.Instance.StatusReceived += (s, p) => _lastStatusTicks = Environment.TickCount64;
+        SerialInterface.Instance.ConnectionStatusChanged += OnConnectionStatusChanged;
     }
-    
+
     private readonly object _runnerLock = new object();
 
     private Thread? _senderThread;
@@ -48,22 +62,27 @@ public class JobRunner
 
     public void Start(IEnumerable<string> gcode)
     {
-        if (_isRunning) return;
+        lock (_runnerLock)
+        {
+            if (_isRunning) return;
 
-        _gcodeLines = gcode.ToList();
-        _currentLineIndex = 0;
-        PendingCommandsCount = 0;
-        _currentBytes = 0;
-        _sentLineLengths.Clear();
-        
-        _isRunning = true;
-        _isPaused = false;
-        
-        _cts = new CancellationTokenSource();
-        _senderThread = new Thread(SenderLoop);
-        _senderThread.IsBackground = true;
-        _senderThread.Name = "JobSender";
-        _senderThread.Start();
+            _gcodeLines = gcode.ToList();
+            _currentLineIndex = 0;
+            PendingCommandsCount = 0;
+            _currentBytes = 0;
+            _sentLineLengths.Clear();
+            _allLinesSent = false;
+            _laserModeWarned = false;
+
+            _isRunning = true;
+            _isPaused = false;
+
+            _cts = new CancellationTokenSource();
+            _senderThread = new Thread(SenderLoop);
+            _senderThread.IsBackground = true;
+            _senderThread.Name = "JobSender";
+            _senderThread.Start();
+        }
     }
 
     public void Pause()
@@ -71,6 +90,24 @@ public class JobRunner
         if (!_isRunning) return;
         _isPaused = true;
         SerialInterface.Instance.Write("!");
+
+        // Laser safety: only GRBL laser mode ($32=1) turns the laser off during feed
+        // hold. Warn once if that isn't confirmed - otherwise the laser may keep
+        // burning at the current power while motion is paused.
+        if (!SerialInterface.Instance.LaserModeEnabled && !_laserModeWarned)
+        {
+            _laserModeWarned = true;
+            var main = Application.OpenForms.Cast<Form>().FirstOrDefault(f => f.Visible);
+            Action warn = () => MessageBox.Show(
+                main,
+                "GRBL laser mode ($32=1) is not enabled (or not confirmed by the machine).\n\n" +
+                "During feed hold the laser may stay ON at its current power, burning in place.\n" +
+                "Enable laser mode on the controller: send '$32=1' (requires PWM output).",
+                "Laser Safety Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (main != null && main.InvokeRequired) main.BeginInvoke(warn);
+            else if (main != null) main.Invoke(warn);
+            else warn();
+        }
     }
 
     public void Resume()
@@ -85,32 +122,91 @@ public class JobRunner
 
     public void Stop()
     {
-        _isRunning = false;
-        _isPaused = false;
-        
-        _cts?.Cancel();
-        // Option: Wait for thread? 
-        // _senderThread?.Join(500);
+        bool wasRunning;
+        lock (_runnerLock)
+        {
+            wasRunning = _isRunning;
+            _isRunning = false;
+            _isPaused = false;
+            _allLinesSent = false;
+            _cts?.Cancel();
 
-        _gcodeLines.Clear();
-        PendingCommandsCount = 0;   
-        _currentBytes = 0;
-        _sentLineLengths.Clear();
+            _gcodeLines.Clear();
+            PendingCommandsCount = 0;
+            _currentBytes = 0;
+            _sentLineLengths.Clear();
+        }
+
+        if (!wasRunning) return;
 
         SerialInterface.Instance.EmptyBuffers();
-        
-        // Soft Reset to clear GRBL buffer
-        SerialInterface.Instance.Write("\u0018"); 
+        // Soft Reset to clear GRBL buffer and stop the machine.
+        SerialInterface.Instance.Write("\u0018");
+        Task.Run(() => JobStopped?.Invoke());
     }
 
-    public bool DequeueCommand() {
+    private void FailJob(string message)
+    {
+        lock (_runnerLock)
+        {
+            if (!_isRunning) return;
+            _isRunning = false;
+            _isPaused = false;
+            _allLinesSent = false;
+        }
+        Debug.WriteLine($"JobRunner: {message}");
+        Task.Run(() => JobFailed?.Invoke(message));
+    }
 
+    private void OnConnectionStatusChanged(bool connected)
+    {
+        if (!connected && _isRunning)
+        {
+            FailJob("Connection to the machine was lost.");
+        }
+    }
+
+    private void OnSerialLineReceived(string line)
+    {
+        lock (_runnerLock)
+        {
+            if (!_isRunning) return;
+
+            // GRBL sends 'ok' when a command is accepted into the planner buffer
+            // Or 'error'. In both cases, the command has left the RX buffer.
+            if (line.Contains("ok") || line.Contains("error"))
+            {
+                DequeueCommand();
+
+                if (line.Contains("error"))
+                {
+                    Debug.WriteLine($"GRBL Error: {line}");
+                }
+            }
+            else if (line.Contains("ALARM:"))
+            {
+                Stop();
+                string alarmCode = line.Substring(line.IndexOf(':') + 1);
+                string msg = GrblErrors.GetAlarmMessage(alarmCode);
+                var main = Application.OpenForms.Cast<Form>().FirstOrDefault(f => f.Visible);
+                Action show = () => MessageBox.Show(
+                    main,
+                    $"Machine Alarm: {line}\n{msg}", "Alarm", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (main != null && main.InvokeRequired) main.BeginInvoke(show);
+                else if (main != null) main.Invoke(show);
+                else Task.Run(show);
+            }
+        }
+    }
+
+    public bool DequeueCommand()
+    {
         PendingCommandsCount--;
-        //if(PendingCommandsCount < 0) PendingCommandsCount = 0;
+        if (PendingCommandsCount < 0) PendingCommandsCount = 0;
 
         // Update Byte Count
         if (_sentLineLengths.Count > 0)
-        {            
+        {
             int len = _sentLineLengths.Dequeue();
             _currentBytes -= len;
             if (_currentBytes < 0) _currentBytes = 0; // Output safety
@@ -119,77 +215,82 @@ public class JobRunner
         return false;
     }
 
-    private void OnSerialLineReceived(string line)
-    {
-        // lock (_runnerLock) - we only need to protect shared state updates
-        lock(_runnerLock)
-        {
-            if (!_isRunning) return;
-
-            // GRBL sends 'ok' when a command is accepted into the planner buffer
-            // Or 'error'. In both cases, the command has left the RX buffer and entered the parser/executor.
-            
-            if (line.Contains("ok") || line.Contains("error"))
-            {
-                DequeueCommand();
-                
-                if (line.Contains("error"))
-                {
-                    Debug.WriteLine($"GRBL Error: {line}");
-                }
-                
-                // No need to call SendNext, the loop will pick it up
-            } else if(line.Contains("ALARM:"))
-            {
-                Stop();
-                string alarmCode = line.Substring(line.IndexOf(':') + 1);
-                string msg = GrblErrors.GetAlarmMessage(alarmCode);
-                MessageBox.Show($"Machine Alarm: {line}\n{msg}", "Alarm", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-    }
-
     private void SenderLoop()
     {
         try
         {
-            while (_isRunning && _cts != null && !_cts.IsCancellationRequested)
+            while (true)
             {
-                if (_isPaused)
-                {
-                    Thread.Sleep(50);
-                    continue;
-                }
-
-                bool sent = false;
                 lock (_runnerLock)
                 {
-                    // Check Completion
-                    if (_currentLineIndex >= _gcodeLines.Count && SerialInterface.Instance.BytesToWrite() == 0)
+                    if (!_isRunning || (_cts != null && _cts.IsCancellationRequested)) break;
+
+                    if (_isPaused)
                     {
-                        _isRunning = false;
-                        Task.Run(() => JobCompleted?.Invoke()); // Fire and forget on thread pool
-                        break;
+                        continue;
                     }
 
-                    if (_currentLineIndex < _gcodeLines.Count)
+                    if (_allLinesSent)
+                    {
+                        // All lines were written to the wire. The job is only complete
+                        // when every line was acknowledged by GRBL AND the machine is
+                        // back to Idle (the buffer has fully executed).
+                        bool bufferDrained = _currentBytes <= 0 && PendingCommandsCount <= 0;
+                        bool machineIdle = SerialInterface.Instance.MachineState.Equals("Idle", StringComparison.OrdinalIgnoreCase);
+
+                        if (bufferDrained && machineIdle)
+                        {
+                            _isRunning = false;
+                            Task.Run(() => JobCompleted?.Invoke());
+                            break;
+                        }
+
+                        long now = Environment.TickCount64;
+
+                        // The machine stopped reporting status (serial dead / GRBL lockup).
+                        if (bufferDrained && now - _lastStatusTicks > StatusStarvationTimeout)
+                        {
+                            _isRunning = false;
+                            Task.Run(() => JobFailed?.Invoke("No status from the machine while waiting for the job to finish."));
+                            break;
+                        }
+
+                        // The machine never finished (large job on a slow controller,
+                        // or the controller stopped mid-buffer).
+                        if (now - _completionWaitStartTicks > CompletionWaitTimeout)
+                        {
+                            _isRunning = false;
+                            Task.Run(() => JobFailed?.Invoke("Timed out waiting for the machine to finish."));
+                            break;
+                        }
+                    }
+                    else if (_currentLineIndex < _gcodeLines.Count)
                     {
                         string line = _gcodeLines[_currentLineIndex];
                         string lineToSend = line + "\n";
                         int lineBytes = lineToSend.Length;
 
                         // Check Output Buffer (Character Counting)
-                        // We strictly verify that we don't overflow the GRBL Receive buffer (127 bytes)
                         if (_currentBytes + lineBytes <= MaxBufferSize)
                         {
-                            SerialInterface.Instance.Write(lineToSend);
+                            if (!SerialInterface.Instance.IsConnected)
+                            {
+                                FailJob("Connection to the machine was lost.");
+                                break;
+                            }
+
+                            bool sent = SerialInterface.Instance.Write(lineToSend);
+                            if (!sent)
+                            {
+                                FailJob("Failed to send data to the machine. Job stopped.");
+                                break;
+                            }
 
                             PendingCommandsCount++;
                             _currentBytes += lineBytes;
                             _sentLineLengths.Enqueue(lineBytes);
 
                             _currentLineIndex++;
-                            sent = true;
 
                             long now = DateTime.Now.Ticks;
                             if (now - _lastProgressTicks > ProgressInterval)
@@ -201,12 +302,14 @@ public class JobRunner
                             }
                         }
                     }
+                    else
+                    {
+                        _allLinesSent = true;
+                        _completionWaitStartTicks = Environment.TickCount64;
+                    }
                 }
 
-                if (!sent)
-                {
-                    Thread.Sleep(5); // Yield / Wait
-                }
+                Thread.Sleep(5); // Yield / Wait
             }
         }
         catch (Exception ex)
@@ -215,5 +318,4 @@ public class JobRunner
             _isRunning = false;
         }
     }
-
 }

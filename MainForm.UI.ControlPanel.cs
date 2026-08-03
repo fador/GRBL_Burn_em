@@ -170,6 +170,25 @@ public partial class MainForm
              });
         };
 
+        _jobRunner.JobFailed += (msg) => 
+        {
+             if (_statusStrip.IsDisposed) return;
+             _statusStrip.Invoke(() => 
+             {
+                 _progressBar.Visible = false;
+                 MessageBox.Show($"Job failed: {msg}", "Job Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+             });
+        };
+
+        _jobRunner.JobStopped += () => 
+        {
+             if (_statusStrip.IsDisposed) return;
+             _statusStrip.Invoke(() => 
+             {
+                 _progressBar.Visible = false;
+             });
+        };
+
         var btnStart = new Button { Text = "Start", Width = 200, BackColor = Color.LightGreen };
         btnStart.Click += (s, e) => 
         {

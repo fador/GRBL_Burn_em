@@ -77,6 +77,26 @@ public partial class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        // Laser safety: never leave the machine running unattended on exit.
+        if (_jobRunner.IsRunning)
+        {
+            var result = MessageBox.Show(
+                "A job is still running on the machine.\n\n" +
+                "Stop the job and disconnect before exiting?",
+                "Job in Progress", MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Warning, MessageBoxDefaultButton.Button1);
+            if (result == DialogResult.Cancel)
+            {
+                e.Cancel = true;
+                return;
+            }
+            if (result == DialogResult.Yes)
+            {
+                _jobRunner.Stop();
+            }
+        }
+        SerialInterface.Instance.Disconnect();
+
         try
         {
              // Save View Settings
