@@ -78,6 +78,23 @@ public static class EmulatorBoardRenderer
         return new Rectangle(destX, destY, destW, destH);
     }
 
+    /// <summary>
+    /// Converts a bed bitmap pixel to CNC coordinates (mm). The bed bitmap is drawn
+    /// with CNC (0,0) at the bottom-left: pixel y grows downward while CNC Y grows up.
+    /// </summary>
+    public static PointF BedPixelToCnc(PointF bedPixel, float scale, float bedHeight)
+    {
+        return new PointF(bedPixel.X / scale, (bedHeight - bedPixel.Y) / scale);
+    }
+
+    /// <summary>
+    /// Converts CNC coordinates (mm) to bed bitmap pixels.
+    /// </summary>
+    public static PointF CncToBedPixel(PointF cnc, float scale, float bedHeight)
+    {
+        return new PointF(cnc.X * scale, bedHeight - cnc.Y * scale);
+    }
+
     private static Bitmap MatToRgbBitmap(Mat m)
     {
         var bmp = new Bitmap(m.Width, m.Height, PixelFormat.Format24bppRgb);

@@ -48,6 +48,11 @@ public partial class EmulatorForm : Form
     private int _lastBoardBx, _lastBoardBy, _lastBoardPx, _lastBoardPy;
     private bool _hasBoard;
 
+    // Dragging the ChArUco board on the bed view.
+    private bool _isDraggingBoard;
+    private float _boardDragOffsetX, _boardDragOffsetY;
+    private const float BoardPositionMax = 400f; // work area size (mm)
+
     private PointF _panOffset;
     private Point _panStart;
     private bool _isPanning;
@@ -168,6 +173,18 @@ public partial class EmulatorForm : Form
                 _isPanning = true;
                 _panStart = e.Location;
                 _workArea.Cursor = Cursors.SizeAll;
+                return;
+            }
+
+            // Left-drag moves the ChArUco board (when it is enabled).
+            if (e.Button == MouseButtons.Left && _drawCharuco)
+            {
+                var cnc = ScreenToCnc(e.Location);
+                _boardDragOffsetX = _boardX - cnc.X;
+                _boardDragOffsetY = _boardY - cnc.Y;
+                _isDraggingBoard = true;
+                _workArea.Capture = true;
+                _workArea.Cursor = Cursors.SizeAll;
             }
         };
         _workArea.MouseMove += (s, e) =>
@@ -178,6 +195,17 @@ public partial class EmulatorForm : Form
                 _panOffset.Y += e.Y - _panStart.Y;
                 _panStart = e.Location;
                 _workArea.Invalidate();
+                return;
+            }
+
+            if (_isDraggingBoard)
+            {
+                var cnc = ScreenToCnc(e.Location);
+                float targetX = Math.Clamp(cnc.X + _boardDragOffsetX, 0, BoardPositionMax);
+                float targetY = Math.Clamp(cnc.Y + _boardDragOffsetY, 0, BoardPositionMax);
+                // The NUD change handlers update _boardX/_boardY and redraw the board.
+                _nudBoardX.Value = (decimal)Math.Round(targetX, 1);
+                _nudBoardY.Value = (decimal)Math.Round(targetY, 1);
             }
         };
         _workArea.MouseUp += (s, e) =>
@@ -185,6 +213,14 @@ public partial class EmulatorForm : Form
             if (_isPanning)
             {
                 _isPanning = false;
+                _workArea.Cursor = Cursors.Cross;
+                return;
+            }
+
+            if (_isDraggingBoard)
+            {
+                _isDraggingBoard = false;
+                _workArea.Capture = false;
                 _workArea.Cursor = Cursors.Cross;
             }
         };
@@ -334,15 +370,23 @@ public partial class EmulatorForm : Form
         _nudBoardSquares.ValueChanged += (s, e) => { if (_drawCharuco) DrawCharucoBoard(); };
         (_nudBoardSize, y) = AddNumeric(parent, "Board size (mm):", 120, 30, 500, ref y);
         _nudBoardSize.ValueChanged += (s, e) => { if (_drawCharuco) DrawCharucoBoard(); };
-        (_nudBoardX, y) = AddNumeric(parent, "Board X (mm):", 50, 0, 380, ref y);
+        (_nudBoardX, y) = AddNumeric(parent, "Board X (mm):", 50, 0, 400, ref y);
         _nudBoardX.ValueChanged += (s, e) => { _boardX = (float)_nudBoardX.Value; if (_drawCharuco) DrawCharucoBoard(); };
-        (_nudBoardY, y) = AddNumeric(parent, "Board Y (mm):", 50, 0, 380, ref y);
+        (_nudBoardY, y) = AddNumeric(parent, "Board Y (mm):", 50, 0, 400, ref y);
         _nudBoardY.ValueChanged += (s, e) => { _boardY = (float)_nudBoardY.Value; if (_drawCharuco) DrawCharucoBoard(); };
 
         _btnDrawBoard = new Button { Text = "Redraw Board", Left = 10, Top = y, Width = 200 };
         _btnDrawBoard.Click += (s, e) => { if (_drawCharuco) DrawCharucoBoard(); };
         parent.Controls.Add(_btnDrawBoard);
-        y += 35;
+        y += 25;
+
+        var lblBoardHint = new Label
+        {
+            Text = "Tip: drag on the bed view to position the board",
+            Left = 10, Top = y, Width = 250, AutoSize = true, ForeColor = Color.Gray
+        };
+        parent.Controls.Add(lblBoardHint);
+        y += 22;
 
         y += 10;
         AddLabel(parent, "Jog Controls", font, ref y);
@@ -441,6 +485,17 @@ public partial class EmulatorForm : Form
         _hasBoard = true;
 
         _workArea.Invalidate();
+    }
+
+    /// <summary>
+    /// Converts a work-area view position to CNC coordinates (mm), accounting for the
+    /// current pan offset. Used to position the ChArUco board by dragging.
+    /// </summary>
+    private PointF ScreenToCnc(Point mouse)
+    {
+        float bedPx = mouse.X - _panOffset.X;
+        float bedPy = mouse.Y - _panOffset.Y;
+        return EmulatorBoardRenderer.BedPixelToCnc(new PointF(bedPx, bedPy), _scale, _bedHeight);
     }
 
     private Dictionary GetSelectedDictionary()

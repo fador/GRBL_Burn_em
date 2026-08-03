@@ -210,6 +210,7 @@ Or run `Emulator\bin\Debug\net9.0-windows10.0.19041.0\grbl_burn_em_emulator.exe`
 | ChArUco Board | Squares | Number of chessboard squares |
 | ChArUco Board | Board size | Physical board size in mm |
 | ChArUco Board | Board X/Y | Board origin (outer top-left corner) on virtual bed |
+| ChArUco Board | Drag on bed | Left-drag on the bed view positions the board anywhere on the work area (updates Board X/Y) |
 | Jog Controls | D-pad | Move the virtual machine |
 | Jog Controls | Step/Feed | Movement parameters |
 | Toolbar | Clear Bed | Reset virtual bed to beige |
