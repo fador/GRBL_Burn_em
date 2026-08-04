@@ -156,9 +156,12 @@ public partial class LensCalibrationForm : Form
                 $"$J=G90 X{(float)nudGoX.Value:F1} Y{(float)nudGoY.Value:F1} F2000");
             SerialInterface.Instance.Write(cmd + "\n");
         };
+        var btnCenter = new Button { Text = "Center on Board", Width = 110, Height = 23 };
+        btnCenter.Click += (s, e) => CenterOnBoard();
         moveLayout.Controls.Add(nudGoX);
         moveLayout.Controls.Add(nudGoY);
         moveLayout.Controls.Add(btnGo);
+        moveLayout.Controls.Add(btnCenter);
         movePanel.Controls.Add(moveLayout);
         sidePanel.Controls.Add(movePanel, 0, 8);
 
@@ -427,8 +430,67 @@ public partial class LensCalibrationForm : Form
         }
     }
 
-    private void RunSingleViewCalibration()
+    /// <summary>
+    /// Detects the ChArUco board in the current view and jogs the machine so the
+    /// board is centered under the camera (useful before Auto Capture).
+    /// </summary>
+    private void CenterOnBoard()
     {
+        Mat? rawCopy = null;
+        lock (_rawFrameLock)
+        {
+            if (_rawFrame != null) rawCopy = _rawFrame.Clone();
+        }
+        if (rawCopy == null)
+        {
+            MessageBox.Show(this, "No camera frame available yet.", "Warning");
+            return;
+        }
+
+        try
+        {
+            var store = CameraManager.Instance.CalibrationStore;
+            if (store.BoardConfig == null)
+            {
+                MessageBox.Show(this, "Please set up ChArUco board first.", "Warning");
+                return;
+            }
+
+            var engine = new CameraCalibrationEngine(store.BoardConfig);
+            var detection = engine.DetectBoard(rawCopy);
+            if (!detection.Detected)
+            {
+                MessageBox.Show(this, "ChArUco board not detected in the current view.", "Warning");
+                return;
+            }
+
+            var (dx, dy) = CameraCalibrationEngine.ComputeCenteringJog(
+                detection, rawCopy.Width, rawCopy.Height, store.BoardConfig);
+
+            if (Math.Abs(dx) < 0.5f && Math.Abs(dy) < 0.5f)
+            {
+                _lblStatus.Text = "Board already centered.";
+                return;
+            }
+
+            if (!SerialInterface.Instance.IsConnected)
+            {
+                MessageBox.Show(this, "Machine not connected. Click 'Connect Emulator' in Camera Settings.", "Warning");
+                return;
+            }
+
+            string cmd = string.Create(CultureInfo.InvariantCulture,
+                $"$J=G91 X{dx:F1} Y{dy:F1} F2000");
+            SerialInterface.Instance.Write(cmd + "\n");
+            _lblStatus.Text = $"Centering: jog ({dx:F1}, {dy:F1}) mm";
+        }
+        finally
+        {
+            rawCopy.Dispose();
+        }
+    }
+
+    private void RunSingleViewCalibration()    {
         if (_picPreview.Image == null) return;
 
         try

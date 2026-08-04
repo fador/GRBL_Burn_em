@@ -539,6 +539,61 @@ public class CameraCalibrationEngine
         return pts;
     }
 
+    /// <summary>
+    /// Physical board coordinates (mm) of the given ChArUco corner IDs.
+    /// </summary>
+    public PointF[] GetBoardPoints(int[] charucoIds)
+    {
+        var pts = GetBoardObjectPoints(charucoIds);
+        var result = new PointF[pts.Length];
+        for (int i = 0; i < pts.Length; i++)
+            result[i] = new PointF(pts[i].X, pts[i].Y);
+        return result;
+    }
+
+    /// <summary>
+    /// Computes the machine jog (mm) needed to bring the detected board center to the
+    /// center of the camera view. Pixels are scaled to mm using the board's known
+    /// physical size (works without calibrated intrinsics).
+    /// Convention: image X right = machine +X, image Y down = machine +Y
+    /// (the flipped-camera convention used by the emulator and the workspace scan).
+    /// </summary>
+    public static (float dx, float dy) ComputeCenteringJog(
+        DetectionResult detection, int imageWidth, int imageHeight, CharucoBoardConfig boardConfig)
+    {
+        if (!detection.Detected || detection.CharucoCorners == null || detection.CharucoIds == null)
+            return (0, 0);
+
+        var corners = detection.CharucoCorners.ToArray();
+        var ids = detection.CharucoIds.ToArray();
+        if (corners.Length < 2) return (0, 0);
+
+        var phys = new CameraCalibrationEngine(boardConfig).GetBoardPoints(ids);
+
+        float minPxX = float.MaxValue, minPxY = float.MaxValue, maxPxX = float.MinValue, maxPxY = float.MinValue;
+        float minWx = float.MaxValue, minWy = float.MaxValue, maxWx = float.MinValue, maxWy = float.MinValue;
+        for (int i = 0; i < corners.Length; i++)
+        {
+            minPxX = Math.Min(minPxX, corners[i].X); maxPxX = Math.Max(maxPxX, corners[i].X);
+            minPxY = Math.Min(minPxY, corners[i].Y); maxPxY = Math.Max(maxPxY, corners[i].Y);
+            minWx = Math.Min(minWx, phys[i].X); maxWx = Math.Max(maxWx, phys[i].X);
+            minWy = Math.Min(minWy, phys[i].Y); maxWy = Math.Max(maxWy, phys[i].Y);
+        }
+
+        float pxSpanX = maxPxX - minPxX, pxSpanY = maxPxY - minPxY;
+        float mmSpanX = maxWx - minWx, mmSpanY = maxWy - minWy;
+
+        float mppX = pxSpanX > 1f ? mmSpanX / pxSpanX : 1f;
+        float mppY = pxSpanY > 1f ? mmSpanY / pxSpanY : 1f;
+
+        float boardCx = (minPxX + maxPxX) / 2f;
+        float boardCy = (minPxY + maxPxY) / 2f;
+
+        float dx = (boardCx - imageWidth / 2f) * mppX;
+        float dy = (boardCy - imageHeight / 2f) * mppY; // image Y down = machine +Y
+        return (dx, dy);
+    }
+
     private double ComputeCharucoReprojectionError(
         DetectionResult detection, double[] rvec, double[] tvec, Mat cameraMatrix, Mat distCoeffs)
     {

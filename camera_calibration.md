@@ -86,6 +86,11 @@ Computes intrinsic camera parameters (focal length, principal point, distortion)
 3. Configure grid: **Rows**, **Columns**, **Step (mm)**
 4. Click **Auto Capture** — the machine moves through grid positions, captures frames where the board is detected
 
+**Center on Board:** the "Center on Board" button in the lens calibration dialog
+detects the board in the current view and jogs the machine so the board is centered
+under the camera (useful before Auto Capture). It uses the board's known physical
+size to convert pixels to mm, so it works without calibrated intrinsics.
+
 Grid indicators: ✓ (board detected), ✗ (skipped)
 
 ### Calibration
